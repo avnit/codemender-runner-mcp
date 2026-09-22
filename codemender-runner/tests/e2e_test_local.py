@@ -58,7 +58,7 @@ def test_local_storage_flow(temp_dir, bare_repo_dir, target_sha, proj_root):
       "CODEMENDER_BUILD_COMMAND": "echo 'build'",
   }
 
-  run_cmd(["python3", "orchestrator.py"], cwd=proj_root, env=scan_env)
+  run_cmd(["python3", "main.py"], cwd=proj_root, env=scan_env)
 
   manifest_local_path = os.path.join(local_storage_dir, "e2e-bucket", "scans", "e2e-scan", "manifest.json")
   if not os.path.exists(manifest_local_path):
@@ -96,7 +96,7 @@ def test_local_storage_flow(temp_dir, bare_repo_dir, target_sha, proj_root):
         "CODEMENDER_BUILD_COMMAND": "echo 'build'",
     }
 
-    run_cmd(["python3", "orchestrator.py"], cwd=proj_root, env=worker_env)
+    run_cmd(["python3", "main.py"], cwd=proj_root, env=worker_env)
 
     worker_db_local_path = os.path.join(local_storage_dir, "e2e-bucket", "scans", "e2e-scan", f"worker_{i}_state.db")
     if not os.path.exists(worker_db_local_path):
@@ -123,7 +123,7 @@ def test_local_storage_flow(temp_dir, bare_repo_dir, target_sha, proj_root):
       "CODEMENDER_BUILD_COMMAND": "echo 'build'",
   }
 
-  run_cmd(["python3", "orchestrator.py"], cwd=proj_root, env=aggregate_env)
+  run_cmd(["python3", "main.py"], cwd=proj_root, env=aggregate_env)
 
   # Verifications on Aggregated State
   reports_dir = os.path.join(local_storage_dir, "e2e-bucket", "reports")
@@ -163,7 +163,7 @@ def test_github_actions_flow(temp_dir, bare_repo_dir, target_sha, proj_root):
       "GITHUB_OUTPUT": github_output_file,
   }
 
-  run_cmd(["python3", "orchestrator.py"], cwd=proj_root, env=scan_env)
+  run_cmd(["python3", "main.py"], cwd=proj_root, env=scan_env)
 
   # Verify .codemender_transit/base files created
   transit_base = os.path.join(gha_workspace, ".codemender_transit", "base")
@@ -191,7 +191,7 @@ def test_github_actions_flow(temp_dir, bare_repo_dir, target_sha, proj_root):
         "CODEMENDER_BUILD_COMMAND": "echo 'build'",
     }
 
-    run_cmd(["python3", "orchestrator.py"], cwd=proj_root, env=worker_env)
+    run_cmd(["python3", "main.py"], cwd=proj_root, env=worker_env)
 
     shard_db = os.path.join(gha_workspace, ".codemender_transit", "shards", f"worker_{i}", f"worker_{i}_state.db")
     assert os.path.exists(shard_db), f"Worker shard DB {shard_db} missing!"
@@ -212,7 +212,7 @@ def test_github_actions_flow(temp_dir, bare_repo_dir, target_sha, proj_root):
       "GITHUB_STEP_SUMMARY": step_summary_file,
   }
 
-  run_cmd(["python3", "orchestrator.py"], cwd=proj_root, env=aggregate_env)
+  run_cmd(["python3", "main.py"], cwd=proj_root, env=aggregate_env)
 
   # Verify Step Summary
   assert os.path.exists(step_summary_file), "GITHUB_STEP_SUMMARY missing!"

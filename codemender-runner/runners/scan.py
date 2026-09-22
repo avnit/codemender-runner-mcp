@@ -26,34 +26,34 @@ from typing import Optional
 import uuid
 
 # CodeMender CLI JSON parser and version logging
-from codemender_agent.codemender.cli import log_cm_version
-from codemender_agent.codemender.cli import parse_findings_json
+from codemender.cli import log_cm_version
+from codemender.cli import parse_findings_json
 # Configuration injection and credentials
-from codemender_agent.config import OrchestratorConfig
-from codemender_agent.config import get_github_credentials
-from codemender_agent.config import get_scrubbed_env
-from codemender_agent.config import inject_codemender_config
+from config import OrchestratorConfig
+from config import get_github_credentials
+from config import get_scrubbed_env
+from config import inject_codemender_config
 # Storage signed URL and upload utilities
-from codemender_agent.storage import generate_signed_url
-from codemender_agent.storage import upload_file_to_gcs
-from codemender_agent.utils import accumulate_model_token_usage
-from codemender_agent.utils import build_cm_command
-from codemender_agent.utils import render_token_usage_markdown
-from codemender_agent.utils import resolve_command_model
-from codemender_agent.utils import run_command
+from storage import generate_signed_url
+from storage import upload_file_to_gcs
+from utils import accumulate_model_token_usage
+from utils import build_cm_command
+from utils import render_token_usage_markdown
+from utils import resolve_command_model
+from utils import run_command
 # Git branch derivation and diff hunk utilities
-from codemender_agent.vcs.git import get_finding_branch_name
-from codemender_agent.vcs.git import get_git_auth_header
-from codemender_agent.vcs.git import get_pr_changed_lines
-from codemender_agent.vcs.git import normalize_repo_relative_path
-from codemender_agent.vcs.git import parse_repo_owner_and_name
-from codemender_agent.vcs.git import sanitize_git_url
-from codemender_agent.vcs.git import setup_local_git_excludes
+from vcs.git import get_finding_branch_name
+from vcs.git import get_git_auth_header
+from vcs.git import get_pr_changed_lines
+from vcs.git import normalize_repo_relative_path
+from vcs.git import parse_repo_owner_and_name
+from vcs.git import sanitize_git_url
+from vcs.git import setup_local_git_excludes
 # GitHub REST API check and deduplication helpers
-from codemender_agent.vcs.github import check_remote_branch_exists
-from codemender_agent.vcs.github import delete_remote_branch
-from codemender_agent.vcs.github import get_default_branch
-from codemender_agent.vcs.github import is_duplicate_pr
+from vcs.github import check_remote_branch_exists
+from vcs.github import delete_remote_branch
+from vcs.github import get_default_branch
+from vcs.github import is_duplicate_pr
 
 logger = logging.getLogger("codemender-orchestrator")
 

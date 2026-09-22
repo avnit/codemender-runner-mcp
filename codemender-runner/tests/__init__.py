@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CodeMender Agent Package."""
+"""Unit tests suite for CodeMender Orchestrator submodules."""
 
-__version__ = "1.0.0"
+import os
+import sys
+
+_ORCHESTRATOR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ORCHESTRATOR_DIR not in sys.path:
+  sys.path.insert(0, _ORCHESTRATOR_DIR)

@@ -17,12 +17,15 @@
 import json
 import os
 import sqlite3
+import sys
 import tarfile
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from codemender_agent.runners.aggregate import (
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from runners.aggregate import (
     _inject_token_metrics_into_html,
     _render_step_summary,
     merge_db,
@@ -347,11 +350,11 @@ class TestAggregateRunner(unittest.TestCase):
     self.assertEqual(rows[1], ("utils.py", "hash2"))
     conn.close()
 
-  @patch("codemender_agent.runners.aggregate.run_command")
-  @patch("codemender_agent.runners.aggregate.download_file_from_gcs")
-  @patch("codemender_agent.runners.aggregate.list_gcs_blobs")
-  @patch("codemender_agent.runners.aggregate.upload_and_sign_report")
-  @patch("codemender_agent.runners.aggregate.merge_db")
+  @patch("runners.aggregate.run_command")
+  @patch("runners.aggregate.download_file_from_gcs")
+  @patch("runners.aggregate.list_gcs_blobs")
+  @patch("runners.aggregate.upload_and_sign_report")
+  @patch("runners.aggregate.merge_db")
   @patch("tarfile.open")
   @patch("shutil.which")
   def test_aggregate_pipeline_success(
@@ -534,12 +537,12 @@ class TestAggregateRunner(unittest.TestCase):
     self.assertIn("gemini-2.5-pro", content)
     self.assertIn("5,000", content)
 
-  @patch("codemender_agent.runners.aggregate._generate_and_upload_report")
-  @patch("codemender_agent.runners.aggregate._aggregate_token_metrics")
-  @patch("codemender_agent.runners.aggregate._download_and_merge_worker_dbs")
-  @patch("codemender_agent.runners.aggregate.list_gcs_blobs")
-  @patch("codemender_agent.runners.aggregate.download_file_from_gcs")
-  @patch("codemender_agent.runners.aggregate.run_command")
+  @patch("runners.aggregate._generate_and_upload_report")
+  @patch("runners.aggregate._aggregate_token_metrics")
+  @patch("runners.aggregate._download_and_merge_worker_dbs")
+  @patch("runners.aggregate.list_gcs_blobs")
+  @patch("runners.aggregate.download_file_from_gcs")
+  @patch("runners.aggregate.run_command")
   @patch("tarfile.open")
   def test_run_aggregate_pipeline_passes_token_totals_to_report(
       self,
@@ -600,8 +603,8 @@ class TestAggregateRunner(unittest.TestCase):
 
   def test_render_step_summary_formatting(self):
     """Test step summary Markdown formatting with stats and findings table."""
-    from codemender_agent.config import OrchestratorConfig
-    from codemender_agent.runners.aggregate import _render_step_summary
+    from config import OrchestratorConfig
+    from runners.aggregate import _render_step_summary
 
     db_path = os.path.join(self.workspace_dir, "summary_test.db")
     self.create_test_db(
@@ -675,8 +678,8 @@ class TestAggregateRunner(unittest.TestCase):
 
   def test_render_step_summary_truncation(self):
     """Test step summary truncation when exceeding 1000 KiB buffer size."""
-    from codemender_agent.config import OrchestratorConfig
-    from codemender_agent.runners.aggregate import _render_step_summary
+    from config import OrchestratorConfig
+    from runners.aggregate import _render_step_summary
 
     db_path = os.path.join(self.workspace_dir, "summary_large.db")
     # Create DB with very large number of findings
@@ -699,7 +702,7 @@ class TestAggregateRunner(unittest.TestCase):
 
   def test_sanitize_sarif_file(self):
     """Test SARIF file path sanitization, message deduplication, and duplicate suppression injection."""
-    from codemender_agent.runners.aggregate import _sanitize_sarif_file
+    from runners.aggregate import _sanitize_sarif_file
 
     repo_dir = os.path.join(self.workspace_dir, "my-repo")
     os.makedirs(repo_dir, exist_ok=True)
@@ -803,9 +806,9 @@ class TestAggregateRunner(unittest.TestCase):
     # Rule without concatenated analysis retains fullDescription and populates help
     self.assertEqual(rules[1]["help"]["markdown"], "Cross-site scripting vulnerability")
 
-  @patch("codemender_agent.runners.aggregate.post_commit_status")
-  @patch("codemender_agent.runners.aggregate.run_command")
-  @patch("codemender_agent.runners.aggregate.merge_db")
+  @patch("runners.aggregate.post_commit_status")
+  @patch("runners.aggregate.run_command")
+  @patch("runners.aggregate.merge_db")
   @patch("shutil.which")
   def test_aggregate_pipeline_github_actions_mode(
       self,
@@ -880,9 +883,9 @@ class TestAggregateRunner(unittest.TestCase):
     self.assertEqual(status_kwargs["context"], "CodeMender / Security Gate")
     self.assertIn("Security Gate FAILED", status_kwargs["description"])
 
-  @patch("codemender_agent.runners.aggregate.post_commit_status")
-  @patch("codemender_agent.runners.aggregate.run_command")
-  @patch("codemender_agent.runners.aggregate.merge_db")
+  @patch("runners.aggregate.post_commit_status")
+  @patch("runners.aggregate.run_command")
+  @patch("runners.aggregate.merge_db")
   @patch("shutil.which")
   def test_aggregate_pipeline_pr_scan_soft_gate_when_fail_on_findings_false(
       self,
@@ -941,8 +944,8 @@ class TestAggregateRunner(unittest.TestCase):
     status_kwargs = mock_post_status.call_args.kwargs
     self.assertEqual(status_kwargs["state"], "success")
 
-  @patch("codemender_agent.runners.aggregate.run_command")
-  @patch("codemender_agent.runners.aggregate.merge_db")
+  @patch("runners.aggregate.run_command")
+  @patch("runners.aggregate.merge_db")
   @patch("shutil.which")
   def test_aggregate_pipeline_nightly_mode_does_not_fail(
       self,
@@ -996,7 +999,7 @@ class TestAggregateRunner(unittest.TestCase):
 
   def test_render_step_summary_pr_scan_omits_pre_existing_findings(self):
     """Verify that _render_step_summary omits PRE_EXISTING_IGNORED findings on PR scans."""
-    from codemender_agent.config import OrchestratorConfig
+    from config import OrchestratorConfig
 
     db_dir = os.path.join(self.workspace_dir, "test_pr_summary")
     os.makedirs(db_dir, exist_ok=True)

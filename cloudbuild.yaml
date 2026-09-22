@@ -27,8 +27,8 @@ steps:
           --version=stable \
           --name=cm-linux-amd64.zip \
           --destination=./
-        python3 -m zipfile -e cm-linux-amd64.zip ./
-        chmod +x cm
+        python3 -m zipfile -e cm-linux-amd64.zip codemender-runner/
+        chmod +x codemender-runner/cm
 
   # Step 2: Build the container image
   - name: 'gcr.io/cloud-builders/docker'
@@ -36,7 +36,7 @@ steps:
       - 'build'
       - '-t'
       - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/orchestrator:latest'
-      - '.'
+      - 'codemender-runner'
 
   # Step 3: Push the container image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'

@@ -3,23 +3,23 @@
 This guide provides step-by-step instructions to run and test the CodeMender
 Orchestrator script locally on your workstation.
 
---------------------------------------------------------------------------------
+______________________________________________________________________
 
 ## Prerequisites
 
 Before running the orchestrator, ensure you have the following installed on your
 machine:
 
-1.  **Python 3.8+** (with `pip` package manager)
-2.  **Git** (CLI client)
-3.  **CodeMender CLI (`cm`)**:
-    -   For a **real run**: Ensure the `cm` binary is installed and available in
-        your shell's `PATH`.
-    -   For a **mock/dry run**: Follow
-        [Step 4](#step-4-optional-create-a-mock-cm-cli-for-testing) to create a
-        mock `cm` executable.
+1. **Python 3.8+** (with `pip` package manager)
+1. **Git** (CLI client)
+1. **CodeMender CLI (`cm`)**:
+   - For a **real run**: Ensure the `cm` binary is installed and available in
+     your shell's `PATH`.
+   - For a **mock/dry run**: Follow
+     [Step 4](#step-4-optional-create-a-mock-cm-cli-for-testing) to create a
+     mock `cm` executable.
 
---------------------------------------------------------------------------------
+______________________________________________________________________
 
 ## Step-by-Step Execution Guide
 
@@ -37,24 +37,24 @@ cd /path/to/codemender-agent
 > **Zero-Setup Testing**: The orchestrator is designed with safe import
 > fallbacks. If the `google-cloud-storage` library is missing locally, the
 > script automatically switches to internal dummy mocks, allowing you to run
-> unit tests (`python3 -m unittest discover tests`) and dry-runs **without
-> installing any local dependencies**.
+> unit tests (`python3 -m unittest discover -s codemender-runner/tests`) and
+> dry-runs **without installing any local dependencies**.
 
 If you need to install the dependencies locally (e.g. to test actual GCS
 uploads), ensure `pip3` is installed on your workstation, then run:
 
 ```bash
-pip3 install -r requirements.txt
+pip3 install -r codemender-runner/requirements.txt
 ```
 
 ### Step 3: Make the Orchestrator Executable (Optional)
 
 This is only required if you want to execute the script directly as
-`./orchestrator.py`. If you run it using `python3 orchestrator.py`, you can skip
-this step.
+`./codemender-runner/main.py`. If you run it using
+`python3 codemender-runner/main.py`, you can skip this step.
 
 ```bash
-chmod +x orchestrator.py
+chmod +x codemender-runner/main.py
 ```
 
 ### Step 4: (Optional) Create a Mock `cm` CLI for Testing
@@ -63,70 +63,70 @@ If you do not have the real `cm` backend set up locally, or want to dry-run the
 Git cloning, branch switching, pushing, and GitHub Pull Request loop without
 calling actual AI models, create a mock `cm` script:
 
-1.  Create a file named `cm` in `/tmp/bin/` (or any directory in your `$PATH`):
+1. Create a file named `cm` in `/tmp/bin/` (or any directory in your `$PATH`):
 
-    ```bash
-    mkdir -p /tmp/bin
-    cat << 'EOF' > /tmp/bin/cm
-    #!/bin/bash
-    # Mock CodeMender CLI
-    CMD=$1
-    shift
+   ```bash
+   mkdir -p /tmp/bin
+   cat << 'EOF' > /tmp/bin/cm
+   #!/bin/bash
+   # Mock CodeMender CLI
+   CMD=$1
+   shift
 
-    case "$CMD" in
-      init)
-        echo "Mock CM: Initialized."
-        exit 0
-        ;;
-      find)
-        if [ "$1" = "verify" ]; then
-          echo "Mock CM: Verified finding $2."
-          exit 0
-        else
-          echo "Mock CM: Scanning code path."
-          exit 0
-        fi
-        ;;
-      report)
-        # Outputs a mock vulnerability finding schema
-        echo '[
-          {
-            "FindingID": "11111111-2222-3333-4444-555555555555",
-            "Title": "SQL Injection in database handler",
-            "FilePath": "app/db.py",
-            "Severity": "HIGH",
-            "VulnType": "SQL_INJECTION",
-            "Analysis": "Unsanitized user input concatenated in SQL query.",
-            "Status": "OPEN"
-          }
-        ]'
-        exit 0
-        ;;
-      fix)
-        echo "Mock CM: Applying fix for finding $1..."
-        # Simulate file modifications for git add -u to pick up
-        if [ -f "app/db.py" ]; then
-          echo "# Fixed SQLi" >> app/db.py
-          exit 0
-        else
-          echo "Error: app/db.py not found during fix."
-          exit 1
-        fi
-        ;;
-      *)
-        echo "Mock CM: Unknown command $CMD"
-        exit 1
-        ;;
-    esac
-    EOF
-    chmod +x /tmp/bin/cm
-    ```
+   case "$CMD" in
+     init)
+       echo "Mock CM: Initialized."
+       exit 0
+       ;;
+     find)
+       if [ "$1" = "verify" ]; then
+         echo "Mock CM: Verified finding $2."
+         exit 0
+       else
+         echo "Mock CM: Scanning code path."
+         exit 0
+       fi
+       ;;
+     report)
+       # Outputs a mock vulnerability finding schema
+       echo '[
+         {
+           "FindingID": "11111111-2222-3333-4444-555555555555",
+           "Title": "SQL Injection in database handler",
+           "FilePath": "app/db.py",
+           "Severity": "HIGH",
+           "VulnType": "SQL_INJECTION",
+           "Analysis": "Unsanitized user input concatenated in SQL query.",
+           "Status": "OPEN"
+         }
+       ]'
+       exit 0
+       ;;
+     fix)
+       echo "Mock CM: Applying fix for finding $1..."
+       # Simulate file modifications for git add -u to pick up
+       if [ -f "app/db.py" ]; then
+         echo "# Fixed SQLi" >> app/db.py
+         exit 0
+       else
+         echo "Error: app/db.py not found during fix."
+         exit 1
+       fi
+       ;;
+     *)
+       echo "Mock CM: Unknown command $CMD"
+       exit 1
+       ;;
+   esac
+   EOF
+   chmod +x /tmp/bin/cm
+   ```
 
-2.  Add `/tmp/bin` to your environment path:
+1. Add `/tmp/bin` to your environment path:
 
-    ```bash
-    export PATH="/tmp/bin:$PATH"
-    ```
+   ```bash
+   export PATH="/tmp/bin:$PATH"
+   ```
 
 ### Step 5: Configure GitHub Token & Target Repository
 
@@ -167,10 +167,9 @@ export CODEMENDER_MODEL="gemini-2.5-flash"
 ```
 
 > [!NOTE]
-> **GCS Report Authorization**: If you configure
-> `CODEMENDER_REPORT_BUCKET` for local runs, you must ensure your terminal is
-> authenticated with GCP and local Application Default Credentials (ADC) are set
-> up. Run:
+> **GCS Report Authorization**: If you configure `CODEMENDER_REPORT_BUCKET` for
+> local runs, you must ensure your terminal is authenticated with GCP and local
+> Application Default Credentials (ADC) are set up. Run:
 >
 > ```bash
 > gcloud auth application-default login
@@ -181,19 +180,22 @@ export CODEMENDER_MODEL="gemini-2.5-flash"
 Run the script:
 
 ```bash
-python3 orchestrator.py
+python3 codemender-runner/main.py
 ```
 
---------------------------------------------------------------------------------
+______________________________________________________________________
 
 ## Verifying Success
 
 If the run is successful, you should see logs showing:
 
-1.  The target repository cloned or fetched under `$WORKSPACE_DIR`.
-2.  Git committer identity configured.
-3.  The codebase scanned for findings.
-4.  For each finding:
-    -   Fix synthesized with `cm fix` (or optionally verified first if `CODEMENDER_SKIP_VERIFY="false"`).
-    -   Remediation applied via inline review suggestions on PR diff, or dedicated fix branch pushed and Pull Request opened on GitHub (with PR URL printed in logs).
-5.  Clean workspace reset back to default branch.
+1. The target repository cloned or fetched under `$WORKSPACE_DIR`.
+1. Git committer identity configured.
+1. The codebase scanned for findings.
+1. For each finding:
+   - Fix synthesized with `cm fix` (or optionally verified first if
+     `CODEMENDER_SKIP_VERIFY="false"`).
+   - Remediation applied via inline review suggestions on PR diff, or dedicated
+     fix branch pushed and Pull Request opened on GitHub (with PR URL printed in
+     logs).
+1. Clean workspace reset back to default branch.

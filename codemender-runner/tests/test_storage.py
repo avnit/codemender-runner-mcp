@@ -12,20 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for codemender_agent.storage module."""
+"""Unit tests for storage module."""
 
 import datetime
+import os
 import sys
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from codemender_agent.storage import upload_and_sign_report
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from storage import upload_and_sign_report
 
 
 class TestStorage(unittest.TestCase):
 
-  @patch("codemender_agent.storage.storage.Client")
+  @patch("storage.storage.Client")
   def test_upload_and_sign_report_with_signing_credentials(
       self, mock_client_cls
   ):
@@ -84,7 +87,7 @@ class TestStorage(unittest.TestCase):
             method="GET",
         )
 
-  @patch("codemender_agent.storage.storage.Client")
+  @patch("storage.storage.Client")
   def test_upload_and_sign_report_with_impersonated_credentials(
       self, mock_client_cls
   ):
@@ -156,8 +159,8 @@ class TestStorage(unittest.TestCase):
             credentials=mock_signing_creds,
         )
 
-  @patch("codemender_agent.storage.requests.get")
-  @patch("codemender_agent.storage.storage.Client")
+  @patch("storage.requests.get")
+  @patch("storage.storage.Client")
   def test_upload_and_sign_report_with_cloud_run_default_service_account_metadata_fallback(
       self, mock_client_cls, mock_requests_get
   ):
@@ -243,7 +246,7 @@ class TestStorage(unittest.TestCase):
   def test_github_actions_transit_storage_adapter(self):
     """Test GitHubActionsTransitStorageAdapter uploads, downloads, and lists blobs correctly."""
     import os
-    from codemender_agent.storage import GitHubActionsTransitStorageAdapter
+    from storage import GitHubActionsTransitStorageAdapter
 
     with tempfile.TemporaryDirectory() as temp_dir:
       adapter = GitHubActionsTransitStorageAdapter(base_dir=temp_dir)
@@ -273,7 +276,7 @@ class TestStorage(unittest.TestCase):
 
   def test_get_storage_adapter_factory(self):
     """Test get_storage_adapter returns correct adapter instance for each mode."""
-    from codemender_agent.storage import (
+    from storage import (
         GCSTransitStorageAdapter,
         GitHubActionsTransitStorageAdapter,
         LocalStorageAdapter,

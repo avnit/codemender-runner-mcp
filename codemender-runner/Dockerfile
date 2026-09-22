@@ -72,10 +72,14 @@ RUN python3.11 -m venv /opt/codemender/venv && \
     /opt/codemender/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # Copy orchestrator package and entrypoint script
-COPY codemender_agent ./codemender_agent
-COPY orchestrator.py .
+COPY codemender ./codemender-runner/codemender
+COPY runners ./codemender-runner/runners
+COPY vcs ./codemender-runner/vcs
+COPY *.py ./codemender-runner/
+RUN chmod +x /opt/codemender/codemender-runner/main.py && \
+    ln -s /opt/codemender/codemender-runner/main.py /opt/codemender/orchestrator.py
 
-ENV PYTHONPATH=/opt/codemender
+ENV PYTHONPATH=/opt/codemender/codemender-runner
 
 # Set entrypoint to isolated virtual environment python
-ENTRYPOINT ["/opt/codemender/venv/bin/python3", "/opt/codemender/orchestrator.py"]
+ENTRYPOINT ["/opt/codemender/venv/bin/python3", "/opt/codemender/codemender-runner/main.py"]

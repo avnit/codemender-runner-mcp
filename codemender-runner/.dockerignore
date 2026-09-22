@@ -28,8 +28,6 @@ report.sarif
 *.json
 !requirements.txt
 
-# Tests, deployment configurations, and documentation
-terraform/
-workflows/
-docs/
+# Tests and documentation
 tests/
+README.md

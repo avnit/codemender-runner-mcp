@@ -12,17 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for codemender_agent.vcs.github module."""
+"""Unit tests for vcs.github module."""
 
+import os
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-from codemender_agent.vcs.github import check_remote_branch_exists, create_pull_request, get_default_branch
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from vcs.github import check_remote_branch_exists, create_pull_request, get_default_branch
 
 
 class TestVcsGithub(unittest.TestCase):
 
-  @patch("codemender_agent.vcs.github._get_branch_via_api")
+  @patch("vcs.github._get_branch_via_api")
   def test_check_remote_branch_exists_true(self, mock_api):
     """Verify branch check returns True when GitHub API finds the branch."""
     mock_api.return_value = True
@@ -69,7 +73,7 @@ class TestVcsGithub(unittest.TestCase):
   @patch("requests.post")
   def test_create_pr_comment_success(self, mock_post):
     """Verify posting review comment on PRs."""
-    from codemender_agent.vcs.github import create_pr_comment
+    from vcs.github import create_pr_comment
 
     mock_resp = MagicMock()
     mock_resp.status_code = 201
@@ -93,7 +97,7 @@ class TestVcsGithub(unittest.TestCase):
   @patch("requests.get")
   def test_is_duplicate_pr_with_head_branch(self, mock_get):
     """Verify targeted O(1) duplicate PR lookup with head_branch parameter."""
-    from codemender_agent.vcs.github import is_duplicate_pr
+    from vcs.github import is_duplicate_pr
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -118,7 +122,7 @@ class TestVcsGithub(unittest.TestCase):
   @patch("requests.post")
   def test_post_commit_status_success(self, mock_post):
     """Verify posting a commit status check on a PR commit SHA."""
-    from codemender_agent.vcs.github import post_commit_status
+    from vcs.github import post_commit_status
 
     mock_resp = MagicMock()
     mock_resp.status_code = 201
@@ -146,7 +150,7 @@ class TestVcsGithub(unittest.TestCase):
 
   def test_post_commit_status_fake_token(self):
     """Verify post_commit_status handles fake-token gracefully in unit tests."""
-    from codemender_agent.vcs.github import post_commit_status
+    from vcs.github import post_commit_status
 
     success = post_commit_status(
         token="fake-token",
@@ -162,7 +166,7 @@ class TestVcsGithub(unittest.TestCase):
   def test_post_commit_status_api_error_returns_false(self, mock_post):
     """Verify post_commit_status returns False on network error without throwing."""
     import requests
-    from codemender_agent.vcs.github import post_commit_status
+    from vcs.github import post_commit_status
 
     mock_post.side_effect = requests.exceptions.RequestException("Connection error")
 
@@ -178,7 +182,7 @@ class TestVcsGithub(unittest.TestCase):
 
   def test_delete_remote_branch_safety_guard_rejects_main(self):
     """Verify delete_remote_branch strictly rejects non-codemender branches."""
-    from codemender_agent.vcs.github import delete_remote_branch
+    from vcs.github import delete_remote_branch
 
     # Refuse to delete protected or non-codemender branches
     self.assertFalse(
@@ -194,7 +198,7 @@ class TestVcsGithub(unittest.TestCase):
   @patch("requests.delete")
   def test_delete_remote_branch_api_success(self, mock_delete):
     """Verify deleting branch via GitHub REST API with 204 status."""
-    from codemender_agent.vcs.github import delete_remote_branch
+    from vcs.github import delete_remote_branch
 
     mock_resp = MagicMock()
     mock_resp.status_code = 204
@@ -215,7 +219,7 @@ class TestVcsGithub(unittest.TestCase):
   @patch("requests.delete")
   def test_delete_remote_branch_api_404_idempotent(self, mock_delete):
     """Verify deleting already-deleted branch returns True idempotently on 404/422."""
-    from codemender_agent.vcs.github import delete_remote_branch
+    from vcs.github import delete_remote_branch
 
     mock_resp = MagicMock()
     mock_resp.status_code = 404
@@ -228,14 +232,14 @@ class TestVcsGithub(unittest.TestCase):
     )
     self.assertTrue(success)
 
-  @patch("codemender_agent.vcs.github.run_command")
+  @patch("vcs.github.run_command")
   @patch("requests.delete")
   def test_delete_remote_branch_api_fail_falls_back_to_cli(
       self, mock_delete, mock_run_command
   ):
     """Verify falling back to Git CLI push --delete if REST API raises error."""
     import requests
-    from codemender_agent.vcs.github import delete_remote_branch
+    from vcs.github import delete_remote_branch
 
     mock_delete.side_effect = requests.exceptions.RequestException("API error")
     mock_cli_res = MagicMock()

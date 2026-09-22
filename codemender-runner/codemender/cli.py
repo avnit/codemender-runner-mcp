@@ -20,7 +20,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from codemender_agent.utils import (
+from utils import (
     build_cm_command,
     extract_json_from_output,
     run_command,

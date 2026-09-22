@@ -16,11 +16,14 @@
 
 import json
 import os
+import sys
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from codemender_agent.runners.scan import (
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from runners.scan import (
     _render_zero_findings_summary,
     run_scan_pipeline,
 )
@@ -52,13 +55,13 @@ class TestScanRunner(unittest.TestCase):
     self.env_patcher.stop()
     self.temp_dir.cleanup()
 
-  @patch("codemender_agent.runners.scan.generate_signed_url")
-  @patch("codemender_agent.runners.scan.run_command")
-  @patch("codemender_agent.runners.scan.upload_file_to_gcs")
-  @patch("codemender_agent.runners.scan.is_duplicate_pr")
-  @patch("codemender_agent.runners.scan.check_remote_branch_exists")
-  @patch("codemender_agent.runners.scan.get_default_branch")
-  @patch("codemender_agent.runners.scan.make_tarfile")
+  @patch("runners.scan.generate_signed_url")
+  @patch("runners.scan.run_command")
+  @patch("runners.scan.upload_file_to_gcs")
+  @patch("runners.scan.is_duplicate_pr")
+  @patch("runners.scan.check_remote_branch_exists")
+  @patch("runners.scan.get_default_branch")
+  @patch("runners.scan.make_tarfile")
   @patch("shutil.which")
   def test_scan_pipeline_success(
       self,
@@ -184,10 +187,10 @@ class TestScanRunner(unittest.TestCase):
     self.assertTrue(workspace_uploaded)
     self.assertEqual(partitions_uploaded, 2)
 
-  @patch("codemender_agent.runners.scan.run_command")
-  @patch("codemender_agent.runners.scan.upload_file_to_gcs")
-  @patch("codemender_agent.runners.scan.is_duplicate_pr")
-  @patch("codemender_agent.runners.scan.get_default_branch")
+  @patch("runners.scan.run_command")
+  @patch("runners.scan.upload_file_to_gcs")
+  @patch("runners.scan.is_duplicate_pr")
+  @patch("runners.scan.get_default_branch")
   @patch("shutil.which")
   def test_scan_pipeline_zero_findings(
       self,
@@ -246,13 +249,13 @@ class TestScanRunner(unittest.TestCase):
 
     self.assertTrue(manifest_uploaded)
 
-  @patch("codemender_agent.runners.scan.generate_signed_url")
-  @patch("codemender_agent.runners.scan.run_command")
-  @patch("codemender_agent.runners.scan.upload_file_to_gcs")
-  @patch("codemender_agent.runners.scan.is_duplicate_pr")
-  @patch("codemender_agent.runners.scan.check_remote_branch_exists")
-  @patch("codemender_agent.runners.scan.get_default_branch")
-  @patch("codemender_agent.runners.scan.make_tarfile")
+  @patch("runners.scan.generate_signed_url")
+  @patch("runners.scan.run_command")
+  @patch("runners.scan.upload_file_to_gcs")
+  @patch("runners.scan.is_duplicate_pr")
+  @patch("runners.scan.check_remote_branch_exists")
+  @patch("runners.scan.get_default_branch")
+  @patch("runners.scan.make_tarfile")
   @patch("shutil.which")
   def test_scan_pipeline_with_skipped_findings(
       self,
@@ -337,12 +340,12 @@ class TestScanRunner(unittest.TestCase):
     self.assertEqual(rows[1][1], "OPEN")
     self.assertEqual(rows[1][2], 0)
 
-  @patch("codemender_agent.runners.scan.generate_signed_url")
-  @patch("codemender_agent.runners.scan.run_command")
-  @patch("codemender_agent.runners.scan.upload_file_to_gcs")
-  @patch("codemender_agent.runners.scan.check_remote_branch_exists")
-  @patch("codemender_agent.runners.scan.is_duplicate_pr")
-  @patch("codemender_agent.runners.scan.get_default_branch")
+  @patch("runners.scan.generate_signed_url")
+  @patch("runners.scan.run_command")
+  @patch("runners.scan.upload_file_to_gcs")
+  @patch("runners.scan.check_remote_branch_exists")
+  @patch("runners.scan.is_duplicate_pr")
+  @patch("runners.scan.get_default_branch")
   @patch("shutil.which")
   def test_scan_pipeline_relative_targets_normalized(
       self,
@@ -407,11 +410,11 @@ class TestScanRunner(unittest.TestCase):
     for target in find_targets_passed:
       self.assertTrue(os.path.isabs(target), f"Target {target} is not absolute")
 
-  @patch("codemender_agent.runners.scan.get_pr_changed_lines")
-  @patch("codemender_agent.runners.scan.run_command")
-  @patch("codemender_agent.runners.scan.check_remote_branch_exists")
-  @patch("codemender_agent.runners.scan.is_duplicate_pr")
-  @patch("codemender_agent.runners.scan.get_default_branch")
+  @patch("runners.scan.get_pr_changed_lines")
+  @patch("runners.scan.run_command")
+  @patch("runners.scan.check_remote_branch_exists")
+  @patch("runners.scan.is_duplicate_pr")
+  @patch("runners.scan.get_default_branch")
   @patch("shutil.which")
   def test_scan_pipeline_pr_differential_filtering(
       self,
@@ -538,14 +541,14 @@ class TestScanRunner(unittest.TestCase):
     self.assertIn("- **Grand Total Tokens:** 1,280", content)
     self.assertIn("| `gemini-2.5-flash` | 1,200 | 80 | 1,280 |", content)
 
-  @patch("codemender_agent.runners.scan.delete_remote_branch")
-  @patch("codemender_agent.runners.scan.is_duplicate_pr")
-  @patch("codemender_agent.runners.scan.check_remote_branch_exists")
+  @patch("runners.scan.delete_remote_branch")
+  @patch("runners.scan.is_duplicate_pr")
+  @patch("runners.scan.check_remote_branch_exists")
   def test_filter_findings_dead_branch_pruned_and_retained(
       self, mock_check_branch, mock_is_dup_pr, mock_delete_branch
   ):
     """Verify that a remote branch without an open PR is pruned as a dead branch and retained as active."""
-    from codemender_agent.runners.scan import _filter_findings
+    from runners.scan import _filter_findings
 
     mock_check_branch.return_value = True
     mock_is_dup_pr.return_value = False
@@ -576,14 +579,14 @@ class TestScanRunner(unittest.TestCase):
     self.assertEqual(ignored, [])
     mock_delete_branch.assert_called_once()
 
-  @patch("codemender_agent.runners.scan.is_duplicate_pr")
-  @patch("codemender_agent.runners.scan.check_remote_branch_exists")
+  @patch("runners.scan.is_duplicate_pr")
+  @patch("runners.scan.check_remote_branch_exists")
   def test_filter_findings_accepts_cm_070_snake_case_payload(
       self, mock_check_branch, mock_is_dup_pr
   ):
     """Verify cm 0.7.0 snake_case findings survive filtering end-to-end."""
-    from codemender_agent.codemender.cli import parse_findings_json
-    from codemender_agent.runners.scan import _filter_findings
+    from codemender.cli import parse_findings_json
+    from runners.scan import _filter_findings
 
     mock_check_branch.return_value = False
     mock_is_dup_pr.return_value = False
@@ -635,14 +638,14 @@ class TestScanRunner(unittest.TestCase):
         active[1]["FindingID"], "d83ac117-0f0a-5c3c-8b1e-9a1f2c3d4e5f"
     )
 
-  @patch("codemender_agent.runners.scan.delete_remote_branch")
-  @patch("codemender_agent.runners.scan.is_duplicate_pr")
-  @patch("codemender_agent.runners.scan.check_remote_branch_exists")
+  @patch("runners.scan.delete_remote_branch")
+  @patch("runners.scan.is_duplicate_pr")
+  @patch("runners.scan.check_remote_branch_exists")
   def test_filter_findings_live_branch_skipped(
       self, mock_check_branch, mock_is_dup_pr, mock_delete_branch
   ):
     """Verify that a remote branch WITH an open PR is recognized as live and skipped."""
-    from codemender_agent.runners.scan import _filter_findings
+    from runners.scan import _filter_findings
 
     mock_check_branch.return_value = True
     mock_is_dup_pr.return_value = True

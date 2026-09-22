@@ -18,22 +18,25 @@ import os
 import re
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from codemender_agent.config import (
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from config import (
     PR_MODE_CHILD_PR,
     PR_MODE_REVIEW_SUGGESTION,
     OrchestratorConfig,
     resolve_pr_remediation_mode,
 )
-from codemender_agent.runners.worker import (
+from runners.worker import (
     _build_suggestion_comments,
     _fit_fork_comment,
 )
-from codemender_agent.vcs.git import parse_patch_to_suggestions
-from codemender_agent.vcs.github import (
+from vcs.git import parse_patch_to_suggestions
+from vcs.github import (
     FINDING_MARKER_PREFIX,
     MAX_COMMENT_BODY_CHARS,
     STICKY_SUMMARY_MARKER,
@@ -184,7 +187,7 @@ class TestSuggestionBodyFormatting(unittest.TestCase):
 class TestPrDiffLineRanges(unittest.TestCase):
   """Validates discovery of the lines GitHub will accept as review anchors."""
 
-  @patch("codemender_agent.vcs.github._fetch_pr_files")
+  @patch("vcs.github._fetch_pr_files")
   def test_expands_hunk_headers_into_line_numbers(self, mock_fetch):
     mock_fetch.return_value = [{
         "filename": "app/views.py",
@@ -193,13 +196,13 @@ class TestPrDiffLineRanges(unittest.TestCase):
     ranges = get_pr_diff_line_ranges("t", "org", "repo", 7)
     self.assertEqual(ranges["app/views.py"], {1, 2, 3, 4, 30, 31})
 
-  @patch("codemender_agent.vcs.github._fetch_pr_files")
+  @patch("vcs.github._fetch_pr_files")
   def test_file_without_patch_is_not_addressable(self, mock_fetch):
     """Binary or oversized files have no patch, so nothing can anchor to them."""
     mock_fetch.return_value = [{"filename": "logo.png", "status": "added"}]
     self.assertEqual(get_pr_diff_line_ranges("t", "org", "repo", 7), {})
 
-  @patch("codemender_agent.vcs.github._fetch_pr_files")
+  @patch("vcs.github._fetch_pr_files")
   def test_fetch_failure_yields_empty_map(self, mock_fetch):
     mock_fetch.side_effect = RuntimeError("boom")
     self.assertEqual(get_pr_diff_line_ranges("t", "org", "repo", 7), {})
@@ -536,9 +539,9 @@ class TestBuildSuggestionComments(unittest.TestCase):
       "analysis": "Unescaped user input.",
   }
 
-  @patch("codemender_agent.runners.worker.parse_patch_to_suggestions")
+  @patch("runners.worker.parse_patch_to_suggestions")
   def test_in_diff_patch_produces_marked_comments(self, mock_parse):
-    from codemender_agent.vcs.git import SuggestionHunk
+    from vcs.git import SuggestionHunk
 
     mock_parse.return_value = (
         [SuggestionHunk("app.py", 10, 11, ["safe = escape(x)", "return safe"])],
@@ -554,9 +557,9 @@ class TestBuildSuggestionComments(unittest.TestCase):
     self.assertIn(finding_marker("CM-1"), comments[0]["body"])
     self.assertIn("```suggestion", comments[0]["body"])
 
-  @patch("codemender_agent.runners.worker.parse_patch_to_suggestions")
+  @patch("runners.worker.parse_patch_to_suggestions")
   def test_out_of_diff_line_blocks_whole_patch(self, mock_parse):
-    from codemender_agent.vcs.git import SuggestionHunk
+    from vcs.git import SuggestionHunk
 
     mock_parse.return_value = (
         [SuggestionHunk("app.py", 10, 11, ["x"])],
@@ -568,9 +571,9 @@ class TestBuildSuggestionComments(unittest.TestCase):
     self.assertEqual(comments, [])
     self.assertIn("outside the pull request diff", blocker)
 
-  @patch("codemender_agent.runners.worker.parse_patch_to_suggestions")
+  @patch("runners.worker.parse_patch_to_suggestions")
   def test_untouched_file_blocks_whole_patch(self, mock_parse):
-    from codemender_agent.vcs.git import SuggestionHunk
+    from vcs.git import SuggestionHunk
 
     mock_parse.return_value = ([SuggestionHunk("other.py", 1, 1, ["x"])], [])
     comments, blocker = _build_suggestion_comments(
@@ -579,10 +582,10 @@ class TestBuildSuggestionComments(unittest.TestCase):
     self.assertEqual(comments, [])
     self.assertIn("not part of the reviewable pull request diff", blocker)
 
-  @patch("codemender_agent.runners.worker.parse_patch_to_suggestions")
+  @patch("runners.worker.parse_patch_to_suggestions")
   def test_one_bad_hunk_blocks_the_suggestable_ones(self, mock_parse):
     """Partial fixes must never be offered; remediation is all or nothing."""
-    from codemender_agent.vcs.git import SuggestionHunk
+    from vcs.git import SuggestionHunk
 
     mock_parse.return_value = (
         [
@@ -597,7 +600,7 @@ class TestBuildSuggestionComments(unittest.TestCase):
     self.assertEqual(comments, [])
     self.assertIsNotNone(blocker)
 
-  @patch("codemender_agent.runners.worker.parse_patch_to_suggestions")
+  @patch("runners.worker.parse_patch_to_suggestions")
   def test_structural_blocker_is_propagated(self, mock_parse):
     mock_parse.return_value = ([], ["`helper.py` is a new file"])
     comments, blocker = _build_suggestion_comments(
@@ -606,9 +609,9 @@ class TestBuildSuggestionComments(unittest.TestCase):
     self.assertEqual(comments, [])
     self.assertIn("new file", blocker)
 
-  @patch("codemender_agent.runners.worker.parse_patch_to_suggestions")
+  @patch("runners.worker.parse_patch_to_suggestions")
   def test_multi_hunk_comments_are_numbered(self, mock_parse):
-    from codemender_agent.vcs.git import SuggestionHunk
+    from vcs.git import SuggestionHunk
 
     mock_parse.return_value = (
         [
@@ -677,7 +680,7 @@ class TestProcessFindingRouting(unittest.TestCase):
     return OrchestratorConfig(**params)
 
   def _run(self, config, **kwargs):
-    from codemender_agent.runners.worker import _process_finding
+    from runners.worker import _process_finding
 
     return _process_finding(
         finding_id="fid-1",
@@ -701,16 +704,16 @@ class TestProcessFindingRouting(unittest.TestCase):
 def _routing_patches(func):
   """Applies the mock stack shared by every routing test."""
   decorators = [
-      patch("codemender_agent.runners.worker.run_command"),
-      patch("codemender_agent.runners.worker.check_remote_branch_exists"),
-      patch("codemender_agent.runners.worker.is_duplicate_pr"),
-      patch("codemender_agent.runners.worker.is_finding_verified"),
-      patch("codemender_agent.runners.worker.get_finding_status"),
-      patch("codemender_agent.runners.worker.push_branch_to_remote"),
-      patch("codemender_agent.runners.worker.create_pull_request"),
-      patch("codemender_agent.runners.worker.create_pr_comment"),
-      patch("codemender_agent.runners.worker.create_pr_review_with_suggestions"),
-      patch("codemender_agent.runners.worker.parse_patch_to_suggestions"),
+      patch("runners.worker.run_command"),
+      patch("runners.worker.check_remote_branch_exists"),
+      patch("runners.worker.is_duplicate_pr"),
+      patch("runners.worker.is_finding_verified"),
+      patch("runners.worker.get_finding_status"),
+      patch("runners.worker.push_branch_to_remote"),
+      patch("runners.worker.create_pull_request"),
+      patch("runners.worker.create_pr_comment"),
+      patch("runners.worker.create_pr_review_with_suggestions"),
+      patch("runners.worker.parse_patch_to_suggestions"),
   ]
   for decorator in decorators:
     func = decorator(func)
@@ -750,7 +753,7 @@ class TestRoutingDecisions(TestProcessFindingRouting):
 
   @_routing_patches
   def test_suggestable_patch_posts_review_and_pushes_nothing(self, *args):
-    from codemender_agent.vcs.git import SuggestionHunk
+    from vcs.git import SuggestionHunk
 
     mocks = self._unpack(args)
     self._prime(mocks)
@@ -798,7 +801,7 @@ class TestRoutingDecisions(TestProcessFindingRouting):
   @_routing_patches
   def test_rejected_review_falls_back_to_child_pr(self, *args):
     """A 422 from GitHub must not strand the finding without a remediation."""
-    from codemender_agent.vcs.git import SuggestionHunk
+    from vcs.git import SuggestionHunk
 
     mocks = self._unpack(args)
     self._prime(mocks)
@@ -852,7 +855,7 @@ class TestRoutingDecisions(TestProcessFindingRouting):
   @_routing_patches
   def test_fork_pr_ignores_child_pr_mode(self, *args):
     """Forks cannot receive a pushed branch, so the flag must not apply."""
-    from codemender_agent.vcs.git import SuggestionHunk
+    from vcs.git import SuggestionHunk
 
     mocks = self._unpack(args)
     self._prime(mocks)

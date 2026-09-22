@@ -12,14 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for codemender_agent.codemender.db module."""
+"""Unit tests for codemender.db module."""
 
 import os
 import sqlite3
+import sys
 import tempfile
 import unittest
 
-from codemender_agent.codemender.db import get_finding_status, is_finding_verified
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from codemender.db import get_finding_status, is_finding_verified
 
 
 class TestCodeMenderDb(unittest.TestCase):

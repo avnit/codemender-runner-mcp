@@ -12,17 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for codemender_agent.config module."""
+"""Unit tests for config module."""
 
 import os
+import sys
 import tempfile
 import unittest
 import unittest.mock
 
-from codemender_agent.config import get_cleanup_ports
-from codemender_agent.config import get_github_credentials
-from codemender_agent.config import get_scrubbed_env
-from codemender_agent.config import inject_codemender_config
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from config import get_cleanup_ports
+from config import get_github_credentials
+from config import get_scrubbed_env
+from config import inject_codemender_config
 import yaml
 
 
@@ -158,7 +161,7 @@ class TestConfig(unittest.TestCase):
 
   def test_detect_build_command_nodejs(self):
     """Verify detect_build_command finds npm test in package.json."""
-    from codemender_agent.config import detect_build_command
+    from config import detect_build_command
     with tempfile.TemporaryDirectory() as repo_dir:
       with open(os.path.join(repo_dir, "package.json"), "w") as f:
         f.write('{"name": "test-pkg", "scripts": {"test": "mocha"}}')
@@ -166,7 +169,7 @@ class TestConfig(unittest.TestCase):
 
   def test_detect_build_command_python(self):
     """Verify detect_build_command finds pytest when pyproject.toml exists."""
-    from codemender_agent.config import detect_build_command
+    from config import detect_build_command
     with tempfile.TemporaryDirectory() as repo_dir:
       with open(os.path.join(repo_dir, "pyproject.toml"), "w") as f:
         f.write("[tool.pytest]")
@@ -174,7 +177,7 @@ class TestConfig(unittest.TestCase):
 
   def test_detect_build_command_go(self):
     """Verify detect_build_command finds go test when go.mod exists."""
-    from codemender_agent.config import detect_build_command
+    from config import detect_build_command
     with tempfile.TemporaryDirectory() as repo_dir:
       with open(os.path.join(repo_dir, "go.mod"), "w") as f:
         f.write("module example.com/test")
@@ -195,7 +198,7 @@ class TestConfig(unittest.TestCase):
 
   def test_inject_codemender_config_env_override_takes_precedence(self):
     """Verify env override CODEMENDER_BUILD_COMMAND takes precedence over repo config."""
-    from codemender_agent.config import OrchestratorConfig
+    from config import OrchestratorConfig
     with tempfile.TemporaryDirectory() as temp_home:
       with tempfile.TemporaryDirectory() as repo_dir:
         local_config = {"build": {"command": "npm test"}}
@@ -213,7 +216,7 @@ class TestConfig(unittest.TestCase):
 
   def test_inject_codemender_config_composite_build_command(self):
     """Verify composite build commands with ampersands are safely preserved."""
-    from codemender_agent.config import OrchestratorConfig
+    from config import OrchestratorConfig
     with tempfile.TemporaryDirectory() as temp_home:
       with tempfile.TemporaryDirectory() as repo_dir:
         test_env = {"CODEMENDER_BUILD_COMMAND": "npm install && npm test"}
@@ -228,14 +231,14 @@ class TestConfig(unittest.TestCase):
 
   def test_orchestrator_config_skip_verify_default(self):
     """Verify skip_verify defaults to True when CODEMENDER_SKIP_VERIFY is unset."""
-    from codemender_agent.config import OrchestratorConfig
+    from config import OrchestratorConfig
     with unittest.mock.patch.dict(os.environ, {}, clear=True):
       cfg = OrchestratorConfig.from_env()
       self.assertTrue(cfg.skip_verify)
 
   def test_orchestrator_config_skip_verify_false(self):
     """Verify skip_verify is False when CODEMENDER_SKIP_VERIFY is false/0/no."""
-    from codemender_agent.config import OrchestratorConfig
+    from config import OrchestratorConfig
     for false_val in ("false", "0", "no"):
       with unittest.mock.patch.dict(
           os.environ, {"CODEMENDER_SKIP_VERIFY": false_val}, clear=True
@@ -248,7 +251,7 @@ class TestConfig(unittest.TestCase):
 
   def test_orchestrator_config_skip_verify_true(self):
     """Verify skip_verify is True when CODEMENDER_SKIP_VERIFY is true/1/yes."""
-    from codemender_agent.config import OrchestratorConfig
+    from config import OrchestratorConfig
     for true_val in ("true", "1", "yes"):
       with unittest.mock.patch.dict(
           os.environ, {"CODEMENDER_SKIP_VERIFY": true_val}, clear=True

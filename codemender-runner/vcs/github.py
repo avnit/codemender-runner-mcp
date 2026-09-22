@@ -19,8 +19,8 @@ import re
 from typing import Dict, List, Optional, Set
 
 import requests
-from codemender_agent.utils import retry_on_exception, run_command
-from codemender_agent.vcs.git import get_git_auth_header, parse_repo_owner_and_name, sanitize_git_url
+from utils import retry_on_exception, run_command
+from vcs.git import get_git_auth_header, parse_repo_owner_and_name, sanitize_git_url
 
 logger = logging.getLogger("codemender-orchestrator")
 

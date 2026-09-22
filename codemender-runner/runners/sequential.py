@@ -22,34 +22,34 @@ import sqlite3
 import sys
 import time
 
-from codemender_agent.codemender.cli import extract_session_id
-from codemender_agent.codemender.cli import log_cm_version
-from codemender_agent.codemender.cli import parse_findings_json
-from codemender_agent.codemender.db import get_finding_status
-from codemender_agent.codemender.db import is_finding_verified
-from codemender_agent.config import get_cleanup_ports
-from codemender_agent.config import get_github_credentials
-from codemender_agent.config import get_scrubbed_env
-from codemender_agent.config import inject_codemender_config
-from codemender_agent.runners.aggregate import _inject_token_metrics_into_html
-from codemender_agent.storage import upload_and_sign_report
-from codemender_agent.utils import accumulate_model_token_usage
-from codemender_agent.utils import build_cm_command
-from codemender_agent.utils import free_port
-from codemender_agent.utils import resolve_command_model
-from codemender_agent.utils import run_command
-from codemender_agent.vcs.git import clean_workspace
-from codemender_agent.vcs.git import generate_branch_name
-from codemender_agent.vcs.git import get_git_auth_header
-from codemender_agent.vcs.git import parse_repo_owner_and_name
-from codemender_agent.vcs.git import sanitize_exploit_and_artifacts
-from codemender_agent.vcs.git import sanitize_git_url
-from codemender_agent.vcs.git import setup_local_git_excludes
-from codemender_agent.vcs.github import check_remote_branch_exists
-from codemender_agent.vcs.github import create_pull_request
-from codemender_agent.vcs.github import delete_remote_branch
-from codemender_agent.vcs.github import get_default_branch
-from codemender_agent.vcs.github import is_duplicate_pr
+from codemender.cli import extract_session_id
+from codemender.cli import log_cm_version
+from codemender.cli import parse_findings_json
+from codemender.db import get_finding_status
+from codemender.db import is_finding_verified
+from config import get_cleanup_ports
+from config import get_github_credentials
+from config import get_scrubbed_env
+from config import inject_codemender_config
+from runners.aggregate import _inject_token_metrics_into_html
+from storage import upload_and_sign_report
+from utils import accumulate_model_token_usage
+from utils import build_cm_command
+from utils import free_port
+from utils import resolve_command_model
+from utils import run_command
+from vcs.git import clean_workspace
+from vcs.git import generate_branch_name
+from vcs.git import get_git_auth_header
+from vcs.git import parse_repo_owner_and_name
+from vcs.git import sanitize_exploit_and_artifacts
+from vcs.git import sanitize_git_url
+from vcs.git import setup_local_git_excludes
+from vcs.github import check_remote_branch_exists
+from vcs.github import create_pull_request
+from vcs.github import delete_remote_branch
+from vcs.github import get_default_branch
+from vcs.github import is_duplicate_pr
 
 logger = logging.getLogger("codemender-orchestrator")
 

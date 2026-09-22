@@ -12,15 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for codemender_agent.vcs.git module."""
+"""Unit tests for vcs.git module."""
 
 import base64
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 
-from codemender_agent.vcs.git import (
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from vcs.git import (
     enforce_https_url,
     filter_stageable_files,
     generate_branch_name,
@@ -157,7 +160,7 @@ class TestVcsGit(unittest.TestCase):
 
   def test_sanitize_exploit_and_artifacts(self):
     """Verify sanitize_exploit_and_artifacts removes junk build caches while preserving exploit files."""
-    from codemender_agent.vcs.git import sanitize_exploit_and_artifacts
+    from vcs.git import sanitize_exploit_and_artifacts
 
     with tempfile.TemporaryDirectory() as repo_dir:
       with tempfile.TemporaryDirectory() as cm_home:

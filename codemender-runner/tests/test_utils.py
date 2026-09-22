@@ -12,13 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for codemender_agent.utils module."""
+"""Unit tests for utils module."""
 
+import os
 import subprocess
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-from codemender_agent.utils import (
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils import (
     extract_json_from_output,
     free_port,
     retry_on_exception,

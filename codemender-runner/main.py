@@ -24,10 +24,10 @@ import logging
 import os
 import sys
 
-from codemender_agent.runners.aggregate import run_aggregate_pipeline
-from codemender_agent.runners.scan import run_scan_pipeline
-from codemender_agent.runners.sequential import run_sequential_pipeline
-from codemender_agent.runners.worker import run_worker_pipeline
+from runners.aggregate import run_aggregate_pipeline
+from runners.scan import run_scan_pipeline
+from runners.sequential import run_sequential_pipeline
+from runners.worker import run_worker_pipeline
 
 # Configure global root logger for all package submodules
 logging.basicConfig(

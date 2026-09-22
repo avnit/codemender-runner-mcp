@@ -13,14 +13,17 @@
 # limitations under the License.
 
 import os
+import sys
 import unittest
 from unittest.mock import patch
 
-from codemender_agent.utils import accumulate_model_token_usage
-from codemender_agent.utils import build_cm_command
-from codemender_agent.utils import parse_token_metric
-from codemender_agent.utils import render_token_usage_markdown
-from codemender_agent.utils import resolve_command_model
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils import accumulate_model_token_usage
+from utils import build_cm_command
+from utils import parse_token_metric
+from utils import render_token_usage_markdown
+from utils import resolve_command_model
 
 
 class TestCommandBuilder(unittest.TestCase):

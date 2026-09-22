@@ -19,13 +19,16 @@ import json
 import os
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import unittest
 import unittest.mock
 
-from codemender_agent.config import OrchestratorConfig
-from codemender_agent.runners.worker import _process_finding
-from codemender_agent.runners.worker import run_worker_pipeline
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from config import OrchestratorConfig
+from runners.worker import _process_finding
+from runners.worker import run_worker_pipeline
 
 
 class TestWorkerRunner(unittest.TestCase):
@@ -56,15 +59,15 @@ class TestWorkerRunner(unittest.TestCase):
     self.env_patcher.stop()
     self.temp_dir.cleanup()
 
-  @unittest.mock.patch("codemender_agent.runners.worker.run_command")
-  @unittest.mock.patch("codemender_agent.runners.worker.download_from_url")
-  @unittest.mock.patch("codemender_agent.runners.worker.upload_to_url")
-  @unittest.mock.patch("codemender_agent.runners.worker.check_remote_branch_exists")
-  @unittest.mock.patch("codemender_agent.runners.worker.push_branch_to_remote")
-  @unittest.mock.patch("codemender_agent.runners.worker.create_pull_request")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_duplicate_pr")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_finding_verified")
-  @unittest.mock.patch("codemender_agent.runners.worker.get_finding_status")
+  @unittest.mock.patch("runners.worker.run_command")
+  @unittest.mock.patch("runners.worker.download_from_url")
+  @unittest.mock.patch("runners.worker.upload_to_url")
+  @unittest.mock.patch("runners.worker.check_remote_branch_exists")
+  @unittest.mock.patch("runners.worker.push_branch_to_remote")
+  @unittest.mock.patch("runners.worker.create_pull_request")
+  @unittest.mock.patch("runners.worker.is_duplicate_pr")
+  @unittest.mock.patch("runners.worker.is_finding_verified")
+  @unittest.mock.patch("runners.worker.get_finding_status")
   @unittest.mock.patch("tarfile.open")
   @unittest.mock.patch("shutil.which")
   def test_worker_pipeline_success(
@@ -174,15 +177,15 @@ class TestWorkerRunner(unittest.TestCase):
           "https://github.com/org/repo/pull/42",
       )
 
-  @unittest.mock.patch("codemender_agent.runners.worker.run_command")
-  @unittest.mock.patch("codemender_agent.runners.worker.download_from_url")
-  @unittest.mock.patch("codemender_agent.runners.worker.upload_to_url")
-  @unittest.mock.patch("codemender_agent.runners.worker.check_remote_branch_exists")
-  @unittest.mock.patch("codemender_agent.runners.worker.push_branch_to_remote")
-  @unittest.mock.patch("codemender_agent.runners.worker.create_pull_request")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_duplicate_pr")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_finding_verified")
-  @unittest.mock.patch("codemender_agent.runners.worker.get_finding_status")
+  @unittest.mock.patch("runners.worker.run_command")
+  @unittest.mock.patch("runners.worker.download_from_url")
+  @unittest.mock.patch("runners.worker.upload_to_url")
+  @unittest.mock.patch("runners.worker.check_remote_branch_exists")
+  @unittest.mock.patch("runners.worker.push_branch_to_remote")
+  @unittest.mock.patch("runners.worker.create_pull_request")
+  @unittest.mock.patch("runners.worker.is_duplicate_pr")
+  @unittest.mock.patch("runners.worker.is_finding_verified")
+  @unittest.mock.patch("runners.worker.get_finding_status")
   @unittest.mock.patch("tarfile.open")
   @unittest.mock.patch("shutil.which")
   def test_worker_pipeline_with_verify_enabled(
@@ -271,14 +274,14 @@ class TestWorkerRunner(unittest.TestCase):
     self.assertTrue(fix_called)
     mock_create_pr.assert_called_once()
 
-  @unittest.mock.patch("codemender_agent.runners.worker.run_command")
-  @unittest.mock.patch("codemender_agent.runners.worker.download_from_url")
-  @unittest.mock.patch("codemender_agent.runners.worker.upload_to_url")
-  @unittest.mock.patch("codemender_agent.runners.worker.check_remote_branch_exists")
-  @unittest.mock.patch("codemender_agent.runners.worker.create_pull_request")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_duplicate_pr")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_finding_verified")
-  @unittest.mock.patch("codemender_agent.runners.worker.get_finding_status")
+  @unittest.mock.patch("runners.worker.run_command")
+  @unittest.mock.patch("runners.worker.download_from_url")
+  @unittest.mock.patch("runners.worker.upload_to_url")
+  @unittest.mock.patch("runners.worker.check_remote_branch_exists")
+  @unittest.mock.patch("runners.worker.create_pull_request")
+  @unittest.mock.patch("runners.worker.is_duplicate_pr")
+  @unittest.mock.patch("runners.worker.is_finding_verified")
+  @unittest.mock.patch("runners.worker.get_finding_status")
   @unittest.mock.patch("tarfile.open")
   @unittest.mock.patch("shutil.which")
   def test_worker_pipeline_idempotency_skip(
@@ -369,9 +372,9 @@ class TestWorkerRunner(unittest.TestCase):
         content_type="application/json",
     )
 
-  @unittest.mock.patch("codemender_agent.runners.worker.run_command")
-  @unittest.mock.patch("codemender_agent.runners.worker.download_from_url")
-  @unittest.mock.patch("codemender_agent.runners.worker.upload_to_url")
+  @unittest.mock.patch("runners.worker.run_command")
+  @unittest.mock.patch("runners.worker.download_from_url")
+  @unittest.mock.patch("runners.worker.upload_to_url")
   @unittest.mock.patch("tarfile.open")
   def test_worker_pipeline_metadata_upload(
       self, mock_tarfile_open, mock_upload_to_url, mock_download_from_url, mock_run_command
@@ -411,16 +414,16 @@ class TestWorkerRunner(unittest.TestCase):
         content_type="application/json",
     )
 
-  @unittest.mock.patch("codemender_agent.runners.worker.run_command")
-  @unittest.mock.patch("codemender_agent.runners.worker.download_from_url")
-  @unittest.mock.patch("codemender_agent.runners.worker.upload_to_url")
-  @unittest.mock.patch("codemender_agent.runners.worker.check_remote_branch_exists")
-  @unittest.mock.patch("codemender_agent.runners.worker.push_branch_to_remote")
-  @unittest.mock.patch("codemender_agent.runners.worker.create_pull_request")
-  @unittest.mock.patch("codemender_agent.runners.worker.create_pr_comment")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_duplicate_pr")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_finding_verified")
-  @unittest.mock.patch("codemender_agent.runners.worker.get_finding_status")
+  @unittest.mock.patch("runners.worker.run_command")
+  @unittest.mock.patch("runners.worker.download_from_url")
+  @unittest.mock.patch("runners.worker.upload_to_url")
+  @unittest.mock.patch("runners.worker.check_remote_branch_exists")
+  @unittest.mock.patch("runners.worker.push_branch_to_remote")
+  @unittest.mock.patch("runners.worker.create_pull_request")
+  @unittest.mock.patch("runners.worker.create_pr_comment")
+  @unittest.mock.patch("runners.worker.is_duplicate_pr")
+  @unittest.mock.patch("runners.worker.is_finding_verified")
+  @unittest.mock.patch("runners.worker.get_finding_status")
   @unittest.mock.patch("tarfile.open")
   @unittest.mock.patch("shutil.which")
   def test_worker_pipeline_child_pr_and_fork_comment(
@@ -566,16 +569,16 @@ class TestWorkerRunner(unittest.TestCase):
     self.assertNotIn("Parent PR", mock_create_pr.call_args.kwargs.get("body"))
     mock_create_comment.assert_not_called()
 
-  @unittest.mock.patch("codemender_agent.runners.worker.delete_remote_branch")
-  @unittest.mock.patch("codemender_agent.runners.worker.run_command")
-  @unittest.mock.patch("codemender_agent.runners.worker.download_from_url")
-  @unittest.mock.patch("codemender_agent.runners.worker.upload_to_url")
-  @unittest.mock.patch("codemender_agent.runners.worker.check_remote_branch_exists")
-  @unittest.mock.patch("codemender_agent.runners.worker.push_branch_to_remote")
-  @unittest.mock.patch("codemender_agent.runners.worker.create_pull_request")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_duplicate_pr")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_finding_verified")
-  @unittest.mock.patch("codemender_agent.runners.worker.get_finding_status")
+  @unittest.mock.patch("runners.worker.delete_remote_branch")
+  @unittest.mock.patch("runners.worker.run_command")
+  @unittest.mock.patch("runners.worker.download_from_url")
+  @unittest.mock.patch("runners.worker.upload_to_url")
+  @unittest.mock.patch("runners.worker.check_remote_branch_exists")
+  @unittest.mock.patch("runners.worker.push_branch_to_remote")
+  @unittest.mock.patch("runners.worker.create_pull_request")
+  @unittest.mock.patch("runners.worker.is_duplicate_pr")
+  @unittest.mock.patch("runners.worker.is_finding_verified")
+  @unittest.mock.patch("runners.worker.get_finding_status")
   @unittest.mock.patch("tarfile.open")
   @unittest.mock.patch("shutil.which")
   def test_worker_pipeline_pr_creation_failure_rolls_back_branch(
@@ -650,13 +653,13 @@ class TestWorkerRunner(unittest.TestCase):
     mock_create_pr.assert_called_once()
     mock_delete_branch.assert_called_once()
 
-  @unittest.mock.patch("codemender_agent.runners.worker.run_command")
-  @unittest.mock.patch("codemender_agent.runners.worker.check_remote_branch_exists")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_duplicate_pr")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_finding_verified")
-  @unittest.mock.patch("codemender_agent.runners.worker.get_finding_status")
-  @unittest.mock.patch("codemender_agent.runners.worker.create_pull_request")
-  @unittest.mock.patch("codemender_agent.runners.worker.push_branch_to_remote")
+  @unittest.mock.patch("runners.worker.run_command")
+  @unittest.mock.patch("runners.worker.check_remote_branch_exists")
+  @unittest.mock.patch("runners.worker.is_duplicate_pr")
+  @unittest.mock.patch("runners.worker.is_finding_verified")
+  @unittest.mock.patch("runners.worker.get_finding_status")
+  @unittest.mock.patch("runners.worker.create_pull_request")
+  @unittest.mock.patch("runners.worker.push_branch_to_remote")
   def test_worker_staging_filters_exploit_files(
       self,
       _mock_push,
@@ -769,13 +772,13 @@ class TestWorkerRunner(unittest.TestCase):
         self.assertNotIn(".exploit", arg)
     self.assertEqual(git_add_calls[0], ["git", "add", "routes/userProfile.ts"])
 
-  @unittest.mock.patch("codemender_agent.runners.worker.run_command")
-  @unittest.mock.patch("codemender_agent.runners.worker.check_remote_branch_exists")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_duplicate_pr")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_finding_verified")
-  @unittest.mock.patch("codemender_agent.runners.worker.get_finding_status")
-  @unittest.mock.patch("codemender_agent.runners.worker.create_pull_request")
-  @unittest.mock.patch("codemender_agent.runners.worker.push_branch_to_remote")
+  @unittest.mock.patch("runners.worker.run_command")
+  @unittest.mock.patch("runners.worker.check_remote_branch_exists")
+  @unittest.mock.patch("runners.worker.is_duplicate_pr")
+  @unittest.mock.patch("runners.worker.is_finding_verified")
+  @unittest.mock.patch("runners.worker.get_finding_status")
+  @unittest.mock.patch("runners.worker.create_pull_request")
+  @unittest.mock.patch("runners.worker.push_branch_to_remote")
   def test_worker_staging_fallback_on_error(
       self,
       _mock_push,
@@ -871,13 +874,13 @@ class TestWorkerRunner(unittest.TestCase):
 
     mock_create_pr.assert_called_once()
 
-  @unittest.mock.patch("codemender_agent.runners.worker.run_command")
-  @unittest.mock.patch("codemender_agent.runners.worker.check_remote_branch_exists")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_duplicate_pr")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_finding_verified")
-  @unittest.mock.patch("codemender_agent.runners.worker.get_finding_status")
-  @unittest.mock.patch("codemender_agent.runners.worker.create_pull_request")
-  @unittest.mock.patch("codemender_agent.runners.worker.push_branch_to_remote")
+  @unittest.mock.patch("runners.worker.run_command")
+  @unittest.mock.patch("runners.worker.check_remote_branch_exists")
+  @unittest.mock.patch("runners.worker.is_duplicate_pr")
+  @unittest.mock.patch("runners.worker.is_finding_verified")
+  @unittest.mock.patch("runners.worker.get_finding_status")
+  @unittest.mock.patch("runners.worker.create_pull_request")
+  @unittest.mock.patch("runners.worker.push_branch_to_remote")
   def test_process_finding_skips_verify_when_configured(
       self,
       _mock_push,
@@ -951,13 +954,13 @@ class TestWorkerRunner(unittest.TestCase):
     ]
     self.assertEqual(len(verify_calls), 0)
 
-  @unittest.mock.patch("codemender_agent.runners.worker.run_command")
-  @unittest.mock.patch("codemender_agent.runners.worker.check_remote_branch_exists")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_duplicate_pr")
-  @unittest.mock.patch("codemender_agent.runners.worker.is_finding_verified")
-  @unittest.mock.patch("codemender_agent.runners.worker.get_finding_status")
-  @unittest.mock.patch("codemender_agent.runners.worker.create_pull_request")
-  @unittest.mock.patch("codemender_agent.runners.worker.push_branch_to_remote")
+  @unittest.mock.patch("runners.worker.run_command")
+  @unittest.mock.patch("runners.worker.check_remote_branch_exists")
+  @unittest.mock.patch("runners.worker.is_duplicate_pr")
+  @unittest.mock.patch("runners.worker.is_finding_verified")
+  @unittest.mock.patch("runners.worker.get_finding_status")
+  @unittest.mock.patch("runners.worker.create_pull_request")
+  @unittest.mock.patch("runners.worker.push_branch_to_remote")
   def test_process_finding_runs_verify_when_skip_verify_false(
       self,
       _mock_push,

@@ -5,9 +5,8 @@ on:
     branches:
       - main
     paths:
-      - 'Dockerfile'
-      - 'codemender_agent/**'
-      - 'requirements.txt'
+      - 'codemender-runner/**'
+      - '.github/workflows/build_runner_image.yml'
     tags:
       - 'v*'
   workflow_dispatch:
@@ -54,24 +53,28 @@ jobs:
           if [ -n "$CM_CUSTOM_URL" ]; then
             echo "Downloading custom cm binary from $CM_CUSTOM_URL..."
             curl -fsSL -o cm-custom.zip "$CM_CUSTOM_URL"
-            unzip -q -o cm-custom.zip cm || cp cm-custom.zip cm
-            chmod +x cm
+            unzip -q -o cm-custom.zip cm -d codemender-runner/ || cp cm-custom.zip codemender-runner/cm
+            chmod +x codemender-runner/cm
+          elif [ -f "./codemender-runner/cm" ]; then
+            echo "Using local cm binary present in codemender-runner/ build context."
+            chmod +x codemender-runner/cm
           elif [ -f "./cm" ]; then
-            echo "Using local cm binary present in build context."
-            chmod +x cm
+            echo "Copying local cm binary into codemender-runner/ build context."
+            cp ./cm codemender-runner/cm
+            chmod +x codemender-runner/cm
           else
             VERSION="$CM_VERSION"
             echo "Downloading CodeMender CLI version: ${VERSION} from Artifact Registry..."
             URL="https://artifactregistry.googleapis.com/download/v1/projects/cmoc-prod/locations/us/repositories/codemender-cli-production/files/cm%3A${VERSION}%3Acm-linux-amd64.zip:download?alt=media"
             curl -fsSL -o cm-linux-amd64.zip "$URL"
-            unzip -q -o cm-linux-amd64.zip cm
-            chmod +x cm
+            unzip -q -o cm-linux-amd64.zip cm -d codemender-runner/
+            chmod +x codemender-runner/cm
           fi
 
       - name: Build and Push Runner Image
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
-          context: .
+          context: codemender-runner
           push: true
           provenance: false
           tags: |

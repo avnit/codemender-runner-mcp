@@ -26,30 +26,30 @@ import tarfile
 import time
 from typing import Optional, Set
 
-from codemender_agent.codemender.cli import log_cm_version
-from codemender_agent.config import OrchestratorConfig
-from codemender_agent.config import PR_MODE_REVIEW_SUGGESTION
-from codemender_agent.config import get_github_credentials
-from codemender_agent.config import get_scrubbed_env
-from codemender_agent.config import inject_codemender_config
-from codemender_agent.config import resolve_pr_remediation_mode
-from codemender_agent.storage import download_file_from_gcs
-from codemender_agent.storage import get_storage_adapter
-from codemender_agent.storage import list_gcs_blobs
-from codemender_agent.storage import upload_and_sign_report
-from codemender_agent.utils import accumulate_model_token_usage
-from codemender_agent.utils import build_cm_command
-from codemender_agent.utils import extract_json_from_output
-from codemender_agent.utils import render_token_usage_markdown
-from codemender_agent.utils import run_command
-from codemender_agent.vcs.git import get_git_auth_header
-from codemender_agent.vcs.git import normalize_repo_relative_path
-from codemender_agent.vcs.git import parse_repo_owner_and_name
-from codemender_agent.vcs.git import sanitize_git_url
-from codemender_agent.vcs.git import setup_local_git_excludes
-from codemender_agent.vcs.github import get_default_branch
-from codemender_agent.vcs.github import post_commit_status
-from codemender_agent.vcs.github import post_or_update_sticky_comment
+from codemender.cli import log_cm_version
+from config import OrchestratorConfig
+from config import PR_MODE_REVIEW_SUGGESTION
+from config import get_github_credentials
+from config import get_scrubbed_env
+from config import inject_codemender_config
+from config import resolve_pr_remediation_mode
+from storage import download_file_from_gcs
+from storage import get_storage_adapter
+from storage import list_gcs_blobs
+from storage import upload_and_sign_report
+from utils import accumulate_model_token_usage
+from utils import build_cm_command
+from utils import extract_json_from_output
+from utils import render_token_usage_markdown
+from utils import run_command
+from vcs.git import get_git_auth_header
+from vcs.git import normalize_repo_relative_path
+from vcs.git import parse_repo_owner_and_name
+from vcs.git import sanitize_git_url
+from vcs.git import setup_local_git_excludes
+from vcs.github import get_default_branch
+from vcs.github import post_commit_status
+from vcs.github import post_or_update_sticky_comment
 
 logger = logging.getLogger("codemender-orchestrator")
 

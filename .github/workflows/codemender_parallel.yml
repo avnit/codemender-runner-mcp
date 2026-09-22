@@ -189,7 +189,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.custom_github_token || secrets.GITHUB_TOKEN || github.token }}
           GITHUB_REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
           WORKSPACE_DIR: ${{ github.workspace }}
-        run: /opt/codemender/venv/bin/python3 /opt/codemender/orchestrator.py
+        run: /opt/codemender/venv/bin/python3 /opt/codemender/codemender-runner/main.py
 
       - name: Upload Base State Artifact
         if: ${{ steps.run-scan.outputs.findings_count != '0' && steps.run-scan.outputs.findings_count != '' }}
@@ -287,7 +287,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.custom_github_token || secrets.GITHUB_TOKEN || github.token }}
           GITHUB_REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
           WORKSPACE_DIR: ${{ github.workspace }}
-        run: /opt/codemender/venv/bin/python3 /opt/codemender/orchestrator.py
+        run: /opt/codemender/venv/bin/python3 /opt/codemender/codemender-runner/main.py
 
       - name: Upload Worker Shard Artifact
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
@@ -376,7 +376,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.custom_github_token || secrets.GITHUB_TOKEN || github.token }}
           GITHUB_REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
           WORKSPACE_DIR: ${{ github.workspace }}
-        run: /opt/codemender/venv/bin/python3 /opt/codemender/orchestrator.py
+        run: /opt/codemender/venv/bin/python3 /opt/codemender/codemender-runner/main.py
 
       - name: Upload SARIF Report
         if: always() && inputs.upload_sarif && hashFiles('report.sarif') != ''

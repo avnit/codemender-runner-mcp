@@ -23,7 +23,7 @@ import re
 import shutil
 from typing import Any, List, Optional, Tuple
 
-from codemender_agent.utils import retry_on_exception
+from utils import retry_on_exception
 
 logger = logging.getLogger("codemender-orchestrator")
 
@@ -138,7 +138,7 @@ def clean_workspace(repo_dir: str, exclude_dirs: Optional[Tuple[str, ...]] = Non
   for ex in exclude_dirs:
     cmd.extend(["-e", ex])
 
-  from codemender_agent.utils import run_command
+  from utils import run_command
   run_command(cmd, cwd=repo_dir, check=False)
 
 
@@ -225,7 +225,7 @@ def filter_stageable_files(
     return []
 
   # Check against git ignore rules (.gitignore and .git/info/exclude)
-  from codemender_agent.utils import run_command
+  from utils import run_command
 
   try:
     check_res = run_command(
@@ -298,7 +298,7 @@ def get_pr_changed_lines(repo_dir: str, base_ref: str) -> Optional[dict[str, set
     Dict mapping repository-relative file paths to sets of 1-based modified line numbers,
     or None if git diff execution failed across all candidate targets.
   """
-  from codemender_agent.utils import run_command
+  from utils import run_command
 
   clean_base = base_ref.strip()
   if clean_base.startswith("refs/heads/"):
@@ -364,12 +364,12 @@ class SuggestionHunk:
 
 
 _HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
-_DIFF_GIT_RE = re.compile(r"^diff --git a/(.+?) b/(.+)$")
+_DIFF_GIT_RE = re.compile(r"^diff --git (?:[abciwo]/)?(.+?) (?:[abciwo]/)?(.+)$")
 
 
 def _read_head_file_lines(repo_dir: str, path: str) -> Optional[List[str]]:
   """Reads a file's contents at HEAD (the PR head commit), bypassing the mutated working tree."""
-  from codemender_agent.utils import run_command
+  from utils import run_command
 
   try:
     res = run_command(
@@ -573,5 +573,5 @@ def push_branch_to_remote(
   if force:
     push_cmd.append("-f")
   push_cmd.extend(["origin", branch_name])
-  from codemender_agent.utils import run_command
+  from utils import run_command
   run_command(push_cmd, cwd=repo_dir, check=True)

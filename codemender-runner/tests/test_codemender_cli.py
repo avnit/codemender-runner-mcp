@@ -12,12 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for codemender_agent.codemender.cli module."""
+"""Unit tests for codemender.cli module."""
 
+import os
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-from codemender_agent.codemender.cli import (
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from codemender.cli import (
     extract_session_id,
     log_cm_version,
     parse_findings_json,
@@ -122,7 +126,7 @@ class TestCodeMenderCli(unittest.TestCase):
     self.assertEqual(findings[0]["FindingID"], "pascal-wins")
     self.assertEqual(findings[0]["finding_id"], "snake-loses")
 
-  @patch("codemender_agent.codemender.cli.run_command")
+  @patch("codemender.cli.run_command")
   def test_log_cm_version_success(self, mock_run_cmd):
     """Verify log_cm_version logs and returns version string on success."""
     mock_run_cmd.return_value = MagicMock(
@@ -140,7 +144,7 @@ class TestCodeMenderCli(unittest.TestCase):
         capture_stderr=True,
     )
 
-  @patch("codemender_agent.codemender.cli.run_command")
+  @patch("codemender.cli.run_command")
   def test_log_cm_version_failure(self, mock_run_cmd):
     """Verify log_cm_version handles command error gracefully."""
     mock_run_cmd.return_value = MagicMock(
@@ -151,7 +155,7 @@ class TestCodeMenderCli(unittest.TestCase):
     version = log_cm_version("cm")
     self.assertIsNone(version)
 
-  @patch("codemender_agent.codemender.cli.run_command")
+  @patch("codemender.cli.run_command")
   def test_log_cm_version_exception(self, mock_run_cmd):
     """Verify log_cm_version handles execution exceptions gracefully."""
     mock_run_cmd.side_effect = RuntimeError("Execution failed")
