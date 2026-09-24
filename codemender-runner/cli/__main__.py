@@ -1,0 +1,164 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Entrypoint for the cm-runner command-line interface.
+
+Run as:  python -m cli <command> [flags]
+
+This module must not import `main.py`. That module configures logging to
+**stdout** at import time, which would put log lines into the NDJSON event
+stream on stdout and break the output contract.
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+from typing import List, Optional
+
+from cli import exit_codes
+from cli.events import EventEmitter
+from cli.events import JSON
+from cli.events import TEXT
+
+_LOG_LEVELS = ("debug", "info", "warning", "error")
+
+
+def configure_logging(level: str) -> None:
+  """Routes all logging to stderr.
+
+  `force=True` tears down any handler a transitively imported module may have
+  installed. This is deliberate belt-and-braces: the repo's `main.py` attaches
+  a stdout handler at import time, and if it ever reaches us indirectly, a
+  single stray log line would corrupt the event stream.
+
+  Args:
+    level: One of _LOG_LEVELS, case-insensitive.
+  """
+  logging.basicConfig(
+      level=getattr(logging, level.upper(), logging.INFO),
+      format="%(asctime)s [%(levelname)s] %(message)s",
+      handlers=[logging.StreamHandler(sys.stderr)],
+      force=True,
+  )
+
+
+def _global_flags() -> argparse.ArgumentParser:
+  """Builds the flags shared by the root parser and every subcommand.
+
+  Attaching these to both means `cm-runner --output text version` and
+  `cm-runner version --output text` both work. argparse would otherwise only
+  accept the first form, and the second is what people actually type.
+
+  Every flag uses `default=argparse.SUPPRESS`. Without it, the subparser's
+  defaults silently overwrite whatever the root parser already parsed, so
+  `--output text version` would quietly emit JSON -- the flag accepted and
+  ignored, which is worse than rejecting it. SUPPRESS means the attribute is
+  only set when the user actually passes the flag; `_apply_defaults` fills in
+  the rest afterwards.
+  """
+  common = argparse.ArgumentParser(add_help=False)
+  common.add_argument(
+      "--output",
+      choices=[JSON, TEXT],
+      default=argparse.SUPPRESS,
+      help=f"stdout format (default: {JSON})",
+  )
+  common.add_argument(
+      "--cm-binary",
+      default=argparse.SUPPRESS,
+      metavar="PATH",
+      help="path to the cm executable (default: first 'cm' on PATH)",
+  )
+  common.add_argument(
+      "--log-level",
+      choices=_LOG_LEVELS,
+      default=argparse.SUPPRESS,
+      help="stderr log verbosity (default: info)",
+  )
+  return common
+
+
+# Applied after parsing, because the flags above use SUPPRESS.
+_DEFAULTS = {
+    "output": JSON,
+    "cm_binary": None,
+    "log_level": "info",
+}
+
+
+def _apply_defaults(args: argparse.Namespace) -> argparse.Namespace:
+  """Fills in any global flag the user did not supply."""
+  for name, value in _DEFAULTS.items():
+    if not hasattr(args, name):
+      setattr(args, name, value)
+  return args
+
+
+def build_parser() -> argparse.ArgumentParser:
+  """Constructs the argument parser for cm-runner."""
+  common = _global_flags()
+
+  parser = argparse.ArgumentParser(
+      prog="cm-runner",
+      parents=[common],
+      description=(
+          "Command-line interface to the CodeMender orchestrator. "
+          "Emits NDJSON on stdout; all logging goes to stderr."
+      ),
+  )
+
+  subparsers = parser.add_subparsers(dest="command", metavar="<command>")
+  subparsers.add_parser(
+      "version",
+      parents=[common],
+      help="report orchestrator, cm, and contract versions",
+      description="Report orchestrator, cm, and contract versions.",
+  )
+  return parser
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+  """Parses arguments and dispatches to a subcommand.
+
+  Args:
+    argv: Argument vector excluding the program name. Defaults to sys.argv[1:].
+
+  Returns:
+    A process exit code from `cli.exit_codes`.
+  """
+  parser = build_parser()
+  args = _apply_defaults(parser.parse_args(sys.argv[1:] if argv is None else argv))
+
+  configure_logging(args.log_level)
+
+  if not args.command:
+    # No subcommand: usage goes to stderr so stdout stays clean even here.
+    parser.print_help(sys.stderr)
+    return exit_codes.USAGE
+
+  emitter = EventEmitter(stream=sys.stdout, output_format=args.output)
+
+  if args.command == "version":
+    from cli.commands import version
+
+    return version.run(args, emitter)
+
+  parser.print_help(sys.stderr)
+  return exit_codes.USAGE
+
+
+if __name__ == "__main__":
+  sys.exit(main())
