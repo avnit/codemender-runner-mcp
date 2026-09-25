@@ -369,6 +369,12 @@ class TestVersionParsing(unittest.TestCase):
   def test_bare_version_passes_through(self):
     self.assertEqual(_normalise_version("0.9.0"), "0.9.0")
 
+  def test_multiline_version_output(self):
+    self.assertEqual(
+        _normalise_version("cm version 0.9.0\nbuilt by Jim Meyering\n"),
+        "0.9.0",
+    )
+
   def test_empty_and_none_yield_none(self):
     self.assertIsNone(_normalise_version(""))
     self.assertIsNone(_normalise_version("   "))

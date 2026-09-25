@@ -18,8 +18,9 @@ The output contract, which every command must honour:
 
   1. stdout carries NDJSON and nothing else. One JSON object per line.
   2. Every human-readable word -- logs, progress, diagnostics -- goes to stderr.
-  3. The last line of any run is exactly one `result` event, on every exit
-     path, so a consumer can `tail -1` to learn the outcome.
+  3. Each command emits one event type, so every stdout line is one unit of
+     work. There is no trailing summary event: success or failure comes from
+     the exit code, and error messages go to stderr.
   4. `--output text` swaps only the renderer. The underlying events are
      identical.
 
@@ -68,7 +69,7 @@ class EventEmitter:
     """Writes a single event and returns the payload that was written.
 
     Args:
-      event: The event type, e.g. "version", "check", "result".
+      event: The event type, e.g. "version", "check", "finding".
       **fields: Arbitrary event-specific data.
 
     Returns:

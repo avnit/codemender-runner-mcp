@@ -58,7 +58,15 @@ def _normalise_version(raw: Optional[str]) -> Optional[str]:
   """
   if not raw:
     return None
-  parts = raw.strip().split()
+  lines = [line.strip() for line in raw.splitlines() if line.strip()]
+  if not lines:
+    return None
+  for line in lines:
+    if "version" in line.lower():
+      parts = line.split()
+      if parts:
+        return parts[-1]
+  parts = lines[0].split()
   return parts[-1] if parts else None
 
 
