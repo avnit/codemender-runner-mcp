@@ -13,38 +13,23 @@
 # limitations under the License.
 
 steps:
-  # Step 1: Download the latest stable cm binary from official Google Artifact Registry
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        gcloud artifacts generic download \
-          --project=cmoc-prod \
-          --location=us \
-          --repository=codemender-cli-production \
-          --package=cm \
-          --version=stable \
-          --name=cm-linux-amd64.zip \
-          --destination=./
-        python3 -m zipfile -e cm-linux-amd64.zip codemender-runner/
-        chmod +x codemender-runner/cm
-
-  # Step 2: Build the container image
+  # Step 1: Build the container image
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
+      - '--build-arg'
+      - 'CM_VERSION=${_CM_VERSION}'
       - '-t'
       - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/orchestrator:latest'
       - 'codemender-runner'
 
-  # Step 3: Push the container image to Artifact Registry
+  # Step 2: Push the container image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
       - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/orchestrator:latest'
 
-  # Step 4: Update the runner Cloud Run Job with the newly pushed image
+  # Step 3: Update the runner Cloud Run Job with the newly pushed image
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
     args:
@@ -57,7 +42,7 @@ steps:
       - '--region'
       - '${_REGION}'
 
-  # Step 5: Update the worker Cloud Run Job with the newly pushed image
+  # Step 4: Update the worker Cloud Run Job with the newly pushed image
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
@@ -72,3 +57,4 @@ steps:
 substitutions:
   _REPO_NAME: 'codemender-runner'
   _REGION: 'us-central1'
+  _CM_VERSION: '0.9.0'

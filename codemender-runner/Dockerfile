@@ -15,71 +15,57 @@
 # CodeMender Orchestrator - Universal Multi-Toolchain Base Container for GitHub Actions and Cloud Run
 FROM ubuntu:22.04
 
-ENV DEBIAN_FRONTEND=noninteractive
+ARG GO_VERSION=1.22.6
+ARG CM_VERSION=0.9.0
+ARG CM_URL=""
 
-# Install core utilities and build essentials
+ENV DEBIAN_FRONTEND=noninteractive \
+    VIRTUAL_ENV=/opt/codemender/venv \
+    PATH="/opt/codemender/venv/bin:/usr/local/go/bin:${PATH}" \
+    PYTHONPATH=/opt/codemender/codemender-runner
+
+# 1. Consolidated multi-toolchain install (Python 3.11, Node.js 22, Java 17, and base build tools)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    curl \
-    jq \
-    tar \
-    gzip \
-    unzip \
-    psmisc \
-    ca-certificates \
-    build-essential \
-    software-properties-common \
-    gnupg \
-    dirmngr \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
-
-# Install Python 3.11 and venv
-RUN add-apt-repository ppa:deadsnakes/ppa -y && \
-    apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 \
-    python3.11-venv \
-    python3.11-dev \
-    python3-pip \
-    python-is-python3 \
+        ca-certificates curl gnupg software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa -y \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends \
+        build-essential dirmngr git gzip jq psmisc tar unzip \
+        python3.11 python3.11-dev python3.11-venv python3-pip python-is-python3 \
+        nodejs \
+        openjdk-17-jdk maven gradle \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+    && npm install -g yarn pnpm \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /root/.npm
 
-# Install Node.js 22 LTS, npm, yarn, pnpm
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
-    npm install -g yarn pnpm && \
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+# 2. Go Toolchain
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" | tar -C /usr/local -xz
 
-# Install Go (latest stable)
-RUN curl -fsSL https://go.dev/dl/go1.22.6.linux-amd64.tar.gz | tar -C /usr/local -xz
-ENV PATH="/usr/local/go/bin:${PATH}"
+# 3. CodeMender CLI binary
+RUN set -eu && \
+    URL="${CM_URL:-https://artifactregistry.googleapis.com/download/v1/projects/cmoc-prod/locations/us/repositories/codemender-cli-production/files/cm%3A${CM_VERSION}%3Acm-linux-amd64.zip:download?alt=media}" && \
+    echo "Downloading CodeMender CLI from ${URL}..." && \
+    curl -fsSL -o /tmp/cm.bin "${URL}" && \
+    if unzip -q -o /tmp/cm.bin cm -d /usr/local/bin/ 2>/dev/null; then \
+        echo "Extracted cm from zip archive."; \
+    else \
+        mv /tmp/cm.bin /usr/local/bin/cm; \
+    fi && \
+    rm -f /tmp/cm.bin && \
+    chmod +x /usr/local/bin/cm
 
-# Install Java JDK 17, Maven, Gradle
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    openjdk-17-jdk \
-    maven \
-    gradle \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
-
-# Copy CodeMender CLI binary
-COPY cm /usr/local/bin/cm
-RUN chmod +x /usr/local/bin/cm
-
-# Set up isolated /opt/codemender runtime environment
+# 4. Isolated Python virtual environment (preserves layer caching for pip dependencies)
 WORKDIR /opt/codemender
-COPY requirements.txt .
+COPY requirements.txt ./
 RUN python3.11 -m venv /opt/codemender/venv && \
     /opt/codemender/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-# Copy orchestrator package and entrypoint script
-COPY codemender ./codemender-runner/codemender
-COPY runners ./codemender-runner/runners
-COPY vcs ./codemender-runner/vcs
-COPY *.py ./codemender-runner/
-RUN chmod +x /opt/codemender/codemender-runner/main.py && \
+# 5. Copy package and establish entrypoint symlinks
+COPY . ./codemender-runner/
+RUN chmod +x /opt/codemender/codemender-runner/bin/cm-runner && \
+    ln -s /opt/codemender/codemender-runner/bin/cm-runner /usr/local/bin/cm-runner && \
     ln -s /opt/codemender/codemender-runner/main.py /opt/codemender/orchestrator.py
 
-ENV PYTHONPATH=/opt/codemender/codemender-runner
-
-# Set entrypoint to isolated virtual environment python
-ENTRYPOINT ["/opt/codemender/venv/bin/python3", "/opt/codemender/codemender-runner/main.py"]
+# 6. Container contract
+ENTRYPOINT ["cm-runner"]
+CMD ["legacy"]

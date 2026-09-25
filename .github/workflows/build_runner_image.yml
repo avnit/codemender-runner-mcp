@@ -9,12 +9,16 @@ on:
       - '.github/workflows/build_runner_image.yml'
     tags:
       - 'v*'
+  pull_request:
+    paths:
+      - 'codemender-runner/**'
+      - '.github/workflows/build_runner_image.yml'
   workflow_dispatch:
     inputs:
       cm_version:
         description: 'Specific version/tag from Artifact Registry'
         required: false
-        default: 'stable'
+        default: '0.9.0'
         type: string
       cm_custom_url:
         description: 'Optional direct download URL for custom/rollback binary'
@@ -39,46 +43,42 @@ jobs:
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
 
       - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve CodeMender CLI Binary
-        env:
-          CM_CUSTOM_URL: ${{ inputs.cm_custom_url }}
-          CM_VERSION: ${{ inputs.cm_version || 'stable' }}
-        run: |
-          if [ -n "$CM_CUSTOM_URL" ]; then
-            echo "Downloading custom cm binary from $CM_CUSTOM_URL..."
-            curl -fsSL -o cm-custom.zip "$CM_CUSTOM_URL"
-            unzip -q -o cm-custom.zip cm -d codemender-runner/ || cp cm-custom.zip codemender-runner/cm
-            chmod +x codemender-runner/cm
-          elif [ -f "./codemender-runner/cm" ]; then
-            echo "Using local cm binary present in codemender-runner/ build context."
-            chmod +x codemender-runner/cm
-          elif [ -f "./cm" ]; then
-            echo "Copying local cm binary into codemender-runner/ build context."
-            cp ./cm codemender-runner/cm
-            chmod +x codemender-runner/cm
-          else
-            VERSION="$CM_VERSION"
-            echo "Downloading CodeMender CLI version: ${VERSION} from Artifact Registry..."
-            URL="https://artifactregistry.googleapis.com/download/v1/projects/cmoc-prod/locations/us/repositories/codemender-cli-production/files/cm%3A${VERSION}%3Acm-linux-amd64.zip:download?alt=media"
-            curl -fsSL -o cm-linux-amd64.zip "$URL"
-            unzip -q -o cm-linux-amd64.zip cm -d codemender-runner/
-            chmod +x codemender-runner/cm
-          fi
-
-      - name: Build and Push Runner Image
+      - name: Build Runner Image
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: codemender-runner
-          push: true
-          provenance: false
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/codemender-runner:latest
-            ghcr.io/${{ github.repository_owner }}/codemender-runner:${{ github.sha }}
+          load: true
+          tags: codemender-runner:test
+          build-args: |
+            CM_VERSION=${{ inputs.cm_version || '0.9.0' }}
+            CM_URL=${{ inputs.cm_custom_url || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify Image Contract
+        run: |
+          ENTRYPOINT=$(docker inspect --format='{{json .Config.Entrypoint}}' codemender-runner:test)
+          CMD=$(docker inspect --format='{{json .Config.Cmd}}' codemender-runner:test)
+          echo "Entrypoint: $ENTRYPOINT"
+          echo "Cmd: $CMD"
+          test "$ENTRYPOINT" = '["cm-runner"]'
+          test "$CMD" = '["legacy"]'
+
+      - name: Verify Version Command
+        run: |
+          docker run --rm codemender-runner:test version
+
+      - name: Push Runner Image
+        if: github.event_name != 'pull_request'
+        run: |
+          docker tag codemender-runner:test ghcr.io/${{ github.repository_owner }}/codemender-runner:latest
+          docker tag codemender-runner:test ghcr.io/${{ github.repository_owner }}/codemender-runner:${{ github.sha }}
+          docker push ghcr.io/${{ github.repository_owner }}/codemender-runner:latest
+          docker push ghcr.io/${{ github.repository_owner }}/codemender-runner:${{ github.sha }}

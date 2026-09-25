@@ -391,5 +391,105 @@ class TestExitCodes(unittest.TestCase):
     self.assertEqual(exit_codes.FAILED, 3)
 
 
+class TestCmRunnerScript(unittest.TestCase):
+  """Tests for the bin/cm-runner wrapper script."""
+
+  def setUp(self):
+    super().setUp()
+    self._script = os.path.join(_PKG_DIR, "bin", "cm-runner")
+
+  def test_script_exists_and_is_executable(self):
+    self.assertTrue(os.path.isfile(self._script))
+    self.assertTrue(os.access(self._script, os.X_OK))
+
+  def test_script_runs_version(self):
+    result = subprocess.run(
+        [self._script, "version"],
+        cwd=_PKG_DIR,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    self.assertEqual(result.returncode, exit_codes.OK, result.stderr)
+    payload = json.loads(result.stdout.strip())
+    self.assertEqual(payload["event"], "version")
+
+  def test_script_runs_legacy(self):
+    # Running legacy invokes main.py. Without env vars it exits with code 1.
+    result = subprocess.run(
+        [self._script, "legacy"],
+        cwd=_PKG_DIR,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    self.assertEqual(result.returncode, 1)
+    self.assertIn("GITHUB_REPO_URL is required", result.stderr)
+
+  def test_script_exit_code_propagation(self):
+    result = subprocess.run(
+        [self._script, "--nonexistent-option"],
+        cwd=_PKG_DIR,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    self.assertEqual(result.returncode, exit_codes.USAGE)
+
+  def test_script_respects_cm_runner_python(self):
+    env = dict(os.environ)
+    env["CM_RUNNER_PYTHON"] = "/nonexistent/custom/python"
+    result = subprocess.run(
+        [self._script, "version"],
+        cwd=_PKG_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    self.assertEqual(result.returncode, 127)
+
+
+class TestPackageDirectoryExecution(unittest.TestCase):
+  """Tests for running the codemender-runner package directory directly via python3."""
+
+  def test_package_directory_runs_version(self):
+    result = subprocess.run(
+        [sys.executable, _PKG_DIR, "version"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    self.assertEqual(result.returncode, exit_codes.OK, result.stderr)
+    payload = json.loads(result.stdout.strip())
+    self.assertEqual(payload["event"], "version")
+
+  def test_package_directory_runs_legacy(self):
+    result = subprocess.run(
+        [sys.executable, _PKG_DIR, "legacy"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    self.assertEqual(result.returncode, 1)
+    self.assertIn("GITHUB_REPO_URL is required", result.stderr)
+
+  def test_package_directory_usage_on_missing_command(self):
+    result = subprocess.run(
+        [sys.executable, _PKG_DIR],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    self.assertEqual(result.returncode, exit_codes.USAGE)
+
+
 if __name__ == "__main__":
   unittest.main()

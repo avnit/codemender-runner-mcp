@@ -1,3 +1,7 @@
+# Build definitions
+Dockerfile
+.dockerignore
+
 # Git and CI/CD metadata
 .git/
 .github/
