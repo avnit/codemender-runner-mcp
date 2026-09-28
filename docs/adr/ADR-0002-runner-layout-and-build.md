@@ -1,6 +1,6 @@
 # ADR-0002: Runner Layout, Build, and How to Call It
 
-*   **Status:** proposed
+*   **Status:** accepted
 *   **Date:** 2026-09-25
 *   **Decision Makers:** nasirmohammad@google.com, yileil@google.com
 
@@ -71,11 +71,12 @@ $ cm-runner version
 | `cli/` | Command layer. Reads flags, formats events, writes JSON to stdout, sets the exit code. | Never starts a process itself. |
 | `cli/commands/<name>.py` | One file per command. | Thin. |
 | `codemender/` | Abstraction layer for interacting directly with the `cm` binary (argument building, invocation, error extraction). | The only module that executes `cm`. Takes settings as arguments, not environment variables. |
+| `codemender/cm.py` | `CmAdapter`: runs `cm` and returns a `CmResult`. Also the legacy pipeline's `cm` helpers. | New commands run `cm` only through `CmAdapter`. |
 | `codemender/db.py` | Reads `cm`'s state database. | Unchanged. |
 | `vcs/git.py` | `git` helpers. | New commands may use the local helpers, not `push_branch_to_remote`. |
 | `vcs/github.py` | GitHub API. | Legacy only. Posting to the repo host is the CI job's work. |
 | `storage.py` | Cloud and local storage helpers. | Clean. |
-| `utils.py` | Legacy shared helpers, including `run_command`. | Transitional. New code must not add helpers here. |
+| `utils.py` | Legacy shared helpers, including `run_command`. | Legacy only, left untouched. New code must not import it or add to it. |
 | `config.py`, `main.py`, `runners/` | Legacy pipeline. | Kept working, not extended. |
 | `__main__.py` | Package execution entry point. Dispatches between legacy pipeline and new CLI subcommands. | Native Python entrypoint; enables running with `python3 codemender-runner <command>`. |
 | `bin/cm-runner` | Thin launcher for `$PATH` convenience in container / CI. | Simple wrapper delegating to `python3 <pkg>`; will be superseded by `pyproject.toml` console scripts. |
@@ -84,19 +85,27 @@ $ cm-runner version
     `cm` calls stay. It will be replaced by the new commands, not upgraded.
 *   **Codemender abstraction.** Direct interaction with the `cm` binary is isolated in
     `codemender/` (the existing `codemender/cli.py` is renamed `cm.py` to avoid name collision
-    with the `cli/` package, and unused adapter classes are removed).
-*   **No new utilities in `utils.py` ([go/no-utils](http://goto.google.com/no-utils)).** `utils.py` is existing legacy debt.
-    New code must not add generic utility functions here. Subprocess execution (`run_command`)
-    will be migrated into a dedicated process execution module as the legacy pipeline is retired.
-*   **Keeping stdout clean.** `utils.run_command` gets a process-wide setting
-    for where child output goes. It stays `stdout` for the legacy pipeline.
-    `cli/__main__.py` switches it to `stderr` at startup, so every helper a
-    `cli/` command calls writes to stderr.
+    with the `cli/` package). Its old, unused adapter class becomes `CmAdapter`.
+    `CmAdapter` starts `cm` itself, with closed stdin, output captured, stdout and
+    stderr kept apart, and an optional timeout. It never raises for a `cm` failure.
+    It returns a `CmResult` this repo owns: exit code, stdout, stderr, token counts,
+    and why `cm` did not finish, if it didn't. Callers depend on `CmResult`, not on
+    `subprocess`, so the way `cm` is run can change behind it.
+*   **Legacy `utils.py` is left untouched ([go/no-utils](http://goto.google.com/no-utils)).**
+    New code does not import it or add to it. The new path needs no generic
+    process helper: `cm` runs through `CmAdapter`, and `git` through `vcs/git.py`.
+    The legacy helpers in `codemender/cm.py` import `utils` inside the function,
+    so importing `CmAdapter` does not load `utils` or `requests`.
+*   **Keeping stdout clean.** `cli/__main__.py` gives the event writer the real
+    stdout, then runs the command with Python's `sys.stdout` pointed at stderr.
+    Any helper a command calls that prints to stdout, such as `utils.run_command`
+    reached through `vcs/git.py`, therefore writes to stderr. Stdout is restored
+    when the command returns.
 
 This changes one rule in ADR-0001: *"CLI subcommands cannot use
-`utils.run_command`"* becomes *"`cli/` switches `run_command` output to stderr
-at startup. New code starts `cm` only through `codemender/`, and other
-programs through `vcs/git.py` or `utils.run_command`."*
+`utils.run_command`"* becomes *"`cli/` sends stray stdout writes to stderr
+while a command runs. New code starts `cm` only through `codemender.cm.CmAdapter`,
+and `git` only through `vcs/git.py`."*
 
 ### How it is built and run
 
@@ -135,19 +144,32 @@ programs through `vcs/git.py` or `utils.run_command`."*
 *   Good, because stdout stays clean for any helper a `cli/` command calls,
     without every author having to remember ADR-0001.
 *   Bad, because two entry points coexist until the legacy pipeline is retired.
-*   Bad, because the stdout/stderr switch is global state, so tests must reset
-    it.
+*   Bad, because the stdout redirect only catches writes made through Python's
+    `sys.stdout`. A child process that inherits the runner's stdout would
+    bypass it. `CmAdapter` captures `cm`'s output, `utils.run_command` pipes
+    its child's output, and the AST check keeps `subprocess` out of `cli/`.
+*   Bad, because the legacy helpers in `codemender/cm.py` import `utils`
+    inside the function rather than at the top of the file.
 *   Bad, because `CM_VERSION` is bumped by hand.
 
 ### Confirmation
 
-*   **Unit tests** (in `ci.yml`, on every pull request):
-    *   An AST check fails if any `cli/` module imports `subprocess` or
+*   **Unit tests** (`python3 -m unittest discover -s codemender-runner/tests -t codemender-runner`).
+    `ci.yml` does not run them yet; it will on every pull request once the CI
+    change lands. Until then they are run locally before review:
+    *   An AST check fails if any `cli/` module imports `subprocess`, `utils`, or
         `vcs.github`, or calls `run_command`, `build_cm_command`, or
         `push_branch_to_remote` directly.
-    *   A `cli/` command that calls a `vcs/git.py` helper against a fake `git`
-        leaves stdout as JSON only.
-    *   `TestStdoutPurity` and `TestImportIsolation` still pass.
+    *   Through the real `cli/` entry point, a command that calls a
+        `vcs/git.py` helper against a noisy fake `git`, then prints, leaves
+        stdout as JSON only, and stdout is restored afterwards.
+    *   `CmAdapter`, run against real stub binaries, keeps stdout and stderr
+        apart, stops a hung `cm` at the timeout, closes stdin, parses token
+        counts, and returns a `CmResult` instead of raising. Importing it loads
+        no `utils` or `requests`.
+    *   `TestStdoutPurity` and `TestImportIsolation` still pass. The latter also
+        checks that `version` loads no `utils` and no package from
+        `requirements.txt`, so it works before dependencies are installed.
 *   **Image checks** (in `build_runner_image.yml`, on pull requests):
     *   A clean-checkout build succeeds.
     *   `docker run <image> version` prints one JSON line and exits `0`.
@@ -163,8 +185,8 @@ programs through `vcs/git.py` or `utils.run_command`."*
 
 ### One job per folder; new `cm` calls only through `codemender/cm.py`
 
-*   Good, because the diff is small: one rename, one switch in `run_command`,
-    and Dockerfile changes.
+*   Good, because the diff is small: one rename, `CmAdapter` for new `cm`
+    calls, a stdout redirect in `cli/__main__.py`, and Dockerfile changes.
 *   Good, because no existing pipeline, path, or log changes.
 *   Bad, because the legacy pipeline keeps its own 17 `cm` calls and gets none
     of the improvements.
@@ -188,20 +210,24 @@ flowchart TD
     entry["codemender-runner/__main__.py"]
     cli["cli/ (new commands)"]
     legacy["main.py + runners/ (legacy)"]
-    cm_layer["codemender/"]
+    cm_layer["codemender/cm.py (legacy helpers)"]
     git["vcs/git.py (local git helpers)"]
     github["vcs/github.py (GitHub API)"]
-    utils["utils.run_command"]
+    adapter["codemender.cm.CmAdapter"]
+    utils["utils.py (legacy, untouched)"]
     binary[("cm")]
     other[("git, gcloud")]
 
     wrapper --> entry
     entry -->|"#lt;command#gt;"| cli
     entry -->|"legacy"| legacy
-    cli --> cm_layer
+    cli --> adapter
     cli --> git
-    cm_layer --> utils
+    adapter -->|"captured output, timeout"| binary
+    legacy -->|"parse_findings_json, log_cm_version"| cm_layer
+    cm_layer -.->|"legacy helpers only"| utils
     git --> utils
+    github --> utils
     utils --> binary
     utils --> other
     legacy --> git

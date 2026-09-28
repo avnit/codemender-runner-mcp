@@ -31,6 +31,7 @@ by a child process or by a C-level write to fd 1, and both of those are
 exactly how the contract has been broken before.
 """
 
+import ast
 import json
 import os
 import shutil
@@ -44,7 +45,6 @@ from io import StringIO
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cli import exit_codes
-from cli.commands.version import _normalise_version
 from cli.events import EventEmitter
 from cli.events import JSON
 from cli.events import TEXT
@@ -301,6 +301,39 @@ class TestImportIsolation(unittest.TestCase):
         "import time.",
     )
 
+  def test_version_command_needs_no_utils_or_third_party_packages(self):
+    """`version` must not load legacy `utils` or any package from requirements.txt.
+
+    It is the command run to diagnose a broken environment, so it must work
+    before dependencies are installed. The AST check only sees direct imports
+    from `cli/`; this catches the indirect ones, such as `codemender/`
+    importing `utils`, which imports `requests`.
+    """
+    probe = (
+        "import sys;"
+        "before = set(sys.modules);"
+        "import cli.__main__, cli.commands.version;"
+        "loaded = set(sys.modules) - before;"
+        "print(sorted(m for m in loaded"
+        " if m.split('.')[0] in ('utils', 'requests', 'yaml', 'google')))"
+    )
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=_PKG_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(result.stdout.strip(), "[]")
+
 
 class TestEventEmitter(unittest.TestCase):
   """The emitter itself, exercised in-process against a StringIO."""
@@ -355,30 +388,6 @@ class TestEventEmitter(unittest.TestCase):
     rendered = stream.getvalue()
     self.assertIn("alpha=1", rendered)
     self.assertIn("beta=two", rendered)
-
-
-class TestVersionParsing(unittest.TestCase):
-  """Parsing the version string out of `cm --version` output."""
-
-  def test_strips_the_cm_version_prefix(self):
-    self.assertEqual(_normalise_version("cm version 0.9.0"), "0.9.0")
-
-  def test_tolerates_surrounding_whitespace(self):
-    self.assertEqual(_normalise_version("  cm version 0.9.0 \n"), "0.9.0")
-
-  def test_bare_version_passes_through(self):
-    self.assertEqual(_normalise_version("0.9.0"), "0.9.0")
-
-  def test_multiline_version_output(self):
-    self.assertEqual(
-        _normalise_version("cm version 0.9.0\nbuilt by Jim Meyering\n"),
-        "0.9.0",
-    )
-
-  def test_empty_and_none_yield_none(self):
-    self.assertIsNone(_normalise_version(""))
-    self.assertIsNone(_normalise_version("   "))
-    self.assertIsNone(_normalise_version(None))
 
 
 class TestExitCodes(unittest.TestCase):
@@ -489,6 +498,174 @@ class TestPackageDirectoryExecution(unittest.TestCase):
         check=False,
     )
     self.assertEqual(result.returncode, exit_codes.USAGE)
+
+
+class TestCliArchitectureRules(unittest.TestCase):
+  """ADR-0002 Confirmation: architectural boundary enforcement via AST inspection."""
+
+  def _get_cli_python_files(self):
+    cli_dir = os.path.join(_PKG_DIR, "cli")
+    py_files = []
+    for root, _, files in os.walk(cli_dir):
+      for f in files:
+        if f.endswith(".py"):
+          py_files.append(os.path.join(root, f))
+    return py_files
+
+  def test_cli_modules_do_not_import_subprocess(self):
+    """CLI modules must never import subprocess directly; cm runs through codemender.cm.CmAdapter, git through vcs/git.py."""
+    for py_file in self._get_cli_python_files():
+      with self.subTest(file=os.path.relpath(py_file, _PKG_DIR)):
+        with open(py_file, "r", encoding="utf-8") as handle:
+          tree = ast.parse(handle.read(), filename=py_file)
+        for node in ast.walk(tree):
+          if isinstance(node, ast.Import):
+            for alias in node.names:
+              self.assertNotEqual(
+                  alias.name,
+                  "subprocess",
+                  f"{py_file}:{node.lineno} imports banned module 'subprocess'",
+              )
+          elif isinstance(node, ast.ImportFrom):
+            self.assertNotEqual(
+                node.module,
+                "subprocess",
+                f"{py_file}:{node.lineno} imports from banned module 'subprocess'",
+            )
+
+  def test_cli_modules_do_not_import_vcs_github(self):
+    """CLI modules must never import vcs.github; posting to repo hosts belongs to the CI job."""
+    for py_file in self._get_cli_python_files():
+      with self.subTest(file=os.path.relpath(py_file, _PKG_DIR)):
+        with open(py_file, "r", encoding="utf-8") as handle:
+          tree = ast.parse(handle.read(), filename=py_file)
+        for node in ast.walk(tree):
+          if isinstance(node, ast.Import):
+            for alias in node.names:
+              self.assertNotIn(
+                  "vcs.github",
+                  alias.name,
+                  f"{py_file}:{node.lineno} imports banned module 'vcs.github'",
+              )
+          elif isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            self.assertFalse(
+                mod == "vcs.github" or mod.startswith("vcs.github"),
+                f"{py_file}:{node.lineno} imports from banned module 'vcs.github'",
+            )
+            if mod == "vcs":
+              for alias in node.names:
+                self.assertNotEqual(
+                    alias.name,
+                    "github",
+                    f"{py_file}:{node.lineno} imports 'github' from 'vcs'",
+                )
+
+  def test_cli_modules_do_not_import_utils(self):
+    """CLI modules must never import legacy utils (go/no-utils); it is left untouched for the legacy pipeline."""
+    for py_file in self._get_cli_python_files():
+      with self.subTest(file=os.path.relpath(py_file, _PKG_DIR)):
+        with open(py_file, "r", encoding="utf-8") as handle:
+          tree = ast.parse(handle.read(), filename=py_file)
+        for node in ast.walk(tree):
+          if isinstance(node, ast.Import):
+            for alias in node.names:
+              self.assertNotEqual(
+                  alias.name,
+                  "utils",
+                  f"{py_file}:{node.lineno} imports banned legacy module 'utils'",
+              )
+          elif isinstance(node, ast.ImportFrom):
+            self.assertNotEqual(
+                node.module,
+                "utils",
+                f"{py_file}:{node.lineno} imports from banned legacy module 'utils'",
+            )
+
+  def test_cli_modules_do_not_call_banned_functions_directly(self):
+    """CLI modules must not directly call run_command, build_cm_command, or push_branch_to_remote."""
+    banned_calls = {"run_command", "build_cm_command", "push_branch_to_remote"}
+    for py_file in self._get_cli_python_files():
+      with self.subTest(file=os.path.relpath(py_file, _PKG_DIR)):
+        with open(py_file, "r", encoding="utf-8") as handle:
+          tree = ast.parse(handle.read(), filename=py_file)
+        for node in ast.walk(tree):
+          if isinstance(node, ast.Call):
+            func_name = None
+            if isinstance(node.func, ast.Name):
+              func_name = node.func.id
+            elif isinstance(node.func, ast.Attribute):
+              func_name = node.func.attr
+            self.assertNotIn(
+                func_name,
+                banned_calls,
+                f"{py_file}:{node.lineno} directly calls banned function '{func_name}'",
+            )
+
+
+class TestStdoutRedirectDuringCommand(unittest.TestCase):
+  """ADR-0002 Confirmation: while a command runs, stray stdout writes land on stderr."""
+
+  def test_git_helper_inside_command_leaves_stdout_clean(self):
+    """A vcs/git.py helper and a bare print() inside a command reach stderr only.
+
+    The probe goes through the real `cli.__main__.main`, with the `version`
+    command's `detect_cm` swapped for one that calls a git helper against a
+    noisy fake `git` (the legacy `utils.run_command` echoes child output to
+    `sys.stdout`) and then prints. This fails if `main` ever stops sending
+    stray stdout writes to stderr, or leaves them redirected after it returns.
+    """
+    temp_dir = tempfile.mkdtemp(prefix="fake_git_")
+    self.addCleanup(shutil.rmtree, temp_dir, True)
+
+    fake_git = os.path.join(temp_dir, "git")
+    with open(fake_git, "w", encoding="utf-8") as f:
+      f.write('#!/bin/sh\necho "fatal: not a git repo"\nexit 128\n')
+    os.chmod(fake_git, 0o755)
+
+    probe = (
+        "import sys\n"
+        "import cli.commands.version as version_cmd\n"
+        "from cli.__main__ import main\n"
+        "from vcs.git import clean_workspace\n"
+        "def noisy_detect_cm(path):\n"
+        f"  clean_workspace({temp_dir!r})\n"
+        "  print('stray print from a helper')\n"
+        "  return {'found': False, 'version': None, 'path': None}\n"
+        "version_cmd.detect_cm = noisy_detect_cm\n"
+        "rc = main(['version'])\n"
+        "sys.stderr.write(f'restored={sys.stdout is sys.__stdout__}\\n')\n"
+        "sys.exit(rc)\n"
+    )
+
+    env = dict(os.environ)
+    # Only the fake git is reachable: no real cm or git can leak in.
+    env["PATH"] = temp_dir
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env.pop("PYTHONPATH", None)
+
+    res = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=_PKG_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    self.assertEqual(res.returncode, exit_codes.OK, res.stderr)
+    lines = res.stdout.splitlines()
+    self.assertEqual(
+        len(lines), 1, f"stdout must hold only the version event, got:\n{res.stdout}"
+    )
+    self.assertEqual(json.loads(lines[0])["event"], "version")
+    # The noisy git output, subprocess delimiters and the print went to stderr.
+    self.assertIn(">>> [SUBPROCESS START]", res.stderr)
+    self.assertIn("fatal: not a git repo", res.stderr)
+    self.assertIn("<<< [SUBPROCESS END]", res.stderr)
+    self.assertIn("stray print from a helper", res.stderr)
+    self.assertIn("restored=True", res.stderr)
 
 
 if __name__ == "__main__":

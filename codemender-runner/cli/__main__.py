@@ -24,6 +24,7 @@ stream on stdout and break the output contract.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import sys
 from typing import List, Optional
@@ -149,12 +150,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.print_help(sys.stderr)
     return exit_codes.USAGE
 
+  # Events go to the real stdout. While the command runs, anything else
+  # written through `sys.stdout` lands on stderr instead. That covers helpers
+  # a command may call that print to stdout, such as the legacy
+  # `utils.run_command` reached through `vcs/git.py`, so they cannot corrupt
+  # the event stream. `cm` itself runs through `codemender.cm.CmAdapter`,
+  # which captures its output.
   emitter = EventEmitter(stream=sys.stdout, output_format=args.output)
 
-  if args.command == "version":
-    from cli.commands import version
+  with contextlib.redirect_stdout(sys.stderr):
+    if args.command == "version":
+      from cli.commands import version
 
-    return version.run(args, emitter)
+      return version.run(args, emitter)
 
   parser.print_help(sys.stderr)
   return exit_codes.USAGE

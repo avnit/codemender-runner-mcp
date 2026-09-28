@@ -26,8 +26,8 @@ import tarfile
 import time
 from typing import Optional
 
-from codemender.cli import log_cm_version
-from codemender.cli import parse_findings_json
+from codemender.cm import log_cm_version
+from codemender.cm import parse_findings_json
 from codemender.db import get_finding_status
 from codemender.db import is_finding_verified
 from config import OrchestratorConfig

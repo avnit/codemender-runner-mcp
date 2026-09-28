@@ -25,99 +25,19 @@ failure. The asymmetry is intentional: `version` diagnoses, `init` gates.
 from __future__ import annotations
 
 import argparse
-import logging
-import shutil
-import subprocess
-from typing import Any, Dict, Optional
 
 import cli
 from cli import exit_codes
 from cli.events import EventEmitter
-
-logger = logging.getLogger("cm-runner")
+from codemender.cm import detect_cm
 
 # The `cm` CLI surface this orchestrator was built and tested against.
 #
 # Recorded so that version drift is visible rather than mysterious. There is
 # precedent: cm 0.7.0 changed `cm report --format json` from PascalCase to
-# snake_case keys, which `codemender/cli.py` still carries a workaround for.
+# snake_case keys, which `codemender/cm.py` still carries a workaround for.
 # Observed working: cm 0.9.0 on 2026-09-24.
 CM_CONTRACT = "cm-0.9.x"
-
-
-def _normalise_version(raw: Optional[str]) -> Optional[str]:
-  """Extracts the bare version from `cm --version` output.
-
-  `cm --version` prints "cm version 0.9.0"; we want "0.9.0".
-
-  Args:
-    raw: Raw stdout from the version call, or None.
-
-  Returns:
-    The trailing version token, or None if there was nothing to parse.
-  """
-  if not raw:
-    return None
-  lines = [line.strip() for line in raw.splitlines() if line.strip()]
-  if not lines:
-    return None
-  for line in lines:
-    if "version" in line.lower():
-      parts = line.split()
-      if parts:
-        return parts[-1]
-  parts = lines[0].split()
-  return parts[-1] if parts else None
-
-
-def detect_cm(cm_binary: Optional[str] = None,
-              timeout_sec: int = 30) -> Dict[str, Any]:
-  """Locates the cm binary and reads its version without ever raising.
-
-  Note on why this does not reuse `codemender.cli.log_cm_version`:
-  that helper goes through `utils.run_command`, which writes a subprocess
-  banner and every line of child output directly to **sys.stdout**
-  (utils.py lines 295-314). That is fine for the env-var pipelines, whose
-  stdout is just a log, but it would corrupt this CLI's NDJSON event stream.
-  Until there is a shared subprocess helper that streams to stderr, commands
-  here call subprocess directly with output captured.
-
-  Args:
-    cm_binary: Explicit path to cm. When None, cm is looked up on PATH.
-    timeout_sec: How long to wait for `cm --version` before giving up.
-
-  Returns:
-    A dict with `found`, `version` and `path` keys. `found` is False when no
-    binary could be located; `version` may be None even when found, if the
-    binary exists but could not be executed or parsed.
-  """
-  path = cm_binary or shutil.which("cm")
-  if not path:
-    return {"found": False, "version": None, "path": None}
-
-  version: Optional[str] = None
-  try:
-    result = subprocess.run(
-        [path, "--version"],
-        capture_output=True,
-        text=True,
-        timeout=timeout_sec,
-        check=False,
-    )
-    if result.returncode == 0:
-      version = _normalise_version(result.stdout)
-    else:
-      logger.warning(
-          "cm --version exited %d: %s",
-          result.returncode,
-          (result.stderr or "").strip(),
-      )
-  except (OSError, subprocess.SubprocessError) as exc:
-    # A binary that exists but will not report its version is worth surfacing,
-    # but it is not a reason for `version` itself to fail.
-    logger.warning("Could not read cm version from %s: %s", path, exc)
-
-  return {"found": True, "version": version, "path": path}
 
 
 def run(args: argparse.Namespace, emitter: EventEmitter) -> int:

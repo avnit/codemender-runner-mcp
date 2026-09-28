@@ -26,7 +26,7 @@ import tarfile
 import time
 from typing import Optional, Set
 
-from codemender.cli import log_cm_version
+from codemender.cm import log_cm_version
 from config import OrchestratorConfig
 from config import PR_MODE_REVIEW_SUGGESTION
 from config import get_github_credentials

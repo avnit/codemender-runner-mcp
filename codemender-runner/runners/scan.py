@@ -26,8 +26,8 @@ from typing import Optional
 import uuid
 
 # CodeMender CLI JSON parser and version logging
-from codemender.cli import log_cm_version
-from codemender.cli import parse_findings_json
+from codemender.cm import log_cm_version
+from codemender.cm import parse_findings_json
 # Configuration injection and credentials
 from config import OrchestratorConfig
 from config import get_github_credentials

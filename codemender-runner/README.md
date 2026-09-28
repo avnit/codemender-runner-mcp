@@ -344,7 +344,7 @@ documentation:
 │   ├── utils.py                        # Subprocess helpers, token parsers, retry decorators, port cleanup
 │   ├── codemender/                     # CodeMender CLI wrapper
 │   │   ├── __init__.py
-│   │   ├── cli.py                      # JSON parsers for findings and session reports
+│   │   ├── cm.py                       # CmAdapter (runs cm for new commands) + JSON parsers for findings and session reports
 │   │   └── db.py                       # SQLite database status queries (verify status, fix status)
 │   ├── vcs/                            # Version Control System (VCS) integrations
 │   │   ├── __init__.py
@@ -361,7 +361,7 @@ documentation:
 │       ├── cm                          # Mock executable mimicking cm CLI interactions
 │       ├── dummy_cm.py                 # Mock Python server simulating CodeMender backend
 │       ├── e2e_test_local.py           # Mock local end-to-end multi-stage pipeline integration test
-│       ├── test_codemender_cli.py      # cm CLI parsing unit tests
+│       ├── test_codemender_cm.py       # CmAdapter, version detection & JSON parsing unit tests
 │       ├── test_codemender_db.py       # SQLite database status queries unit tests
 │       ├── test_command_builder.py     # CLI command builder & token metric parsing unit tests
 │       ├── test_config.py              # Configuration loader & credential scrubbing unit tests

@@ -585,7 +585,7 @@ class TestScanRunner(unittest.TestCase):
       self, mock_check_branch, mock_is_dup_pr
   ):
     """Verify cm 0.7.0 snake_case findings survive filtering end-to-end."""
-    from codemender.cli import parse_findings_json
+    from codemender.cm import parse_findings_json
     from runners.scan import _filter_findings
 
     mock_check_branch.return_value = False
