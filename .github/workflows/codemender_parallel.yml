@@ -143,7 +143,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout Code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
@@ -152,7 +152,7 @@ jobs:
       - name: Mint GitHub App Token
         id: app-token
         if: env.GH_APP_ID != '' && env.GH_APP_KEY != ''
-        uses: actions/create-github-app-token@21cfef2b496dd8ef5b904c159339626a10ad380e # v1.11.6
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.github_app_id }}
           private-key: ${{ secrets.github_app_private_key }}
@@ -193,7 +193,7 @@ jobs:
 
       - name: Upload Base State Artifact
         if: ${{ steps.run-scan.outputs.findings_count != '0' && steps.run-scan.outputs.findings_count != '' }}
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: codemender-base-state
           path: .codemender_transit/base/
@@ -203,7 +203,7 @@ jobs:
 
       - name: Upload Clean SARIF Report
         if: always() && inputs.upload_sarif && steps.run-scan.outputs.findings_count == '0' && hashFiles('report.sarif') != ''
-        uses: github/codeql-action/upload-sarif@b56ba49b26e50535fa1e7f7db0f4f7b4bf65d80d # v3.28.10
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         continue-on-error: true
         with:
           sarif_file: report.sarif
@@ -235,7 +235,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout Code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.scan.outputs.target_sha || github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
@@ -244,7 +244,7 @@ jobs:
       - name: Mint GitHub App Token
         id: app-token
         if: env.GH_APP_ID != '' && env.GH_APP_KEY != ''
-        uses: actions/create-github-app-token@21cfef2b496dd8ef5b904c159339626a10ad380e # v1.11.6
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.github_app_id }}
           private-key: ${{ secrets.github_app_private_key }}
@@ -262,7 +262,7 @@ jobs:
           credentials_json: ${{ secrets.gcp_sa_key }}
 
       - name: Download Base State Artifact
-        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: codemender-base-state
           path: .codemender_transit/base/
@@ -290,7 +290,7 @@ jobs:
         run: /opt/codemender/venv/bin/python3 /opt/codemender/codemender-runner/main.py
 
       - name: Upload Worker Shard Artifact
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: worker-shard-${{ matrix.worker_index }}
           path: .codemender_transit/shards/worker_${{ matrix.worker_index }}/
@@ -321,7 +321,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout Code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.scan.outputs.target_sha || github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
@@ -330,7 +330,7 @@ jobs:
       - name: Mint GitHub App Token
         id: app-token
         if: env.GH_APP_ID != '' && env.GH_APP_KEY != ''
-        uses: actions/create-github-app-token@21cfef2b496dd8ef5b904c159339626a10ad380e # v1.11.6
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.github_app_id }}
           private-key: ${{ secrets.github_app_private_key }}
@@ -348,13 +348,13 @@ jobs:
           credentials_json: ${{ secrets.gcp_sa_key }}
 
       - name: Download Base State Artifact
-        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: codemender-base-state
           path: .codemender_transit/base/
 
       - name: Download Worker Shards
-        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: worker-shard-*
           path: .codemender_transit/shards/
@@ -380,14 +380,14 @@ jobs:
 
       - name: Upload SARIF Report
         if: always() && inputs.upload_sarif && hashFiles('report.sarif') != ''
-        uses: github/codeql-action/upload-sarif@b56ba49b26e50535fa1e7f7db0f4f7b4bf65d80d # v3.28.10
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         continue-on-error: true
         with:
           sarif_file: report.sarif
 
       - name: Upload Final Reports
         if: always()
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: codemender-report-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || 'nightly' }}-run-${{ github.run_id }}
           path: |
