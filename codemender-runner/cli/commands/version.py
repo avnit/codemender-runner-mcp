@@ -21,8 +21,6 @@ command never runs.
 
 from __future__ import annotations
 
-from typing import Any, Dict
-
 import cli
 from cli import exit_codes
 from cli.events import EventEmitter
@@ -51,18 +49,8 @@ def run(adapter: CmAdapter, emitter: EventEmitter) -> int:
   cm = detect_cm(adapter)
   emitter.emit(
       "version",
-      text=_version_text(cli.__version__, cm, CM_CONTRACT),
       orchestrator=cli.__version__,
       cm=cm,
       contract=CM_CONTRACT,
   )
   return exit_codes.OK
-
-
-def _version_text(orchestrator: str, cm: Dict[str, Any], contract: str) -> str:
-  """How the `version` event reads in `--output text` mode."""
-  return (
-      f"cm-runner  {orchestrator}\n"
-      f"cm         {cm['version']}\n"
-      f"contract   {contract}"
-  )

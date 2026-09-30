@@ -21,9 +21,9 @@ The output contract, which every command must honour:
   3. Each command emits one event type, so every stdout line is one unit of
      work. There is no trailing summary event: success or failure comes from
      the exit code, and error messages go to stderr.
-  4. `--output text` swaps only the rendering. The underlying events are
-     identical. Each command supplies its own text line with `emit(text=...)`;
-     this module knows nothing about any particular command.
+
+There is no human-readable mode for stdout. People read stderr, or pipe
+stdout through `python3 -m json.tool --json-lines` or `jq`.
 
 Events are emitted as work happens rather than batched at the end: `init`
 runs `cm` several times and can take tens of seconds, and a silent CI log
@@ -38,10 +38,6 @@ from datetime import datetime
 from datetime import timezone
 from typing import Any, Dict, Optional, TextIO
 
-# Output format identifiers.
-JSON = "json"
-TEXT = "text"
-
 
 def utc_now() -> str:
   """Returns an ISO-8601 UTC timestamp, second resolution."""
@@ -49,33 +45,21 @@ def utc_now() -> str:
 
 
 class EventEmitter:
-  """Writes structured events to a stream.
+  """Writes structured events to a stream, one JSON object per line.
 
   Attributes:
     stream: Destination for events. Always stdout in normal operation; tests
       inject a StringIO.
-    output_format: Either JSON (NDJSON, one object per line) or TEXT
-      (human-readable). The event data is the same either way.
   """
 
-  def __init__(
-      self,
-      stream: Optional[TextIO] = None,
-      output_format: str = JSON,
-  ) -> None:
+  def __init__(self, stream: Optional[TextIO] = None) -> None:
     self.stream = stream if stream is not None else sys.stdout
-    self.output_format = output_format
 
-  def emit(
-      self, event: str, *, text: Optional[str] = None, **fields: Any
-  ) -> Dict[str, Any]:
+  def emit(self, event: str, **fields: Any) -> Dict[str, Any]:
     """Writes a single event and returns the payload that was written.
 
     Args:
       event: The event type, e.g. "version", "check", "finding".
-      text: How the event reads in `--output text` mode, supplied by the
-        command. Not part of the event data. When None, text mode shows the
-        fields as `key=value` pairs.
       **fields: Arbitrary event-specific data.
 
     Returns:
@@ -84,18 +68,7 @@ class EventEmitter:
     """
     payload: Dict[str, Any] = {"ts": utc_now(), "event": event}
     payload.update(fields)
-
-    if self.output_format == TEXT:
-      line = text if text is not None else _key_value_text(payload)
-    else:
-      line = json.dumps(payload)
-
-    self.stream.write(line + "\n")
+    self.stream.write(json.dumps(payload) + "\n")
     # Flush per event: CI log tailing is the whole point of streaming.
     self.stream.flush()
     return payload
-
-
-def _key_value_text(payload: Dict[str, Any]) -> str:
-  """Text fallback: every field except the timestamp, space separated."""
-  return " ".join(f"{k}={v}" for k, v in payload.items() if k != "ts")

@@ -31,8 +31,6 @@ from typing import List, Optional
 
 from cli import exit_codes
 from cli.events import EventEmitter
-from cli.events import JSON
-from cli.events import TEXT
 from codemender.cm import CmAdapter
 
 logger = logging.getLogger(__name__)
@@ -62,24 +60,18 @@ def configure_logging(level: str) -> None:
 def _global_flags() -> argparse.ArgumentParser:
   """Builds the flags shared by the root parser and every subcommand.
 
-  Attaching these to both means `cm-runner --output text version` and
-  `cm-runner version --output text` both work. argparse would otherwise only
-  accept the first form, and the second is what people actually type.
+  Attaching these to both means `cm-runner --log-level debug version` and
+  `cm-runner version --log-level debug` both work. argparse would otherwise
+  only accept the first form, and the second is what people actually type.
 
   Every flag uses `default=argparse.SUPPRESS`. Without it, the subparser's
   defaults silently overwrite whatever the root parser already parsed, so
-  `--output text version` would quietly emit JSON -- the flag accepted and
-  ignored, which is worse than rejecting it. SUPPRESS means the attribute is
+  `--log-level debug version` would quietly log at info -- the flag accepted
+  and ignored, which is worse than rejecting it. SUPPRESS means the attribute is
   only set when the user actually passes the flag; `_apply_defaults` fills in
   the rest afterwards.
   """
   common = argparse.ArgumentParser(add_help=False)
-  common.add_argument(
-      "--output",
-      choices=[JSON, TEXT],
-      default=argparse.SUPPRESS,
-      help=f"stdout format (default: {JSON})",
-  )
   common.add_argument(
       "--cm-binary",
       default=argparse.SUPPRESS,
@@ -97,7 +89,6 @@ def _global_flags() -> argparse.ArgumentParser:
 
 # Applied after parsing, because the flags above use SUPPRESS.
 _DEFAULTS = {
-    "output": JSON,
     "cm_binary": None,
     "log_level": "info",
 }
@@ -174,7 +165,7 @@ def main(argv: Optional[List[str]] = None) -> int:
   # `utils.run_command` reached through `vcs/git.py`, so they cannot corrupt
   # the event stream. `cm` itself runs through `codemender.cm.CmAdapter`,
   # which captures its output.
-  emitter = EventEmitter(stream=sys.stdout, output_format=args.output)
+  emitter = EventEmitter(stream=sys.stdout)
 
   # Every command needs `cm`, so it is checked once, here, before any command
   # starts. A command is only ever given an adapter that works.

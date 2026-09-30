@@ -624,48 +624,6 @@ class TestInitConfigValidate(unittest.TestCase):
     self.assertEqual(code, exit_codes.USAGE)
 
 
-class TestCheckText(unittest.TestCase):
-  """How a `check` event reads in `--output text` mode."""
-
-  def setUp(self):
-    super().setUp()
-    from cli.commands import init as init_cmd
-
-    self.check_text = init_cmd._check_text  # pylint: disable=protected-access
-
-  def test_shows_symbol_name_and_message(self):
-    """Each status gets its own symbol, followed by the name and message."""
-    cases = {"pass": "✅", "warn": "⚠️", "fail": "❌", "recovered": "🔧"}
-    for status, symbol in cases.items():
-      with self.subTest(status=status):
-        rendered = self.check_text("cm_binary", status, "cm 0.9.0 at /bin/cm")
-        self.assertTrue(rendered.startswith(f"{symbol} cm_binary "))
-        self.assertTrue(rendered.endswith("cm 0.9.0 at /bin/cm"))
-        self.assertEqual(len(rendered.splitlines()), 1)
-
-  def test_indents_multi_line_messages(self):
-    """Continuation lines line up under the first line of the message."""
-    rendered = self.check_text(
-        "cm_verify",
-        "fail",
-        "Failed to create client:\nresolving credentials",
-    )
-
-    first, second = rendered.splitlines()
-    # ❌ is one character in the string but two columns wide on screen, so
-    # the message starts one character earlier on the first line than the
-    # indent on the second.
-    indent = len(second) - len(second.lstrip(" "))
-    self.assertEqual(indent, first.index("Failed") + 1)
-    self.assertEqual(second.lstrip(" "), "resolving credentials")
-
-  def test_shows_unknown_status_as_a_word(self):
-    """A status with no symbol is still visible, not silently dropped."""
-    rendered = self.check_text("x", "skipped", "m")
-
-    self.assertTrue(rendered.startswith("[skipped] x"))
-
-
 class TestInitImports(unittest.TestCase):
   """`init` must not drag in the legacy pipeline."""
 

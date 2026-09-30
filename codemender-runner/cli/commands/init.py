@@ -143,41 +143,10 @@ def _check(emitter: EventEmitter, name: str, status: str, message: str) -> None:
   """Emits one `check` event."""
   emitter.emit(
       "check",
-      text=_check_text(name, status, message),
       name=name,
       status=status,
       message=message,
   )
-
-
-# Symbol shown in front of a `check` event in text output, by status.
-_CHECK_SYMBOLS = {
-    "pass": "✅",
-    "warn": "⚠️",
-    "fail": "❌",
-    "recovered": "🔧",
-}
-
-# Width of the check-name column in text output. The longest name today is
-# `cm_workspace` (12 characters).
-_CHECK_NAME_WIDTH = 14
-
-
-def _check_text(name: str, status: str, message: str) -> str:
-  """How a `check` event reads in `--output text` mode.
-
-  Laid out as `<symbol> <name> <message>`. If a message runs over several
-  lines, continuation lines are indented to the message column so they read
-  as part of the same check.
-  """
-  # An unknown status is shown as a word rather than dropped.
-  symbol = _CHECK_SYMBOLS.get(status, f"[{status}]")
-  first, *rest = message.splitlines() or [""]
-
-  indent = " " * (3 + _CHECK_NAME_WIDTH + 1)
-  lines = [f"{symbol} {name.ljust(_CHECK_NAME_WIDTH)} {first}".rstrip()]
-  lines.extend(f"{indent}{line}".rstrip() for line in rest)
-  return "\n".join(lines)
 
 
 def _report_cm(adapter: CmAdapter, emitter: EventEmitter) -> None:

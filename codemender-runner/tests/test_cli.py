@@ -46,9 +46,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cli import exit_codes
 from cli.events import EventEmitter
-from cli.events import JSON
-from cli.events import TEXT
-from codemender.cm import CmAdapter
 
 # Directory containing the `cli` package, used as cwd so `python -m cli` works.
 _PKG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -168,7 +165,9 @@ class TestStdoutPurity(CLIContractTestBase):
         "no subcommand": [],
         "unknown subcommand": ["nonsuch"],
         "unknown flag": ["version", "--nonsuch"],
-        "invalid flag value": ["version", "--output", "yaml"],
+        "invalid flag value": ["version", "--log-level", "loud"],
+        # Removed: stdout is always JSON.
+        "--output flag": ["version", "--output", "text"],
     }
 
     for label, argv in cases.items():
@@ -195,28 +194,23 @@ class TestStdoutPurity(CLIContractTestBase):
     self.assertEqual(result.returncode, exit_codes.OK, result.stderr)
     self.assert_stdout_is_one_json_object(result)
 
-  def test_text_output_writes_no_json(self):
-    """`--output text` swaps the renderer without polluting stdout."""
-    result = self.run_cli("--output", "text", "version")
-
-    self.assertEqual(result.returncode, exit_codes.OK, result.stderr)
-    self.assertIn("cm-runner", result.stdout)
-    with self.assertRaises(json.JSONDecodeError):
-      json.loads(result.stdout.splitlines()[0])
-
   def test_global_flags_accepted_before_and_after_subcommand(self):
     """Both orderings must behave identically.
 
     argparse silently ignores the pre-subcommand form unless the shared flags
     use SUPPRESS, which is a failure mode that looks like success.
     """
-    before = self.run_cli("--output", "text", "version")
-    after = self.run_cli("version", "--output", "text")
+    stub = _write_stub_cm(
+        _temp_dir(self), '#!/bin/sh\necho "cm version 7.7.7"\n'
+    )
 
-    self.assertEqual(before.returncode, exit_codes.OK, before.stderr)
-    self.assertEqual(after.returncode, exit_codes.OK, after.stderr)
-    self.assertIn("cm-runner", before.stdout)
-    self.assertIn("cm-runner", after.stdout)
+    before = self.run_cli("--cm-binary", stub, "version")
+    after = self.run_cli("version", "--cm-binary", stub)
+
+    for result in (before, after):
+      self.assertEqual(result.returncode, exit_codes.OK, result.stderr)
+      payload = self.assert_stdout_is_one_json_object(result)
+      self.assertEqual(payload["cm"]["version"], "7.7.7")
 
 
 class TestCmDetection(CLIContractTestBase):
@@ -374,7 +368,7 @@ class TestEventEmitter(unittest.TestCase):
   def test_emit_writes_one_json_line_per_event(self):
     """Each event is a single self-contained line of JSON."""
     stream = StringIO()
-    emitter = EventEmitter(stream=stream, output_format=JSON)
+    emitter = EventEmitter(stream=stream)
 
     emitter.emit("first", value=1)
     emitter.emit("second", value=2)
@@ -386,54 +380,13 @@ class TestEventEmitter(unittest.TestCase):
 
   def test_emit_returns_payload_including_timestamp(self):
     """The returned payload is what was written, so callers can inspect it."""
-    emitter = EventEmitter(stream=StringIO(), output_format=JSON)
+    emitter = EventEmitter(stream=StringIO())
 
     payload = emitter.emit("version", orchestrator="0.1.0")
 
     self.assertEqual(payload["event"], "version")
     self.assertEqual(payload["orchestrator"], "0.1.0")
     self.assertRegex(payload["ts"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
-
-  def test_text_mode_writes_supplied_text_and_keeps_the_data(self):
-    """--output text writes the command's text; the event data is the same."""
-    json_stream, text_stream = StringIO(), StringIO()
-    fields = {"orchestrator": "0.1.0", "contract": "cm-0.9.x"}
-
-    from_json = EventEmitter(stream=json_stream, output_format=JSON).emit(
-        "version", text="human line", **fields
-    )
-    from_text = EventEmitter(stream=text_stream, output_format=TEXT).emit(
-        "version", text="human line", **fields
-    )
-
-    self.assertEqual(
-        {k: v for k, v in from_json.items() if k != "ts"},
-        {k: v for k, v in from_text.items() if k != "ts"},
-    )
-    self.assertEqual(text_stream.getvalue(), "human line\n")
-    # The text is for humans only; it is never part of the JSON event.
-    self.assertNotIn("text", json.loads(json_stream.getvalue()))
-
-  def test_unknown_event_falls_back_to_key_value_text(self):
-    """With no text supplied, text mode shows the fields as key=value."""
-    stream = StringIO()
-    emitter = EventEmitter(stream=stream, output_format=TEXT)
-
-    emitter.emit("something_new", alpha=1, beta="two")
-
-    rendered = stream.getvalue()
-    self.assertIn("alpha=1", rendered)
-    self.assertIn("beta=two", rendered)
-
-  def test_version_text_shows_the_cm_version(self):
-    """The `version` command's own text layout shows cm's version."""
-    from cli.commands import version
-
-    stream = StringIO()
-    adapter = CmAdapter(_write_stub_cm(_temp_dir(self)))
-    version.run(adapter, EventEmitter(stream=stream, output_format=TEXT))
-
-    self.assertIn("cm         0.9.0", stream.getvalue())
 
 
 class TestExitCodes(unittest.TestCase):

@@ -1,6 +1,6 @@
 # ADR-0001: Machine-Readable Output Contract for cm-runner CLI
 
-*   **Status:** accepted (implemented in PR #6)
+*   **Status:** accepted (implemented in PR #6; amended 2026-09-30: `--output text` removed)
 *   **Date:** 2026-09-24
 *   **Decision Makers:** nasirmohammad@google.com, cledoux@google.com, yileil@google.com
 
@@ -32,14 +32,13 @@ Chosen option: **"Option 3: Newline-delimited JSON on stdout, human logs on stde
 
 ### Output Rules
 
-1.  **stdout is JSON only:** By default (and in `--output json` mode), stdout carries newline-delimited JSON and nothing else. Exactly one JSON object per line.
+1.  **stdout is JSON only:** stdout carries newline-delimited JSON and nothing else. Exactly one JSON object per line. There is no human-readable mode for stdout.
 2.  **stderr is for humans:** All operational logs, diagnostics, progress indicators, tracebacks, and CLI usage help messages route to `stderr`.
 3.  **Coarse exit codes:**
     *   `0`: Success.
     *   `2`: Command-line usage error (invalid flags, missing arguments).
     *   `3`: Execution failure (check failed, process error).
     Exit codes stay coarse on purpose. What failed is reported in the command's own events where it has them (for example a `check` event with `"status": "fail"`), and in the logs on stderr.
-4.  **Human Text Override:** When the user explicitly passes `--output text`, human-readable text is emitted to stdout instead of JSON for local terminal usage.
 
 ### Event Schema Specification
 
@@ -84,6 +83,15 @@ This makes every stdout line one unit of work. A workflow that runs `find-diff` 
 ### Reviewer Notes & Discussion: Terminal Summary Event
 A trailing `result` summary event was originally planned for multi-event commands. Charles LeDoux questioned its value in review of PR #6, and in review of PR #7 pointed out that it complicates fan-out: consumers would have to reason about the type of each line. It was dropped in favour of exit codes plus one event type per command. Error messages go to stderr, not stdout (confirmed in the same review thread).
 
+### Reviewer Notes & Discussion: Human Text Mode
+The first version had a fourth rule: `--output text` printed a human-readable layout on stdout instead of JSON. Charles LeDoux asked in review of PR #19 whether it was needed. It was removed on 2026-09-30, before any caller used it:
+*   No CI caller uses it; CI always reads JSON.
+*   Every command needed its own text layout and tests, on a path CI never exercises.
+*   `find-diff` gives humans a `report.md` file (E2), which is where a readable view of findings belongs.
+*   It matches codemender-connect, whose ADR-0001 keeps stdout machine-readable and gives humans stderr.
+
+Adding a text mode back later would not break any caller; removing it later could have.
+
 ### Forward Compatibility & Evolution Policy
 *   **Event types are fixed per command:** Adding a new event type to an existing command is a breaking change, because consumers fan out over every line.
 *   **Consumers must be lenient about fields:** Consumers must ignore fields they don't recognise.
@@ -96,7 +104,7 @@ A trailing `result` summary event was originally planned for multi-event command
 *   **Good:** Long-running processes stream events in real time without hanging CI log viewers.
 *   **Good:** Logging verbosity (e.g. `--log-level debug`) does not pollute stdout or break downstream JSON decoders.
 *   **Bad:** CLI subcommands cannot use the repository's existing `utils.run_command` helper because it writes child output to stdout. CLI commands must isolate subprocess execution to stderr.
-*   **Bad:** Plain NDJSON is less friendly for ad-hoc human terminal reading (mitigated by `--output text`).
+*   **Bad:** Plain NDJSON is less friendly for ad-hoc human terminal reading. People read stderr, or pipe stdout through `python3 -m json.tool --json-lines` or `jq`.
 
 ### Confirmation & Testing Strategy
 
@@ -133,4 +141,5 @@ flowchart LR
 
 ## References
 *   Initial Implementation: Pull Request #6 (`cloud-gtm/codemender-runner#6`).
+*   Model followed: [codemender-connect ADR-0001](https://github.com/cloud-ai-fde/codemender-connect/blob/main/adrs/ADR-0001.md) (structured stdout, humans read stderr).
 *   Related Roadmap Items: `docs/future_work.md` (Modular Service Layer & `CLIExecutionService`).

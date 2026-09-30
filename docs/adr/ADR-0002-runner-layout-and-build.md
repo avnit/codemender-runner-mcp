@@ -43,7 +43,7 @@ workflow and Cloud Run jobs depend on.
 ### How to call it
 
 ```
-cm-runner [--output json|text] [--cm-binary PATH] [--log-level LEVEL] <command> [flags]
+cm-runner [--cm-binary PATH] [--log-level LEVEL] <command> [flags]
 ```
 
 *   **Inputs** are command-line flags. A command may also read one input from

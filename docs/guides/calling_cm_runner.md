@@ -11,7 +11,7 @@ what it gives back. The design reasoning is in
 ## The command
 
 ```
-cm-runner [--output json|text] [--cm-binary PATH] [--log-level LEVEL] <command> [flags]
+cm-runner [--cm-binary PATH] [--log-level LEVEL] <command> [flags]
 ```
 
 | Command | What it does | Status |
@@ -52,7 +52,8 @@ integrations should always name a command.
 
 **stdout: one JSON object per line.** Each command writes one kind of line, so
 every line is one unit of work. Ignore fields you don't recognise; new ones may
-be added.
+be added. There is no text mode; to read it by hand, pipe it through
+`python3 -m json.tool --json-lines` or `jq`.
 
 ```json
 {"ts": "2026-09-25T00:43:23Z", "event": "version", "orchestrator": "0.1.0", "cm": {"found": true, "version": "0.9.0", "path": "/usr/local/bin/cm"}, "contract": "cm-0.9.x"}
@@ -110,15 +111,6 @@ checkout already is the current folder, so you rarely need it.
 | `pass` | Fine as it was. | No |
 | `recovered` | Something was missing and `init` fixed it. | No |
 | `fail` | Scans can't run until this is fixed. | Yes: exit `3` |
-
-With `--output text`, the same lines read like this:
-
-```
-✅ cm_binary      cm 0.9.0 at /usr/local/bin/cm
-🔧 cm_workspace   created /root/.codemender/config.yaml with 'cm init'
-✅ cm_config      wrote settings for /workspace: build command npm test, sandbox network permissive-open
-✅ cm_verify      4 passed, 4 warnings
-```
 
 **Exit code:** `0` if nothing failed, `3` if any check failed, `2` if
 `--repo` isn't a folder.
