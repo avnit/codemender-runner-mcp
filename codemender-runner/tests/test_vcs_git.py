@@ -28,8 +28,10 @@ from vcs.git import (
     filter_stageable_files,
     generate_branch_name,
     get_git_auth_header,
+    is_git_repository,
     normalize_repo_relative_path,
     parse_repo_owner_and_name,
+    ref_exists,
     sanitize_git_url,
     setup_local_git_excludes,
 )
@@ -265,6 +267,92 @@ class TestVcsGit(unittest.TestCase):
 
       # Should only contain 'routes/userProfile.ts' exactly once
       self.assertEqual(stageable, ["routes/userProfile.ts"])
+
+  def test_is_git_repository(self):
+    """Verify is_git_repository identifies valid Git worktrees and subdirectories and rejects non-Git paths."""
+    with tempfile.TemporaryDirectory() as non_git_dir:
+      self.assertFalse(is_git_repository(non_git_dir))
+      self.assertFalse(is_git_repository(os.path.join(non_git_dir, "does_not_exist")))
+      self.assertFalse(is_git_repository(""))
+
+    with tempfile.TemporaryDirectory() as repo_dir:
+      subprocess.run(["git", "init"], cwd=repo_dir, check=True, capture_output=True)
+      self.assertTrue(is_git_repository(repo_dir))
+
+      sub_dir = os.path.join(repo_dir, "nested", "subdir")
+      os.makedirs(sub_dir, exist_ok=True)
+      self.assertTrue(is_git_repository(sub_dir))
+
+  def test_ref_exists(self):
+    """Verify ref_exists resolves valid commit refs and rejects missing, malformed, or flag-like refs."""
+    with tempfile.TemporaryDirectory() as repo_dir:
+      self.assertFalse(ref_exists(os.path.join(repo_dir, "nonexistent_dir"), "HEAD"))
+      self.assertFalse(ref_exists("", "HEAD"))
+
+      subprocess.run(["git", "init"], cwd=repo_dir, check=True, capture_output=True)
+      subprocess.run(
+          ["git", "config", "user.name", "Test"],
+          cwd=repo_dir,
+          check=True,
+          capture_output=True,
+      )
+      subprocess.run(
+          ["git", "config", "user.email", "test@example.com"],
+          cwd=repo_dir,
+          check=True,
+          capture_output=True,
+      )
+
+      with open(os.path.join(repo_dir, "README.md"), "w") as f:
+        f.write("# Test\n")
+      subprocess.run(
+          ["git", "add", "README.md"], cwd=repo_dir, check=True, capture_output=True
+      )
+      subprocess.run(
+          ["git", "commit", "-m", "initial commit"],
+          cwd=repo_dir,
+          check=True,
+          capture_output=True,
+      )
+
+      # Create a branch and a tag
+      subprocess.run(
+          ["git", "branch", "feature-branch"],
+          cwd=repo_dir,
+          check=True,
+          capture_output=True,
+      )
+      subprocess.run(
+          ["git", "tag", "v1.0.0"],
+          cwd=repo_dir,
+          check=True,
+          capture_output=True,
+      )
+
+      sha_res = subprocess.run(
+          ["git", "rev-parse", "HEAD"],
+          cwd=repo_dir,
+          check=True,
+          capture_output=True,
+          text=True,
+      )
+      full_sha = sha_res.stdout.strip()
+      short_sha = full_sha[:7]
+
+      # Valid references
+      self.assertTrue(ref_exists(repo_dir, "HEAD"))
+      self.assertTrue(ref_exists(repo_dir, "feature-branch"))
+      self.assertTrue(ref_exists(repo_dir, "v1.0.0"))
+      self.assertTrue(ref_exists(repo_dir, full_sha))
+      self.assertTrue(ref_exists(repo_dir, short_sha))
+
+      # Invalid / missing references
+      self.assertFalse(ref_exists(repo_dir, "origin/nonexistent"))
+      self.assertFalse(ref_exists(repo_dir, "origin/..bad..ref"))
+      self.assertFalse(ref_exists(repo_dir, ""))
+      self.assertFalse(ref_exists(repo_dir, "   "))
+      self.assertFalse(ref_exists(repo_dir, "--help"))
+      self.assertFalse(ref_exists(repo_dir, "-q"))
 
 
 if __name__ == "__main__":

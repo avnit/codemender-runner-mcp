@@ -288,6 +288,50 @@ def sanitize_exploit_and_artifacts(
 
 
 
+def is_git_repository(repo_dir: str) -> bool:
+  """Verifies whether repo_dir is inside a valid Git working tree."""
+  if not repo_dir or not os.path.isdir(repo_dir):
+    return False
+  from utils import run_command
+
+  try:
+    res = run_command(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=repo_dir,
+        check=False,
+    )
+    return res.returncode == 0 and (res.stdout or "").strip() == "true"
+  except Exception:  # pylint: disable=broad-exception-caught
+    return False
+
+
+def ref_exists(repo_dir: str, ref: str) -> bool:
+  """Verifies that ref is a valid, existing Git commit reference in repo_dir."""
+  if not repo_dir or not os.path.isdir(repo_dir):
+    return False
+  clean_ref = (ref or "").strip()
+  if not clean_ref or clean_ref.startswith("-"):
+    return False
+  from utils import run_command
+
+  try:
+    res = run_command(
+        [
+            "git",
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            f"{clean_ref}^{{commit}}",
+        ],
+        cwd=repo_dir,
+        check=False,
+    )
+    return res.returncode == 0
+  except Exception:  # pylint: disable=broad-exception-caught
+    return False
+
+
 def get_pr_changed_lines(repo_dir: str, base_ref: str) -> Optional[dict[str, set[int]]]:
   """Parses Unified Diff hunks to extract modified line numbers per file.
 
