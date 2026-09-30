@@ -151,7 +151,7 @@ class TestStdoutPurity(CLIContractTestBase):
     The reason goes to stderr, so a failed run never leaves a line on stdout
     that a caller could mistake for a result.
     """
-    for command in ("version", "init"):
+    for command in ("version", "init", "find-diff"):
       with self.subTest(command=command):
         result = self.run_cli(command, path=self._empty_dir)
 
@@ -303,7 +303,7 @@ class TestImportIsolation(unittest.TestCase):
     probe = (
         "import sys;"
         "import cli, cli.__main__, cli.events, cli.exit_codes,"
-        " cli.commands.version;"
+        " cli.commands.version, cli.commands.find_diff;"
         "print('main' in sys.modules)"
     )
     env = dict(os.environ)

@@ -137,6 +137,33 @@ def build_parser() -> argparse.ArgumentParser:
       metavar="PATH",
       help="the repository to set up (default: the current directory)",
   )
+  find_diff_parser = subparsers.add_parser(
+      "find-diff",
+      parents=[common],
+      help="scan git diff against a base reference and emit SARIF 2.1.0",
+      description=(
+          "Scan git diff against a base reference and emit compact SARIF 2.1.0"
+          " JSON on stdout."
+      ),
+  )
+  find_diff_parser.add_argument(
+      "--repo",
+      default=".",
+      metavar="PATH",
+      help="the repository to scan (default: the current directory)",
+  )
+  find_diff_parser.add_argument(
+      "--base",
+      default="HEAD",
+      metavar="REF",
+      help="the git reference to diff against (default: HEAD)",
+  )
+  find_diff_parser.add_argument(
+      "--out",
+      default=None,
+      metavar="DIR",
+      help="directory to write report.sarif and report.md artifacts",
+  )
   return parser
 
 
@@ -182,6 +209,12 @@ def main(argv: Optional[List[str]] = None) -> int:
       from cli.commands import init
 
       return init.run(init.config_from_args(args), adapter, emitter)
+    if args.command == "find-diff":
+      from cli.commands import find_diff
+
+      return find_diff.run(
+          find_diff.config_from_args(args), adapter, emitter
+      )
 
   parser.print_help(sys.stderr)
   return exit_codes.USAGE

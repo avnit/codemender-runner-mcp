@@ -35,6 +35,7 @@ from cli import exit_codes
 from cli.commands import find_diff
 from cli.events import EventEmitter
 from codemender.cm import CmAdapter, CmResult, TokenUsage
+from tests.test_cli import CLIContractTestBase, _write_stub_cm
 
 _PKG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -767,6 +768,205 @@ class TestFindDiffImports(unittest.TestCase):
     )
 
     self.assertEqual(result.stdout.strip(), "", result.stdout)
+
+
+class TestFindDiffCLIContract(CLIContractTestBase):
+  """End-to-end subprocess CLI contract tests for `python -m cli find-diff`."""
+
+  def setUp(self):
+    super().setUp()
+    self.tmp = tempfile.mkdtemp(prefix="cm_runner_find_diff_cli_")
+    self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    self.repo = os.path.join(self.tmp, "repo")
+    os.makedirs(self.repo, exist_ok=True)
+    self._init_git_repo(self.repo)
+
+    self.sarif_file = os.path.join(self.tmp, "stub_sarif.json")
+    with open(self.sarif_file, "w", encoding="utf-8") as handle:
+      handle.write(_PRETTY_SARIF_TWO_FINDINGS)
+
+    self.md_file = os.path.join(self.tmp, "stub_report.md")
+    with open(self.md_file, "w", encoding="utf-8") as handle:
+      handle.write(_SAMPLE_MARKDOWN_REPORT)
+
+    self._install_stub_cm(find_exit=0)
+    self._cli_path = f"{self._stub_dir}:/usr/bin:/bin"
+
+  def _init_git_repo(self, repo_dir: str) -> None:
+    subprocess.run(
+        ["git", "init"],
+        cwd=repo_dir,
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"],
+        cwd=repo_dir,
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=repo_dir,
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    readme = os.path.join(repo_dir, "README.md")
+    with open(readme, "w", encoding="utf-8") as handle:
+      handle.write("# Sample Repo\n")
+    subprocess.run(
+        ["git", "add", "README.md"],
+        cwd=repo_dir,
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "Initial commit"],
+        cwd=repo_dir,
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+  def _install_stub_cm(self, find_exit: int = 0) -> None:
+    body = f"""#!/bin/bash
+PATH=/usr/bin:/bin
+case "$*" in
+  --version)
+    echo "cm version 0.9.0"
+    ;;
+  find\\ *)
+    echo "Impact-Aware PR Delta Scan: 2 files in scope"
+    echo "Scanning diff..." >&2
+    exit {find_exit}
+    ;;
+  "report --format sarif")
+    cat "{self.sarif_file}"
+    exit 0
+    ;;
+  "report --format md")
+    cat "{self.md_file}"
+    exit 0
+    ;;
+  *)
+    echo "Unexpected cm args: $*" >&2
+    exit 99
+    ;;
+esac
+"""
+    _write_stub_cm(self._stub_dir, body=body)
+
+  def test_happy_path_emits_one_sarif_json_line_and_keeps_chatter_on_stderr(
+      self,
+  ):
+    res = self.run_cli(
+        "find-diff",
+        "--repo",
+        self.repo,
+        "--base",
+        "HEAD",
+        path=self._cli_path,
+    )
+
+    self.assertEqual(res.returncode, exit_codes.OK, res.stderr)
+    payload = self.assert_stdout_is_one_json_object(res)
+    self.assertEqual(payload["version"], "2.1.0")
+    self.assertEqual(len(payload["runs"][0]["results"]), 2)
+    self.assertIn("Impact-Aware PR Delta Scan", res.stderr)
+    self.assertIn("Scanning diff...", res.stderr)
+    self.assertNotIn("Impact-Aware PR Delta Scan", res.stdout)
+
+  def test_out_flag_writes_report_sarif_and_report_md_and_emits_one_sarif_line(
+      self,
+  ):
+    out_dir = os.path.join(self.tmp, "artifacts")
+    res = self.run_cli(
+        "find-diff",
+        "--repo",
+        self.repo,
+        "--base",
+        "HEAD",
+        "--out",
+        out_dir,
+        path=self._cli_path,
+    )
+
+    self.assertEqual(res.returncode, exit_codes.OK, res.stderr)
+    payload = self.assert_stdout_is_one_json_object(res)
+    self.assertEqual(len(payload["runs"][0]["results"]), 2)
+
+    sarif_path = Path(out_dir) / "report.sarif"
+    md_path = Path(out_dir) / "report.md"
+    self.assertTrue(sarif_path.is_file())
+    self.assertTrue(md_path.is_file())
+    self.assertEqual(
+        len(json.loads(sarif_path.read_text(encoding="utf-8"))["runs"][0]["results"]),
+        2,
+    )
+    self.assertEqual(
+        md_path.read_text(encoding="utf-8"), _SAMPLE_MARKDOWN_REPORT
+    )
+
+  def test_usage_errors_exit_two_with_empty_stdout(self):
+    cases = {
+        "nonexistent repo": [
+            "find-diff",
+            "--repo",
+            os.path.join(self.tmp, "nonexistent"),
+        ],
+        "empty base": ["find-diff", "--repo", self.repo, "--base", ""],
+        "unknown flag --staged": ["find-diff", "--staged"],
+    }
+    for label, argv in cases.items():
+      with self.subTest(case=label):
+        res = self.run_cli(*argv, path=self._cli_path)
+
+        self.assertEqual(res.returncode, exit_codes.USAGE, res.stderr)
+        self.assertEqual(res.stdout, "")
+        self.assertNotEqual(res.stderr.strip(), "")
+
+  def test_failures_exit_three_with_empty_stdout(self):
+    non_git = os.path.join(self.tmp, "plain_dir")
+    os.makedirs(non_git, exist_ok=True)
+
+    with self.subTest(case="non-git repo"):
+      res = self.run_cli(
+          "find-diff", "--repo", non_git, "--base", "HEAD", path=self._cli_path
+      )
+      self.assertEqual(res.returncode, exit_codes.FAILED, res.stderr)
+      self.assertEqual(res.stdout, "")
+      self.assertIn("not inside a Git working tree", res.stderr)
+
+    with self.subTest(case="missing base ref"):
+      res = self.run_cli(
+          "find-diff",
+          "--repo",
+          self.repo,
+          "--base",
+          "origin/no-such-branch",
+          path=self._cli_path,
+      )
+      self.assertEqual(res.returncode, exit_codes.FAILED, res.stderr)
+      self.assertEqual(res.stdout, "")
+      self.assertIn("origin/no-such-branch", res.stderr)
+
+    with self.subTest(case="cm find returns exit 1"):
+      self._install_stub_cm(find_exit=1)
+      res = self.run_cli(
+          "find-diff",
+          "--repo",
+          self.repo,
+          "--base",
+          "HEAD",
+          path=self._cli_path,
+      )
+      self.assertEqual(res.returncode, exit_codes.FAILED, res.stderr)
+      self.assertEqual(res.stdout, "")
 
 
 if __name__ == "__main__":
