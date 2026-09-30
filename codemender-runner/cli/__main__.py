@@ -33,6 +33,9 @@ from cli import exit_codes
 from cli.events import EventEmitter
 from cli.events import JSON
 from cli.events import TEXT
+from codemender.cm import CmAdapter
+
+logger = logging.getLogger(__name__)
 
 _LOG_LEVELS = ("debug", "info", "warning", "error")
 
@@ -128,6 +131,21 @@ def build_parser() -> argparse.ArgumentParser:
       help="report orchestrator, cm, and contract versions",
       description="Report orchestrator, cm, and contract versions.",
   )
+  init_parser = subparsers.add_parser(
+      "init",
+      parents=[common],
+      help="set up cm for a repository and check the result",
+      description=(
+          "Set up cm for a repository and check the result. Emits one "
+          "'check' event per step; exits 3 if any check fails."
+      ),
+  )
+  init_parser.add_argument(
+      "--repo",
+      default=".",
+      metavar="PATH",
+      help="the repository to set up (default: the current directory)",
+  )
   return parser
 
 
@@ -158,14 +176,53 @@ def main(argv: Optional[List[str]] = None) -> int:
   # which captures its output.
   emitter = EventEmitter(stream=sys.stdout, output_format=args.output)
 
+  # Every command needs `cm`, so it is checked once, here, before any command
+  # starts. A command is only ever given an adapter that works.
+  adapter = _find_cm(args.cm_binary)
+  if adapter is None:
+    return exit_codes.FAILED
+
   with contextlib.redirect_stdout(sys.stderr):
     if args.command == "version":
       from cli.commands import version
 
-      return version.run(args, emitter)
+      return version.run(adapter, emitter)
+    if args.command == "init":
+      from cli.commands import init
+
+      return init.run(init.config_from_args(args), adapter, emitter)
 
   parser.print_help(sys.stderr)
   return exit_codes.USAGE
+
+
+def _find_cm(binary: Optional[str]) -> Optional[CmAdapter]:
+  """Finds `cm` and checks that it runs.
+
+  `CmAdapter.locate` only finds a path: an explicit `--cm-binary` is not
+  checked at all, and a PATH lookup only confirms there is an executable file
+  named `cm`. Running `cm --version` is what catches a wrong path, a binary
+  built for another CPU, or a broken download.
+
+  On failure the reason goes to stderr and nothing is written to stdout, so a
+  failed run never leaves a line that looks like a result (ADR-0001).
+
+  Args:
+    binary: The `--cm-binary` flag, or None to look `cm` up on PATH.
+
+  Returns:
+    An adapter whose `cm --version` worked, or None if `cm` is missing or
+    will not run.
+  """
+  adapter = CmAdapter.locate(binary)
+  if adapter is None:
+    logger.error("cm not found on PATH. Install it, or pass --cm-binary.")
+    return None
+  if adapter.version() is None:
+    # `version()` has already logged why.
+    logger.error("%s did not run 'cm --version'.", adapter.binary)
+    return None
+  return adapter
 
 
 if __name__ == "__main__":

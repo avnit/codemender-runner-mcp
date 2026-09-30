@@ -159,6 +159,8 @@ class CmAdapter:
       binary: Path to the `cm` executable, or a name to look up on PATH.
     """
     self.binary = binary
+    # Set by the first successful `version()` call.
+    self._version: Optional[str] = None
 
   @classmethod
   def locate(cls, binary: Optional[str] = None) -> Optional["CmAdapter"]:
@@ -240,9 +242,14 @@ class CmAdapter:
     is parsed, so a notice `cm` prints on stderr is never taken for the
     version.
 
+    Once a version has been read it is kept, so later calls return it without
+    running `cm` again. A failed read is not kept.
+
     Args:
       timeout_sec: Seconds to wait for `cm --version`.
     """
+    if self._version is not None:
+      return self._version
     result = self.run(["--version"], timeout_sec=timeout_sec)
     if result.error:
       logger.warning(
@@ -254,7 +261,8 @@ class CmAdapter:
           "cm --version exited %d: %s", result.exit_code, result.stderr.strip()
       )
       return None
-    return _normalise_version(result.stdout)
+    self._version = _normalise_version(result.stdout)
+    return self._version
 
 
 def _normalise_version(raw: Optional[str]) -> Optional[str]:
@@ -283,23 +291,21 @@ def _normalise_version(raw: Optional[str]) -> Optional[str]:
 
 
 def detect_cm(
-    cm_binary: Optional[str] = None,
+    adapter: CmAdapter,
     timeout_sec: float = _VERSION_TIMEOUT_SEC,
 ) -> Dict[str, Any]:
-  """Locates the cm binary and reads its version without ever raising.
+  """Reads the version of an already located cm without ever raising.
 
   Args:
-    cm_binary: Explicit path to cm. When None, cm is looked up on PATH.
+    adapter: The cm found by `CmAdapter.locate`.
     timeout_sec: How long to wait for `cm --version` before giving up.
 
   Returns:
-    A dict with `found`, `version` and `path` keys. `found` is False when no
-    binary could be located; `version` may be None even when found, if the
-    binary exists but could not be executed, timed out, or could not be parsed.
+    A dict with `found`, `version` and `path` keys. `found` is always True;
+    it stays so the `version` event keeps the shape published in ADR-0001.
+    `version` may be None if the binary could not be executed, timed out,
+    or its output could not be parsed.
   """
-  adapter = CmAdapter.locate(cm_binary)
-  if adapter is None:
-    return {"found": False, "version": None, "path": None}
   return {
       "found": True,
       "version": adapter.version(timeout_sec=timeout_sec),

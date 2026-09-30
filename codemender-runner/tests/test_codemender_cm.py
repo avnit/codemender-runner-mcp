@@ -180,7 +180,7 @@ class TestCodeMenderCm(unittest.TestCase):
         stdout="cm version 0.9.0\n",
         stderr="",
     )
-    res = detect_cm("/usr/local/bin/cm")
+    res = detect_cm(CmAdapter("/usr/local/bin/cm"))
     self.assertEqual(res, {
         "found": True,
         "version": "0.9.0",
@@ -197,13 +197,6 @@ class TestCodeMenderCm(unittest.TestCase):
         check=False,
     )
 
-  @patch("codemender.cm.shutil.which")
-  def test_detect_cm_not_found(self, mock_which):
-    """Verify detect_cm returns found=False when binary is missing."""
-    mock_which.return_value = None
-    res = detect_cm(None)
-    self.assertEqual(res, {"found": False, "version": None, "path": None})
-
   @patch("codemender.cm.subprocess.run")
   def test_detect_cm_command_error(self, mock_run):
     """Verify detect_cm returns found=True, version=None when command fails."""
@@ -212,7 +205,7 @@ class TestCodeMenderCm(unittest.TestCase):
         stdout="",
         stderr="error: unknown option",
     )
-    res = detect_cm("/usr/local/bin/cm")
+    res = detect_cm(CmAdapter("/usr/local/bin/cm"))
     self.assertEqual(res, {
         "found": True,
         "version": None,
@@ -223,12 +216,37 @@ class TestCodeMenderCm(unittest.TestCase):
   def test_detect_cm_exception(self, mock_run):
     """Verify detect_cm catches OS errors gracefully."""
     mock_run.side_effect = OSError("Permission denied")
-    res = detect_cm("/usr/local/bin/cm")
+    res = detect_cm(CmAdapter("/usr/local/bin/cm"))
     self.assertEqual(res, {
         "found": True,
         "version": None,
         "path": "/usr/local/bin/cm",
     })
+
+  @patch("codemender.cm.subprocess.run")
+  def test_version_is_read_once_and_kept(self, mock_run):
+    """A version read once is returned again without running cm."""
+    mock_run.return_value = MagicMock(
+        returncode=0, stdout="cm version 0.9.0\n", stderr=""
+    )
+    adapter = CmAdapter("/usr/local/bin/cm")
+
+    self.assertEqual(adapter.version(), "0.9.0")
+    self.assertEqual(adapter.version(), "0.9.0")
+    mock_run.assert_called_once()
+
+  @patch("codemender.cm.subprocess.run")
+  def test_failed_version_read_is_not_kept(self, mock_run):
+    """After a failed read, the next call runs cm again."""
+    mock_run.side_effect = [
+        MagicMock(returncode=1, stdout="", stderr="boom"),
+        MagicMock(returncode=0, stdout="cm version 0.9.0\n", stderr=""),
+    ]
+    adapter = CmAdapter("/usr/local/bin/cm")
+
+    self.assertIsNone(adapter.version())
+    self.assertEqual(adapter.version(), "0.9.0")
+    self.assertEqual(mock_run.call_count, 2)
 
 
 class TestVersionParsing(unittest.TestCase):
@@ -278,7 +296,7 @@ class TestDetectCmWithStubBinary(unittest.TestCase):
 
     start = time.monotonic()
     with self.assertLogs("codemender-orchestrator", level="WARNING") as logs:
-      res = detect_cm(stub, timeout_sec=1)
+      res = detect_cm(CmAdapter(stub), timeout_sec=1)
     elapsed = time.monotonic() - start
 
     self.assertLess(elapsed, 10, "timeout_sec was not honoured")
@@ -293,7 +311,7 @@ class TestDetectCmWithStubBinary(unittest.TestCase):
         'echo "cm version 1.0.0"\n'
     )
 
-    res = detect_cm(stub)
+    res = detect_cm(CmAdapter(stub))
 
     self.assertEqual(res["version"], "1.0.0")
 

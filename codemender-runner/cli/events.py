@@ -21,12 +21,13 @@ The output contract, which every command must honour:
   3. Each command emits one event type, so every stdout line is one unit of
      work. There is no trailing summary event: success or failure comes from
      the exit code, and error messages go to stderr.
-  4. `--output text` swaps only the renderer. The underlying events are
-     identical.
+  4. `--output text` swaps only the rendering. The underlying events are
+     identical. Each command supplies its own text line with `emit(text=...)`;
+     this module knows nothing about any particular command.
 
 Events are emitted as work happens rather than batched at the end: `init`
-shells out to `gcloud` and `cm` and can take tens of seconds, and a silent CI
-log looks like a hang.
+runs `cm` several times and can take tens of seconds, and a silent CI log
+looks like a hang.
 """
 
 from __future__ import annotations
@@ -65,11 +66,16 @@ class EventEmitter:
     self.stream = stream if stream is not None else sys.stdout
     self.output_format = output_format
 
-  def emit(self, event: str, **fields: Any) -> Dict[str, Any]:
+  def emit(
+      self, event: str, *, text: Optional[str] = None, **fields: Any
+  ) -> Dict[str, Any]:
     """Writes a single event and returns the payload that was written.
 
     Args:
       event: The event type, e.g. "version", "check", "finding".
+      text: How the event reads in `--output text` mode, supplied by the
+        command. Not part of the event data. When None, text mode shows the
+        fields as `key=value` pairs.
       **fields: Arbitrary event-specific data.
 
     Returns:
@@ -80,7 +86,7 @@ class EventEmitter:
     payload.update(fields)
 
     if self.output_format == TEXT:
-      line = self._render_text(payload)
+      line = text if text is not None else _key_value_text(payload)
     else:
       line = json.dumps(payload)
 
@@ -89,19 +95,7 @@ class EventEmitter:
     self.stream.flush()
     return payload
 
-  @staticmethod
-  def _render_text(payload: Dict[str, Any]) -> str:
-    """Renders an event for human eyes."""
-    event = payload.get("event")
 
-    if event == "version":
-      cm = payload.get("cm") or {}
-      cm_line = cm.get("version") if cm.get("found") else "not found"
-      return (
-          f"cm-runner  {payload.get('orchestrator')}\n"
-          f"cm         {cm_line}\n"
-          f"contract   {payload.get('contract')}"
-      )
-
-    # Generic fallback: every field except the timestamp, space separated.
-    return " ".join(f"{k}={v}" for k, v in payload.items() if k != "ts")
+def _key_value_text(payload: Dict[str, Any]) -> str:
+  """Text fallback: every field except the timestamp, space separated."""
+  return " ".join(f"{k}={v}" for k, v in payload.items() if k != "ts")

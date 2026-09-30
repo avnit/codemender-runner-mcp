@@ -48,6 +48,7 @@ from cli import exit_codes
 from cli.events import EventEmitter
 from cli.events import JSON
 from cli.events import TEXT
+from codemender.cm import CmAdapter
 
 # Directory containing the `cli` package, used as cwd so `python -m cli` works.
 _PKG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -57,30 +58,54 @@ _PKG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # fixture for the "binary is present but will not report a version" case.
 _FAKE_CM = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cm")
 
+# A stub cm that only answers `--version`, which is all `main` needs from it.
+_WORKING_CM_BODY = '#!/bin/sh\necho "cm version 0.9.0"\n'
+
+
+def _write_stub_cm(directory, body=_WORKING_CM_BODY):
+  """Writes an executable `cm` stub into `directory` and returns its path."""
+  path = os.path.join(directory, "cm")
+  with open(path, "w", encoding="utf-8") as handle:
+    handle.write(body)
+  os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC | stat.S_IXGRP)
+  return path
+
+
+def _temp_dir(test):
+  """Makes a temporary folder that is removed when `test` finishes."""
+  directory = tempfile.mkdtemp(prefix="cm_runner_test_")
+  test.addCleanup(shutil.rmtree, directory, True)
+  return directory
+
 
 class CLIContractTestBase(unittest.TestCase):
-  """Runs the CLI in a subprocess with a controlled, empty PATH."""
+  """Runs the CLI in a subprocess with a controlled PATH."""
 
   def setUp(self):
     super().setUp()
-    # An empty PATH means a real `cm` installed on the developer's machine can
-    # never leak into a test result. Without this, these tests would pass or
-    # fail depending on whose laptop they run on.
+    # PATH only ever holds folders made here, so a real `cm` installed on the
+    # developer's machine can never leak into a test result. Without this,
+    # these tests would pass or fail depending on whose laptop they run on.
     self._empty_dir = tempfile.mkdtemp(prefix="cm_runner_test_")
     self.addCleanup(shutil.rmtree, self._empty_dir, True)
+    # Every command needs a `cm` that runs, so by default PATH holds a stub.
+    self._stub_dir = tempfile.mkdtemp(prefix="cm_runner_stub_")
+    self.addCleanup(shutil.rmtree, self._stub_dir, True)
+    _write_stub_cm(self._stub_dir)
 
   def run_cli(self, *args, path=None):
     """Invokes `python -m cli` and captures both streams separately.
 
     Args:
       *args: Arguments passed after `-m cli`.
-      path: Value for PATH in the child. Defaults to an empty directory.
+      path: Value for PATH in the child. Defaults to a folder holding only a
+        working stub `cm`.
 
     Returns:
       The completed process, with text-mode stdout and stderr.
     """
     env = dict(os.environ)
-    env["PATH"] = self._empty_dir if path is None else path
+    env["PATH"] = self._stub_dir if path is None else path
     # Keep the child from writing .pyc files into the source tree, and stop
     # any inherited PYTHONPATH from changing what `cli` resolves to.
     env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -123,19 +148,19 @@ class TestStdoutPurity(CLIContractTestBase):
     self.assertIn("ts", payload)
     self.assertIn("contract", payload)
 
-  def test_missing_cm_still_succeeds_with_clean_stdout(self):
-    """A missing cm is reported in the payload, not as a failure.
+  def test_missing_cm_fails_with_empty_stdout(self):
+    """With no cm, main exits 3 before any command runs; stdout stays empty.
 
-    Hard-failing on a missing binary is `init`'s job. `version` must stay
-    usable for diagnosing the very environment that is missing cm.
+    The reason goes to stderr, so a failed run never leaves a line on stdout
+    that a caller could mistake for a result.
     """
-    result = self.run_cli("version")
+    for command in ("version", "init"):
+      with self.subTest(command=command):
+        result = self.run_cli(command, path=self._empty_dir)
 
-    self.assertEqual(result.returncode, exit_codes.OK, result.stderr)
-    payload = self.assert_stdout_is_one_json_object(result)
-    self.assertFalse(payload["cm"]["found"])
-    self.assertIsNone(payload["cm"]["version"])
-    self.assertIsNone(payload["cm"]["path"])
+        self.assertEqual(result.returncode, exit_codes.FAILED, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("cm not found", result.stderr)
 
   def test_usage_error_exits_two_and_leaves_stdout_empty(self):
     """argparse must never write to stdout, on any error path."""
@@ -229,18 +254,26 @@ class TestCmDetection(CLIContractTestBase):
     self.assertTrue(payload["cm"]["found"])
     self.assertEqual(payload["cm"]["version"], "4.5.6")
 
-  def test_binary_present_but_version_unreadable(self):
-    """A cm that fails `--version` is found, but reports no version.
+  def test_binary_present_but_version_unreadable_fails(self):
+    """A cm that fails `--version` is found but does not run: exit 3.
 
-    Uses the repo's existing dummy cm, which rejects `--version`. The command
-    must still succeed and must not leak the child's error text to stdout.
+    Uses the repo's existing dummy cm, which rejects `--version`. Stdout
+    stays empty, and the child's error text does not leak onto it.
     """
     result = self.run_cli("version", "--cm-binary", _FAKE_CM)
 
-    self.assertEqual(result.returncode, exit_codes.OK)
-    payload = self.assert_stdout_is_one_json_object(result)
-    self.assertTrue(payload["cm"]["found"])
-    self.assertIsNone(payload["cm"]["version"])
+    self.assertEqual(result.returncode, exit_codes.FAILED, result.stderr)
+    self.assertEqual(result.stdout, "")
+    self.assertIn("did not run 'cm --version'", result.stderr)
+
+  def test_cm_binary_that_does_not_exist_fails(self):
+    """`locate` accepts any --cm-binary path; running it is what fails."""
+    missing = os.path.join(self._empty_dir, "no_such_cm")
+
+    result = self.run_cli("version", "--cm-binary", missing)
+
+    self.assertEqual(result.returncode, exit_codes.FAILED, result.stderr)
+    self.assertEqual(result.stdout, "")
 
   def test_noisy_cm_cannot_pollute_stdout(self):
     """Child process chatter is captured, never forwarded to our stdout.
@@ -361,25 +394,28 @@ class TestEventEmitter(unittest.TestCase):
     self.assertEqual(payload["orchestrator"], "0.1.0")
     self.assertRegex(payload["ts"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
-  def test_text_renderer_does_not_change_the_event(self):
-    """--output text swaps only the rendering, never the data."""
+  def test_text_mode_writes_supplied_text_and_keeps_the_data(self):
+    """--output text writes the command's text; the event data is the same."""
     json_stream, text_stream = StringIO(), StringIO()
+    fields = {"orchestrator": "0.1.0", "contract": "cm-0.9.x"}
 
     from_json = EventEmitter(stream=json_stream, output_format=JSON).emit(
-        "version", orchestrator="0.1.0", cm={"found": False}, contract="cm-0.9.x"
+        "version", text="human line", **fields
     )
     from_text = EventEmitter(stream=text_stream, output_format=TEXT).emit(
-        "version", orchestrator="0.1.0", cm={"found": False}, contract="cm-0.9.x"
+        "version", text="human line", **fields
     )
 
     self.assertEqual(
         {k: v for k, v in from_json.items() if k != "ts"},
         {k: v for k, v in from_text.items() if k != "ts"},
     )
-    self.assertIn("not found", text_stream.getvalue())
+    self.assertEqual(text_stream.getvalue(), "human line\n")
+    # The text is for humans only; it is never part of the JSON event.
+    self.assertNotIn("text", json.loads(json_stream.getvalue()))
 
   def test_unknown_event_falls_back_to_key_value_text(self):
-    """Text rendering must not crash on an event it has no template for."""
+    """With no text supplied, text mode shows the fields as key=value."""
     stream = StringIO()
     emitter = EventEmitter(stream=stream, output_format=TEXT)
 
@@ -388,6 +424,16 @@ class TestEventEmitter(unittest.TestCase):
     rendered = stream.getvalue()
     self.assertIn("alpha=1", rendered)
     self.assertIn("beta=two", rendered)
+
+  def test_version_text_shows_the_cm_version(self):
+    """The `version` command's own text layout shows cm's version."""
+    from cli.commands import version
+
+    stream = StringIO()
+    adapter = CmAdapter(_write_stub_cm(_temp_dir(self)))
+    version.run(adapter, EventEmitter(stream=stream, output_format=TEXT))
+
+    self.assertIn("cm         0.9.0", stream.getvalue())
 
 
 class TestExitCodes(unittest.TestCase):
@@ -412,8 +458,9 @@ class TestCmRunnerScript(unittest.TestCase):
     self.assertTrue(os.access(self._script, os.X_OK))
 
   def test_script_runs_version(self):
+    stub = _write_stub_cm(_temp_dir(self))
     result = subprocess.run(
-        [self._script, "version"],
+        [self._script, "version", "--cm-binary", stub],
         cwd=_PKG_DIR,
         capture_output=True,
         text=True,
@@ -467,8 +514,9 @@ class TestPackageDirectoryExecution(unittest.TestCase):
   """Tests for running the codemender-runner package directory directly via python3."""
 
   def test_package_directory_runs_version(self):
+    stub = _write_stub_cm(_temp_dir(self))
     result = subprocess.run(
-        [sys.executable, _PKG_DIR, "version"],
+        [sys.executable, _PKG_DIR, "version", "--cm-binary", stub],
         capture_output=True,
         text=True,
         timeout=30,
@@ -622,16 +670,19 @@ class TestStdoutRedirectDuringCommand(unittest.TestCase):
     with open(fake_git, "w", encoding="utf-8") as f:
       f.write('#!/bin/sh\necho "fatal: not a git repo"\nexit 128\n')
     os.chmod(fake_git, 0o755)
+    # `main` checks cm before the command runs, so a working stub sits next
+    # to the fake git.
+    _write_stub_cm(temp_dir)
 
     probe = (
         "import sys\n"
         "import cli.commands.version as version_cmd\n"
         "from cli.__main__ import main\n"
         "from vcs.git import clean_workspace\n"
-        "def noisy_detect_cm(path):\n"
+        "def noisy_detect_cm(adapter):\n"
         f"  clean_workspace({temp_dir!r})\n"
         "  print('stray print from a helper')\n"
-        "  return {'found': False, 'version': None, 'path': None}\n"
+        "  return {'found': True, 'version': '0.9.0', 'path': adapter.binary}\n"
         "version_cmd.detect_cm = noisy_detect_cm\n"
         "rc = main(['version'])\n"
         "sys.stderr.write(f'restored={sys.stdout is sys.__stdout__}\\n')\n"
@@ -639,7 +690,8 @@ class TestStdoutRedirectDuringCommand(unittest.TestCase):
     )
 
     env = dict(os.environ)
-    # Only the fake git is reachable: no real cm or git can leak in.
+    # Only the fake git and the stub cm are reachable: no real cm or git can
+    # leak in.
     env["PATH"] = temp_dir
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env.pop("PYTHONPATH", None)

@@ -14,21 +14,19 @@
 
 """`cm-runner version` -- report orchestrator, cm, and contract versions.
 
-This command must **never fail because `cm` is missing**. It is the command you
-run precisely when something is broken, so a missing binary is reported as data
-(`"found": false`) and the exit code stays 0.
-
-That is the opposite of `cm-runner init`, where a missing `cm` is a hard
-failure. The asymmetry is intentional: `version` diagnoses, `init` gates.
+`main` checks that `cm` is present and runs before any command starts. If it
+is not, the run exits `exit_codes.FAILED` with the reason on stderr and this
+command never runs.
 """
 
 from __future__ import annotations
 
-import argparse
+from typing import Any, Dict
 
 import cli
 from cli import exit_codes
 from cli.events import EventEmitter
+from codemender.cm import CmAdapter
 from codemender.cm import detect_cm
 
 # The `cm` CLI surface this orchestrator was built and tested against.
@@ -40,20 +38,31 @@ from codemender.cm import detect_cm
 CM_CONTRACT = "cm-0.9.x"
 
 
-def run(args: argparse.Namespace, emitter: EventEmitter) -> int:
+def run(adapter: CmAdapter, emitter: EventEmitter) -> int:
   """Emits a single `version` event.
 
   Args:
-    args: Parsed CLI arguments; only `cm_binary` is consulted.
+    adapter: The cm found and checked by `main`.
     emitter: Destination for the event.
 
   Returns:
     Always `exit_codes.OK`.
   """
+  cm = detect_cm(adapter)
   emitter.emit(
       "version",
+      text=_version_text(cli.__version__, cm, CM_CONTRACT),
       orchestrator=cli.__version__,
-      cm=detect_cm(getattr(args, "cm_binary", None)),
+      cm=cm,
       contract=CM_CONTRACT,
   )
   return exit_codes.OK
+
+
+def _version_text(orchestrator: str, cm: Dict[str, Any], contract: str) -> str:
+  """How the `version` event reads in `--output text` mode."""
+  return (
+      f"cm-runner  {orchestrator}\n"
+      f"cm         {cm['version']}\n"
+      f"contract   {contract}"
+  )
