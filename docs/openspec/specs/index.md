@@ -1,0 +1,9 @@
+# OpenSpec Specifications Index
+
+This directory contains the formal OpenSpec specification (`spec.md`) and design
+(`design.md`) documents governing the CodeMender Orchestrator (`cm-runner`)
+capabilities.
+
+| Spec ID                             | Name                             | Level     | Status | Primary Focus                                                                   |
+| :---------------------------------- | :------------------------------- | :-------- | :----- | :------------------------------------------------------------------------------ |
+| [SPEC-FIND-DIFF](find-diff/spec.md) | [find-diff](find-diff/design.md) | Component | Draft  | Native Impact-Aware Differential Vulnerability Scanning (`cm-runner find-diff`) |
