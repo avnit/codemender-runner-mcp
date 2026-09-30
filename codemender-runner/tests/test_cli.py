@@ -513,6 +513,67 @@ class TestCliArchitectureRules(unittest.TestCase):
           py_files.append(os.path.join(root, f))
     return py_files
 
+  def _get_codemender_python_files(self):
+    codemender_dir = os.path.join(_PKG_DIR, "codemender")
+    py_files = []
+    for root, _, files in os.walk(codemender_dir):
+      for f in files:
+        if f.endswith(".py"):
+          py_files.append(os.path.join(root, f))
+    return py_files
+
+  def _assert_no_env_scrubbing_in_tree(self, tree, source_label):
+    banned_symbols = {"get_scrubbed_env", "SENSITIVE_ENV_VARS"}
+    for node in ast.walk(tree):
+      if isinstance(node, ast.ImportFrom):
+        for alias in node.names:
+          self.assertNotIn(
+              alias.name,
+              banned_symbols,
+              f"{source_label}:{node.lineno} imports banned symbol"
+              f" '{alias.name}'",
+          )
+      elif isinstance(node, ast.Attribute):
+        self.assertNotIn(
+            node.attr,
+            banned_symbols,
+            f"{source_label}:{node.lineno} accesses banned attribute"
+            f" '{node.attr}'",
+        )
+      elif isinstance(node, ast.Name):
+        self.assertNotIn(
+            node.id,
+            banned_symbols,
+            f"{source_label}:{node.lineno} references banned symbol"
+            f" '{node.id}'",
+        )
+
+  def test_cli_and_codemender_do_not_reference_env_scrubbing(self):
+    """ADR-0003 Confirmation: cli/ and codemender/ must never reference get_scrubbed_env or SENSITIVE_ENV_VARS."""
+    target_files = (
+        self._get_cli_python_files() + self._get_codemender_python_files()
+    )
+    self.assertGreater(len(target_files), 0)
+    for py_file in target_files:
+      with self.subTest(file=os.path.relpath(py_file, _PKG_DIR)):
+        with open(py_file, "r", encoding="utf-8") as handle:
+          tree = ast.parse(handle.read(), filename=py_file)
+        self._assert_no_env_scrubbing_in_tree(tree, py_file)
+
+    synthetic_violations = {
+        "import_from": (
+            "from config import get_scrubbed_env, SENSITIVE_ENV_VARS\n"
+        ),
+        "attribute_access": "config.get_scrubbed_env(repo)\n",
+        "name_reference": " _ = SENSITIVE_ENV_VARS\n".lstrip(),
+    }
+    for label, snippet in synthetic_violations.items():
+      with self.subTest(synthetic=label):
+        with self.assertRaises(AssertionError):
+          self._assert_no_env_scrubbing_in_tree(
+              ast.parse(snippet, filename="<synthetic>"), "<synthetic>"
+          )
+
   def test_cli_modules_do_not_import_subprocess(self):
     """CLI modules must never import subprocess directly; cm runs through codemender.cm.CmAdapter, git through vcs/git.py."""
     for py_file in self._get_cli_python_files():
