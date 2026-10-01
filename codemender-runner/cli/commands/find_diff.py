@@ -61,22 +61,43 @@ class FindDiffConfig:
   base: str = "HEAD"
   out: Optional[Path] = None
 
+  def __post_init__(self) -> None:
+    if isinstance(self.base, str):
+      object.__setattr__(self, "base", self.base.strip())
+
   def validate(self) -> int:
-    """Validates command-line options before running Git or `cm`.
+    """Validates command-line options and Git pre-flight checks before running `cm`.
 
     Returns:
-      `exit_codes.OK` when all options are valid, or `exit_codes.USAGE` (with
-      the reason logged to stderr) when any option is invalid.
+      `exit_codes.OK` when all options and Git pre-flight checks pass,
+      `exit_codes.USAGE` when CLI options are invalid, or `exit_codes.FAILED`
+      when `--repo` is not a Git working tree or `--base` does not resolve to
+      a valid commit.
     """
     if not self.repo.is_dir():
       logger.error("--repo %s is not a directory.", self.repo)
       return exit_codes.USAGE
-    if not isinstance(self.base, str) or not self.base.strip():
+    if not isinstance(self.base, str) or not self.base:
       logger.error("--base must be a non-empty Git reference.")
       return exit_codes.USAGE
     if self.out is not None and self.out.exists() and not self.out.is_dir():
       logger.error("--out %s exists and is not a directory.", self.out)
       return exit_codes.USAGE
+
+    # Pre-flight checks: verify target directory is a Git working tree and base
+    # reference resolves to an existing commit before spawning `cm`.
+    if not git.is_git_repository(self.repo.as_posix()):
+      logger.error("--repo %s is not inside a Git working tree.", self.repo)
+      return exit_codes.FAILED
+
+    if not git.ref_exists(self.repo.as_posix(), self.base):
+      logger.error(
+          "--base reference %r does not exist or is invalid in %s.",
+          self.base,
+          self.repo,
+      )
+      return exit_codes.FAILED
+
     return exit_codes.OK
 
 
@@ -87,7 +108,7 @@ def config_from_args(args: argparse.Namespace) -> FindDiffConfig:
   out_arg = getattr(args, "out", None)
   return FindDiffConfig(
       repo=Path(repo_arg).expanduser().resolve(),
-      base=base_arg,
+      base=base_arg.strip() if isinstance(base_arg, str) else base_arg,
       out=(
           Path(out_arg).expanduser().resolve()
           if out_arg is not None
@@ -117,38 +138,26 @@ def run(
   if err != exit_codes.OK:
     return err
 
-  repo_str = str(cfg.repo)
-  base_ref = cfg.base.strip()
-
-  # Pre-flight checks: verify target directory is a Git working tree and base
-  # reference resolves to an existing commit before spawning `cm`.
-  if not git.is_git_repository(repo_str):
-    logger.error("--repo %s is not inside a Git working tree.", cfg.repo)
-    return exit_codes.FAILED
-
-  if not git.ref_exists(repo_str, base_ref):
-    logger.error(
-        "--base reference %r does not exist or is invalid in %s.",
-        base_ref,
-        cfg.repo,
-    )
-    return exit_codes.FAILED
-
   # Step 1: Differential scan via `cm find --diff`.
   find_result = adapter.run(
-      ["find", repo_str, "-y", f"--diff={base_ref}", "--fail-on", "NONE"],
-      cwd=repo_str,
+      [
+          "find",
+          cfg.repo.as_posix(),
+          "-y",
+          f"--diff={cfg.base}",
+          "--fail-on",
+          "NONE",
+      ],
+      cwd=cfg.repo.as_posix(),
       timeout_sec=_FIND_DIFF_TIMEOUT_SEC,
   )
-  if find_result.stdout and find_result.stdout.strip():
-    logger.info("cm find --diff stdout:\n%s", find_result.stdout.rstrip())
-  if find_result.stderr and find_result.stderr.strip():
-    logger.info("cm find --diff stderr:\n%s", find_result.stderr.rstrip())
+  logger.info("cm find --diff stdout:\n%s", find_result.stdout.rstrip())
+  logger.info("cm find --diff stderr:\n%s", find_result.stderr.rstrip())
 
   if not find_result.ok:
     logger.error(
         "'cm find --diff=%s' failed (exit %s, error %s). stderr:\n%s",
-        base_ref,
+        cfg.base,
         find_result.exit_code,
         find_result.error,
         find_result.stderr,
@@ -158,11 +167,11 @@ def run(
   # Step 2: Extract SARIF 2.1.0 report via `cm report --format sarif`.
   sarif_result = adapter.run(
       ["report", "--format", "sarif"],
-      cwd=repo_str,
+      cwd=cfg.repo.as_posix(),
       timeout_sec=_CM_REPORT_TIMEOUT_SEC,
   )
-  if sarif_result.stderr and sarif_result.stderr.strip():
-    logger.info(
+  if sarif_result.stderr.strip():
+    logger.debug(
         "cm report --format sarif stderr:\n%s", sarif_result.stderr.rstrip()
     )
 
@@ -197,11 +206,11 @@ def run(
   if cfg.out is not None:
     md_result = adapter.run(
         ["report", "--format", "md"],
-        cwd=repo_str,
+        cwd=cfg.repo.as_posix(),
         timeout_sec=_CM_REPORT_TIMEOUT_SEC,
     )
-    if md_result.stderr and md_result.stderr.strip():
-      logger.info(
+    if md_result.stderr.strip():
+      logger.debug(
           "cm report --format md stderr:\n%s", md_result.stderr.rstrip()
       )
     if not md_result.ok:
@@ -229,12 +238,12 @@ def run(
   if finding_count == 0:
     logger.info(
         "cm-runner find-diff completed cleanly against %s: 0 findings.",
-        base_ref,
+        cfg.base,
     )
   else:
     logger.info(
         "cm-runner find-diff completed against %s: %d finding(s).",
-        base_ref,
+        cfg.base,
         finding_count,
     )
 

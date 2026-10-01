@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 from typing import Any, List, Optional, Tuple
 
 from utils import retry_on_exception
@@ -292,16 +293,19 @@ def is_git_repository(repo_dir: str) -> bool:
   """Verifies whether repo_dir is inside a valid Git working tree."""
   if not repo_dir or not os.path.isdir(repo_dir):
     return False
-  from utils import run_command
 
   try:
-    res = run_command(
+    res = subprocess.run(
         ["git", "rev-parse", "--is-inside-work-tree"],
         cwd=repo_dir,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=30,
         check=False,
     )
     return res.returncode == 0 and (res.stdout or "").strip() == "true"
-  except Exception:  # pylint: disable=broad-exception-caught
+  except (OSError, subprocess.SubprocessError):
     return False
 
 
@@ -312,10 +316,9 @@ def ref_exists(repo_dir: str, ref: str) -> bool:
   clean_ref = (ref or "").strip()
   if not clean_ref or clean_ref.startswith("-"):
     return False
-  from utils import run_command
 
   try:
-    res = run_command(
+    res = subprocess.run(
         [
             "git",
             "rev-parse",
@@ -325,10 +328,14 @@ def ref_exists(repo_dir: str, ref: str) -> bool:
             f"{clean_ref}^{{commit}}",
         ],
         cwd=repo_dir,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=30,
         check=False,
     )
     return res.returncode == 0
-  except Exception:  # pylint: disable=broad-exception-caught
+  except (OSError, subprocess.SubprocessError):
     return False
 
 

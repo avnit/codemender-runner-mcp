@@ -240,6 +240,7 @@ class FindDiffTestBase(unittest.TestCase):
       self,
       cfg: find_diff.FindDiffConfig,
       adapter: CmAdapter,
+      log_level: str = "info",
   ) -> Tuple[int, str, str]:
     """Runs `find_diff.run` with stdout/stderr isolation matching `cli/__main__.py`."""
     stdout_buf = StringIO()
@@ -248,7 +249,7 @@ class FindDiffTestBase(unittest.TestCase):
     with contextlib.redirect_stderr(stderr_buf), contextlib.redirect_stdout(
         stderr_buf
     ):
-      cli_main.configure_logging("info")
+      cli_main.configure_logging(log_level)
       rc = find_diff.run(cfg, adapter, emitter)
     # Restore default stderr handler after capture so logging doesn't hold closed StringIO
     cli_main.configure_logging("info")
@@ -265,6 +266,11 @@ class TestFindDiffConfigFromArgs(FindDiffTestBase):
     self.assertEqual(cfg.repo, Path(".").expanduser().resolve())
     self.assertEqual(cfg.base, "HEAD")
     self.assertIsNone(cfg.out)
+
+  def test_strips_surrounding_whitespace_on_base(self):
+    args = argparse.Namespace(repo=self.repo, base="  origin/main \n", out=None)
+    cfg = find_diff.config_from_args(args)
+    self.assertEqual(cfg.base, "origin/main")
 
   def test_tilde_expansion_on_repo_and_out(self):
     old_home = os.environ.get("HOME")
@@ -362,7 +368,7 @@ class TestFindDiffValidate(FindDiffTestBase):
 
 
 class TestFindDiffGitPreflight(FindDiffTestBase):
-  """Tests for Git repository and `--base` ref pre-flight checks (`REQ-0002`, Exit Code 3)."""
+  """Tests for Git repository and `--base` ref pre-flight checks in `validate()` (`REQ-0002`, Exit Code 3)."""
 
   def test_non_git_directory_exits_failed_before_calling_cm(self):
     non_git_dir = Path(self.tmp) / "plain_dir"
@@ -370,6 +376,7 @@ class TestFindDiffGitPreflight(FindDiffTestBase):
     adapter = RecordingCmAdapter()
     cfg = find_diff.FindDiffConfig(repo=non_git_dir, base="HEAD")
 
+    self.assertEqual(cfg.validate(), exit_codes.FAILED)
     rc, stdout, stderr = self.execute_find_diff(cfg, adapter)
 
     self.assertEqual(rc, exit_codes.FAILED)
@@ -383,6 +390,7 @@ class TestFindDiffGitPreflight(FindDiffTestBase):
         repo=Path(self.repo), base="origin/nonexistent"
     )
 
+    self.assertEqual(cfg.validate(), exit_codes.FAILED)
     rc, stdout, stderr = self.execute_find_diff(cfg, adapter)
 
     self.assertEqual(rc, exit_codes.FAILED)
@@ -396,6 +404,7 @@ class TestFindDiffGitPreflight(FindDiffTestBase):
         repo=Path(self.repo), base="origin/..bad..ref"
     )
 
+    self.assertEqual(cfg.validate(), exit_codes.FAILED)
     rc, stdout, stderr = self.execute_find_diff(cfg, adapter)
 
     self.assertEqual(rc, exit_codes.FAILED)
@@ -412,7 +421,9 @@ class TestFindDiffAdapterExecutionAndSarifOutput(FindDiffTestBase):
     repo_path = Path(self.repo).resolve()
     cfg = find_diff.FindDiffConfig(repo=repo_path, base="origin/main")
 
-    rc, stdout, stderr = self.execute_find_diff(cfg, adapter)
+    rc, stdout, stderr = self.execute_find_diff(
+        cfg, adapter, log_level="debug"
+    )
 
     self.assertEqual(rc, exit_codes.OK, stderr)
     self.assertEqual(
@@ -421,19 +432,19 @@ class TestFindDiffAdapterExecutionAndSarifOutput(FindDiffTestBase):
             {
                 "args": [
                     "find",
-                    str(repo_path),
+                    repo_path.as_posix(),
                     "-y",
                     "--diff=origin/main",
                     "--fail-on",
                     "NONE",
                 ],
-                "cwd": str(repo_path),
+                "cwd": repo_path.as_posix(),
                 "env": None,
                 "timeout_sec": 360.0,
             },
             {
                 "args": ["report", "--format", "sarif"],
-                "cwd": str(repo_path),
+                "cwd": repo_path.as_posix(),
                 "env": None,
                 "timeout_sec": 60.0,
             },
