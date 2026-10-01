@@ -11,7 +11,7 @@ what it gives back. The design reasoning is in
 ## The command
 
 ```
-cm-runner [--cm-binary PATH] [--log-level LEVEL] <command> [flags]
+cm-runner [--cm-binary PATH] [--log-level LEVEL] [--no-init] <command> [flags]
 ```
 
 | Command     | What it does                                                                                 | Status    |
@@ -77,6 +77,13 @@ and other programs. Show it to people; don't parse it.
 `cm` is missing or won't run, the runner exits `3` with the reason on stderr and
 writes nothing to stdout. This applies to `version` too.
 
+**`init` runs automatically.** Before running any command other than `version`
+or `init`, `cm-runner` automatically runs [`init`](#init) for `--repo` and logs
+the check results to `stderr` (writing nothing to `stdout` so `stdout` holds
+only the command's own output). This makes every command self-contained in a
+single `docker run --rm` or Cloud Run container invocation. Pass `--no-init` to
+skip automatic initialization when `~/.codemender/` is already set up.
+
 **Files.** Commands that write files put them in the folder you pass with
 `--out`.
 
@@ -86,9 +93,10 @@ writes nothing to stdout. This applies to `version` too.
 cm-runner init [--repo PATH]
 ```
 
-Sets up `cm` for one repository, then checks the result. Run it before any scan,
-**in the same container as the scan**: it writes `~/.codemender/`, and a fresh
-container starts without it.
+Sets up `cm` for one repository, then checks the result. `cm-runner` runs `init`
+automatically before `find-diff`, `fix`, and `verify` (logging to `stderr`
+unless `--no-init` is passed), and you can also run `cm-runner init` on its own
+to inspect the setup checks as `check` events on `stdout`.
 
 `--repo` defaults to the current folder. In GitHub Actions and GitLab the
 checkout already is the current folder, so you rarely need it.
@@ -148,8 +156,9 @@ cm-runner find-diff [--repo PATH] [--base REF] [--out DIR]
 ```
 
 Scans the changes in a repository relative to a base Git reference and reports
-findings in OASIS SARIF v2.1.0 format. Run [`init`](#init) first in the same
-container so `~/.codemender/` is configured.
+findings in OASIS SARIF v2.1.0 format. `cm-runner` automatically runs
+[`init`](#init) for `--repo` first (logging `init` checks to `stderr` only)
+unless `--no-init` is passed.
 
 **Flags:**
 

@@ -212,6 +212,24 @@ class TestStdoutPurity(CLIContractTestBase):
       payload = self.assert_stdout_is_one_json_object(result)
       self.assertEqual(payload["cm"]["version"], "7.7.7")
 
+  def test_no_init_sets_auto_init_false_before_and_after_subcommand(self):
+    """`--no-init` populates `args.auto_init = False` in both positions; default is True."""
+    from cli import __main__ as cli_main
+
+    parser = cli_main.build_parser()
+    default_args = cli_main._apply_defaults(parser.parse_args(["find-diff"]))
+    self.assertTrue(default_args.auto_init)
+
+    before_args = cli_main._apply_defaults(
+        parser.parse_args(["--no-init", "find-diff"])
+    )
+    self.assertFalse(before_args.auto_init)
+
+    after_args = cli_main._apply_defaults(
+        parser.parse_args(["find-diff", "--no-init"])
+    )
+    self.assertFalse(after_args.auto_init)
+
 
 class TestCmDetection(CLIContractTestBase):
   """Locating cm and reading its version."""
@@ -329,17 +347,11 @@ class TestImportIsolation(unittest.TestCase):
     )
 
   def test_version_command_needs_no_utils_or_third_party_packages(self):
-    """`version` must not load legacy `utils` or any package from requirements.txt.
-
-    It is the command run to diagnose a broken environment, so it must work
-    before dependencies are installed. The AST check only sees direct imports
-    from `cli/`; this catches the indirect ones, such as `codemender/`
-    importing `utils`, which imports `requests`.
-    """
+    """`cli.commands.version` must not load legacy `utils` or any package from requirements.txt."""
     probe = (
         "import sys;"
         "before = set(sys.modules);"
-        "import cli.__main__, cli.commands.version;"
+        "import cli, cli.events, cli.exit_codes, cli.commands.version;"
         "loaded = set(sys.modules) - before;"
         "print(sorted(m for m in loaded"
         " if m.split('.')[0] in ('utils', 'requests', 'yaml', 'google')))"

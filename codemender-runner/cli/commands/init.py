@@ -43,9 +43,12 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import io
 import logging
 from pathlib import Path
 import re
+import sys
+from typing import Optional
 
 import yaml
 
@@ -102,20 +105,20 @@ def config_from_args(args: argparse.Namespace) -> InitConfig:
   """Builds an InitConfig from the parsed command line."""
   # `resolve()`, not `absolute()`: `absolute()` keeps `..` in the path, but
   # the config writer removes it, so the read-back in step 3 would not match.
-  return InitConfig(repo=Path(args.repo).resolve())
+  return InitConfig(repo=Path(args.repo).expanduser().resolve())
 
 
 def run(
     cfg: InitConfig,
     adapter: CmAdapter,
-    emitter: EventEmitter,
+    emitter: Optional[EventEmitter] = None,
 ) -> int:
   """Runs the setup steps in order, stopping at the first failure.
 
   Args:
     cfg: What to set up.
     adapter: The cm found and checked by `main`.
-    emitter: Destination for `check` events.
+    emitter: Destination for `check` events, or None to log checks to stderr.
 
   Returns:
     `exit_codes.OK` when every check passed, `exit_codes.FAILED` when one
@@ -139,17 +142,24 @@ def run(
   return exit_codes.OK
 
 
-def _check(emitter: EventEmitter, name: str, status: str, message: str) -> None:
-  """Emits one `check` event."""
-  emitter.emit(
-      "check",
-      name=name,
-      status=status,
-      message=message,
-  )
+def _check(
+    emitter: Optional[EventEmitter], name: str, status: str, message: str
+) -> None:
+  """Emits one `check` event, or logs the check outcome when emitter is None."""
+  if emitter is not None:
+    emitter.emit(
+        "check",
+        name=name,
+        status=status,
+        message=message,
+    )
+  else:
+    logger.info("init check [%s] %s: %s", name, status, message)
 
 
-def _report_cm(adapter: CmAdapter, emitter: EventEmitter) -> None:
+def _report_cm(
+    adapter: CmAdapter, emitter: Optional[EventEmitter] = None
+) -> None:
   """Step 1: report which `cm` is in use.
 
   `main` has already checked that it runs, so this always passes. The
@@ -163,7 +173,9 @@ def _report_cm(adapter: CmAdapter, emitter: EventEmitter) -> None:
   )
 
 
-def _run_init(repo: Path, adapter: CmAdapter, emitter: EventEmitter) -> bool:
+def _run_init(
+    repo: Path, adapter: CmAdapter, emitter: Optional[EventEmitter] = None
+) -> bool:
   """Step 2: create `cm`'s workspace with `cm init`, only when it is missing.
 
   See the module docstring for why an existing config is never touched.
@@ -204,7 +216,9 @@ def _run_init(repo: Path, adapter: CmAdapter, emitter: EventEmitter) -> bool:
   return True
 
 
-def _write_config(repo: Path, emitter: EventEmitter) -> bool:
+def _write_config(
+    repo: Path, emitter: Optional[EventEmitter] = None
+) -> bool:
   """Step 3: write this repo's settings into the config, then read it back.
 
   `inject_codemender_config` catches its own write errors and only logs them,
@@ -220,13 +234,19 @@ def _write_config(repo: Path, emitter: EventEmitter) -> bool:
   """
   config_path = cm_config_path()
   before = _file_identity(config_path)
+  # `inject_codemender_config` prompts on stdin when `sys.stdin.isatty()` is
+  # true and no build command is configured; `init` must never prompt or hang.
+  old_stdin = sys.stdin
   try:
+    sys.stdin = io.StringIO()
     config.inject_codemender_config(str(repo))
   except Exception:  # pylint: disable=broad-exception-caught
     # Any other error is reported as a failed check, not a traceback.
     logger.exception("Writing %s failed.", config_path)
     _check(emitter, "cm_config", FAIL, f"could not write {config_path}")
     return False
+  finally:
+    sys.stdin = old_stdin
   settings = _read_back(config_path, before, repo)
   if settings is None:
     _check(
@@ -241,7 +261,7 @@ def _write_config(repo: Path, emitter: EventEmitter) -> bool:
 
 
 def _verify_init(
-    repo: Path, adapter: CmAdapter, emitter: EventEmitter
+    repo: Path, adapter: CmAdapter, emitter: Optional[EventEmitter] = None
 ) -> bool:
   """Step 4: `cm`'s own check of the setup, `cm init --verify`.
 

@@ -30,12 +30,16 @@ import sys
 from typing import List, Optional
 
 from cli import exit_codes
+from cli.commands import find_diff
+from cli.commands import init
+from cli.commands import version
 from cli.events import EventEmitter
 from codemender.cm import CmAdapter
 
 logger = logging.getLogger(__name__)
 
 _LOG_LEVELS = ("debug", "info", "warning", "error")
+_SKIP_INIT = ("version", "init")
 
 
 def configure_logging(level: str) -> None:
@@ -84,6 +88,13 @@ def _global_flags() -> argparse.ArgumentParser:
       default=argparse.SUPPRESS,
       help="stderr log verbosity (default: info)",
   )
+  common.add_argument(
+      "--no-init",
+      dest="auto_init",
+      action="store_false",
+      default=argparse.SUPPRESS,
+      help="skip automatic 'init' before running a repository command",
+  )
   return common
 
 
@@ -91,6 +102,7 @@ def _global_flags() -> argparse.ArgumentParser:
 _DEFAULTS = {
     "cm_binary": None,
     "log_level": "info",
+    "auto_init": True,
 }
 
 
@@ -201,20 +213,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     return exit_codes.FAILED
 
   with contextlib.redirect_stdout(sys.stderr):
-    if args.command == "version":
-      from cli.commands import version
+    if args.command not in _SKIP_INIT and args.auto_init:
+      init_rc = init.run(init.config_from_args(args), adapter, emitter=None)
+      if init_rc != exit_codes.OK:
+        return init_rc
 
+    if args.command == "version":
       return version.run(adapter, emitter)
     if args.command == "init":
-      from cli.commands import init
-
       return init.run(init.config_from_args(args), adapter, emitter)
     if args.command == "find-diff":
-      from cli.commands import find_diff
-
-      return find_diff.run(
-          find_diff.config_from_args(args), adapter, emitter
-      )
+      return find_diff.run(find_diff.config_from_args(args), adapter, emitter)
 
   parser.print_help(sys.stderr)
   return exit_codes.USAGE

@@ -28,6 +28,8 @@ import tempfile
 from typing import Dict, List, Optional, Sequence, Tuple
 import unittest
 
+import yaml
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cli import __main__ as cli_main
@@ -789,6 +791,10 @@ class TestFindDiffCLIContract(CLIContractTestBase):
     self.tmp = tempfile.mkdtemp(prefix="cm_runner_find_diff_cli_")
     self.addCleanup(shutil.rmtree, self.tmp, True)
 
+    self.home = os.path.join(self.tmp, "home")
+    os.makedirs(self.home, exist_ok=True)
+    self.cm_log = os.path.join(self.tmp, "cm.log")
+
     self.repo = os.path.join(self.tmp, "repo")
     os.makedirs(self.repo, exist_ok=True)
     self._init_git_repo(self.repo)
@@ -803,6 +809,30 @@ class TestFindDiffCLIContract(CLIContractTestBase):
 
     self._install_stub_cm(find_exit=0)
     self._cli_path = f"{self._stub_dir}:/usr/bin:/bin"
+
+  def run_cli(self, *args, path=None):
+    """Invokes `python -m cli` with an isolated HOME directory."""
+    env = dict(os.environ)
+    env["PATH"] = self._stub_dir if path is None else path
+    env["HOME"] = self.home
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env.pop("PYTHONPATH", None)
+
+    return subprocess.run(
+        [sys.executable, "-m", "cli", *args],
+        cwd=_PKG_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+  def _cm_calls(self) -> List[str]:
+    if not os.path.exists(self.cm_log):
+      return []
+    with open(self.cm_log, encoding="utf-8") as handle:
+      return handle.read().splitlines()
 
   def _init_git_repo(self, repo_dir: str) -> None:
     subprocess.run(
@@ -844,12 +874,25 @@ class TestFindDiffCLIContract(CLIContractTestBase):
         timeout=30,
     )
 
-  def _install_stub_cm(self, find_exit: int = 0) -> None:
+  def _install_stub_cm(
+      self,
+      find_exit: int = 0,
+      verify_summary: str = "Results: 4 passed, 4 warnings",
+      verify_exit: int = 0,
+  ) -> None:
     body = f"""#!/bin/bash
 PATH=/usr/bin:/bin
+echo "$*" >> "{self.cm_log}"
 case "$*" in
   --version)
     echo "cm version 0.9.0"
+    ;;
+  init)
+    mkdir -p "$HOME/.codemender" && echo "stock_default: true" > "$HOME/.codemender/config.yaml"
+    ;;
+  "init --verify")
+    echo "{verify_summary}"
+    exit {verify_exit}
     ;;
   find\\ *)
     echo "Impact-Aware PR Delta Scan: 2 files in scope"
@@ -888,9 +931,86 @@ esac
     payload = self.assert_stdout_is_one_json_object(res)
     self.assertEqual(payload["version"], "2.1.0")
     self.assertEqual(len(payload["runs"][0]["results"]), 2)
+
+    config_path = os.path.join(self.home, ".codemender", "config.yaml")
+    self.assertTrue(os.path.isfile(config_path))
+    with open(config_path, encoding="utf-8") as handle:
+      cfg_data = yaml.safe_load(handle)
+    self.assertEqual(
+        cfg_data["sandbox"]["mounts"]["target_dir"],
+        os.path.realpath(self.repo),
+    )
+
+    self.assertIn("init check [cm_binary] pass:", res.stderr)
+    self.assertIn("init check [cm_workspace] recovered:", res.stderr)
+    self.assertIn("init check [cm_config] pass:", res.stderr)
+    self.assertIn("init check [cm_verify] pass:", res.stderr)
     self.assertIn("Impact-Aware PR Delta Scan", res.stderr)
     self.assertIn("Scanning diff...", res.stderr)
     self.assertNotIn("Impact-Aware PR Delta Scan", res.stdout)
+
+  def test_no_init_flag_skips_automatic_init_before_and_after_subcommand(self):
+    orderings = {
+        "before subcommand": [
+            "--no-init",
+            "find-diff",
+            "--repo",
+            self.repo,
+            "--base",
+            "HEAD",
+        ],
+        "after subcommand": [
+            "find-diff",
+            "--no-init",
+            "--repo",
+            self.repo,
+            "--base",
+            "HEAD",
+        ],
+    }
+    config_path = os.path.join(self.home, ".codemender", "config.yaml")
+
+    for label, argv in orderings.items():
+      with self.subTest(ordering=label):
+        if os.path.exists(self.cm_log):
+          os.remove(self.cm_log)
+
+        res = self.run_cli(*argv, path=self._cli_path)
+
+        self.assertEqual(res.returncode, exit_codes.OK, res.stderr)
+        payload = self.assert_stdout_is_one_json_object(res)
+        self.assertEqual(payload["version"], "2.1.0")
+        self.assertEqual(len(payload["runs"][0]["results"]), 2)
+        self.assertFalse(os.path.exists(config_path))
+        calls = self._cm_calls()
+        self.assertNotIn("init", calls)
+        self.assertNotIn("init --verify", calls)
+        self.assertNotIn("init check [", res.stderr)
+
+  def test_failed_automatic_init_stops_before_find_diff_and_leaves_stdout_empty(
+      self,
+  ):
+    self._install_stub_cm(
+        verify_summary="Results: 4 passed, 3 warnings, 1 failed"
+    )
+
+    res = self.run_cli(
+        "find-diff",
+        "--repo",
+        self.repo,
+        "--base",
+        "HEAD",
+        path=self._cli_path,
+    )
+
+    self.assertEqual(res.returncode, exit_codes.FAILED, res.stderr)
+    self.assertEqual(res.stdout, "")
+    self.assertIn("1 failed", res.stderr)
+    calls = self._cm_calls()
+    self.assertFalse(
+        any(c.startswith("find ") for c in calls),
+        f"cm find must not run when automatic init fails; calls={calls}",
+    )
 
   def test_out_flag_writes_report_sarif_and_report_md_and_emits_one_sarif_line(
       self,

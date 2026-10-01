@@ -23,6 +23,9 @@ Like `test_cli.py`, these run the CLI in a subprocess. Each run gets:
     the result.
 """
 
+import argparse
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -32,12 +35,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cli import exit_codes
+from codemender.cm import CmAdapter
 
 # Directory containing the `cli` package, used as cwd so `python -m cli` works.
 _PKG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -587,6 +592,124 @@ class TestInitRepoFlag(InitTestBase):
 
     self.assertEqual(result.returncode, exit_codes.USAGE, result.stderr)
     self.assertEqual(result.stdout, "")
+
+  def test_repo_with_tilde_is_expanded(self):
+    """`~` in --repo is expanded via expanduser().resolve()."""
+    from cli.commands import init as init_cmd
+
+    home_repo = os.path.join(self.home, "subrepo")
+    os.mkdir(home_repo)
+    with mock.patch.dict(os.environ, {"HOME": self.home}):
+      cfg = init_cmd.config_from_args(argparse.Namespace(repo="~/subrepo"))
+    self.assertEqual(cfg.repo, Path(home_repo).resolve())
+
+
+class TestInitSilentMode(InitTestBase):
+  """`init.run` with `emitter=None` (or omitted) for stderr-only auto-init."""
+
+  def setUp(self):
+    super().setUp()
+    from cli.commands import init as init_cmd
+
+    self.init_cmd = init_cmd
+
+  def test_passing_run_on_fresh_home_with_emitter_none(self):
+    """When emitter=None on a fresh HOME, init succeeds, logs checks, and writes zero bytes to stdout."""
+    stub = self.write_stub_cm()
+    adapter = CmAdapter(stub)
+    self.assertEqual(adapter.version(), "0.9.0")
+    repo_path = Path(self.repo).resolve()
+    cfg = self.init_cmd.InitConfig(repo=repo_path)
+
+    stdout_buf = io.StringIO()
+    with (
+        mock.patch.dict(
+            os.environ,
+            {"HOME": self.home, "PATH": self.empty_path},
+            clear=False,
+        ),
+        contextlib.redirect_stdout(stdout_buf),
+        self.assertLogs("cli.commands.init", level="INFO") as logs,
+    ):
+      rc = self.init_cmd.run(cfg, adapter, emitter=None)
+
+    self.assertEqual(rc, exit_codes.OK)
+    self.assertEqual(stdout_buf.getvalue(), "")
+    self.assertTrue(os.path.isfile(self.config_path))
+    settings = self.read_config()
+    self.assertEqual(
+        settings["sandbox"]["mounts"]["target_dir"], str(repo_path)
+    )
+    joined_logs = "\n".join(logs.output)
+    self.assertIn("init check [cm_binary] pass:", joined_logs)
+    self.assertIn("init check [cm_workspace] recovered:", joined_logs)
+    self.assertIn("init check [cm_config] pass:", joined_logs)
+    self.assertIn("init check [cm_verify] pass:", joined_logs)
+
+  def test_passing_run_on_existing_config_with_emitter_omitted(self):
+    """When emitter is omitted on an existing config, init keeps config, updates repo, logs checks, and writes nothing to stdout."""
+    os.makedirs(os.path.dirname(self.config_path))
+    with open(self.config_path, "w", encoding="utf-8") as handle:
+      handle.write("team_id: customer-supplied\n")
+    stub = self.write_stub_cm()
+    adapter = CmAdapter(stub)
+    self.assertEqual(adapter.version(), "0.9.0")
+    repo_path = Path(self.repo).resolve()
+    cfg = self.init_cmd.InitConfig(repo=repo_path)
+
+    stdout_buf = io.StringIO()
+    with (
+        mock.patch.dict(
+            os.environ,
+            {"HOME": self.home, "PATH": self.empty_path},
+            clear=False,
+        ),
+        contextlib.redirect_stdout(stdout_buf),
+        self.assertLogs("cli.commands.init", level="INFO") as logs,
+    ):
+      rc = self.init_cmd.run(cfg, adapter)
+
+    self.assertEqual(rc, exit_codes.OK)
+    self.assertEqual(stdout_buf.getvalue(), "")
+    self.assertEqual(self.init_calls(), [])
+    settings = self.read_config()
+    self.assertEqual(settings["team_id"], "customer-supplied")
+    self.assertEqual(
+        settings["sandbox"]["mounts"]["target_dir"], str(repo_path)
+    )
+    joined_logs = "\n".join(logs.output)
+    self.assertIn("init check [cm_binary] pass:", joined_logs)
+    self.assertIn("init check [cm_workspace] pass:", joined_logs)
+    self.assertIn("init check [cm_config] pass:", joined_logs)
+    self.assertIn("init check [cm_verify] pass:", joined_logs)
+
+  def test_failing_run_with_emitter_none(self):
+    """When emitter=None on a failing run, init returns FAILED, logs the failed check, and writes zero bytes to stdout."""
+    stub = self.write_stub_cm(verify_output=_VERIFY_NO_PROJECT)
+    adapter = CmAdapter(stub)
+    self.assertEqual(adapter.version(), "0.9.0")
+    repo_path = Path(self.repo).resolve()
+    cfg = self.init_cmd.InitConfig(repo=repo_path)
+
+    stdout_buf = io.StringIO()
+    with (
+        mock.patch.dict(
+            os.environ,
+            {"HOME": self.home, "PATH": self.empty_path},
+            clear=False,
+        ),
+        contextlib.redirect_stdout(stdout_buf),
+        self.assertLogs("cli.commands.init", level="INFO") as logs,
+    ):
+      rc = self.init_cmd.run(cfg, adapter, emitter=None)
+
+    self.assertEqual(rc, exit_codes.FAILED)
+    self.assertEqual(stdout_buf.getvalue(), "")
+    joined_logs = "\n".join(logs.output)
+    self.assertIn(
+        "init check [cm_verify] fail: 4 passed, 3 warnings, 1 failed",
+        joined_logs,
+    )
 
 
 class TestInitConfigValidate(unittest.TestCase):
