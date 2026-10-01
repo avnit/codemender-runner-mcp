@@ -57,4 +57,4 @@ steps:
 substitutions:
   _REPO_NAME: 'codemender-runner'
   _REGION: 'us-central1'
-  _CM_VERSION: '0.9.0'
+  _CM_VERSION: '0.11.0'

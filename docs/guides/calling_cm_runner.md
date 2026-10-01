@@ -56,7 +56,7 @@ be added. There is no text mode; to read it by hand, pipe it through
 `python3 -m json.tool --json-lines` or `jq`.
 
 ```json
-{"ts": "2026-09-25T00:43:23Z", "event": "version", "orchestrator": "0.1.0", "cm": {"found": true, "version": "0.9.0", "path": "/usr/local/bin/cm"}, "contract": "cm-0.9.x"}
+{"ts": "2026-09-30T23:41:12Z", "event": "version", "orchestrator": "0.1.0", "cm": {"found": true, "version": "0.11.0", "path": "/usr/local/bin/cm"}, "contract": "cm-0.11.x"}
 ```
 
 **stderr: logs.** Progress, warnings, errors, and all output from `cm`, `git`,

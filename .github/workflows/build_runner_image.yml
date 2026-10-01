@@ -18,7 +18,7 @@ on:
       cm_version:
         description: 'Specific version/tag from Artifact Registry'
         required: false
-        default: '0.9.0'
+        default: '0.11.0'
         type: string
       cm_custom_url:
         description: 'Optional direct download URL for custom/rollback binary'
@@ -57,7 +57,7 @@ jobs:
           load: true
           tags: codemender-runner:test
           build-args: |
-            CM_VERSION=${{ inputs.cm_version || '0.9.0' }}
+            CM_VERSION=${{ inputs.cm_version || '0.11.0' }}
             CM_URL=${{ inputs.cm_custom_url || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
