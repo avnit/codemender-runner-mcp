@@ -46,7 +46,7 @@ _FIND_DIFF_TIMEOUT_SEC = 360.0
 _CM_REPORT_TIMEOUT_SEC = 60.0
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class FindDiffConfig:
   """Command-line configuration for `cm-runner find-diff`.
 
@@ -63,7 +63,7 @@ class FindDiffConfig:
 
   def __post_init__(self) -> None:
     if isinstance(self.base, str):
-      object.__setattr__(self, "base", self.base.strip())
+      self.base = self.base.strip()
 
   def validate(self) -> int:
     """Validates command-line options and Git pre-flight checks before running `cm`.
@@ -108,7 +108,7 @@ def config_from_args(args: argparse.Namespace) -> FindDiffConfig:
   out_arg = getattr(args, "out", None)
   return FindDiffConfig(
       repo=Path(repo_arg).expanduser().resolve(),
-      base=base_arg.strip() if isinstance(base_arg, str) else base_arg,
+      base=base_arg,
       out=(
           Path(out_arg).expanduser().resolve()
           if out_arg is not None
