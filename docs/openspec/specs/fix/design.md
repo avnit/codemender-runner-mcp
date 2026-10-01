@@ -86,10 +86,11 @@ from `cm`'s SARIF.
   before/after comparison works even when the database already holds findings
   from earlier runs.
 
-### Decision 2: Raw Unified Diff on `stdout` (Proposed — Needs a Decision) {#decision-2}
+### Decision 2: Raw Unified Diff on `stdout` {#decision-2}
 
-- **Choice (proposed):** Write the patch to `stdout` exactly as
-  `git diff --binary HEAD` produced it, and nothing else.
+- **Choice:** Write the patch to `stdout` exactly as `git diff --binary HEAD`
+  produced it, and nothing else. Agreed on PR #23 (cledoux@, 2026-10-01): any
+  parsing or converting a caller needs belongs outside this wrapper.
 - **Alternatives Considered:**
   - **A. SARIF with a `fixes` list:** return the input finding with SARIF's
     standard `fixes[].artifactChanges[].replacements[]` filled in. It keeps the
@@ -198,8 +199,8 @@ flowchart TD
 | :--- | :--- | :--- |
 | `cli/__main__.py` | Registers `fix` (`--finding`, `--repo`, `--out`), builds `FixConfig`, calls `fix.run(cfg, adapter, emitter)`. | Already redirects stray `stdout` writes to `stderr` while a command runs. |
 | `cli/commands/fix.py` | `FixConfig`, `validate()`, the steps above as one private function each, writing the diff. | **MUST NOT** import `subprocess`, `utils`, `vcs.github`, or `get_scrubbed_env`. `cm` only through `CmAdapter` (`env=None`). |
-| `codemender/cm.py` | A shared helper that imports one finding and returns its new ID, plus reading a finding's status from `cm report --format json`. | Shared with `cm-runner verify` (E4), so both commands take findings the same way. |
-| `vcs/git.py` | `is_git_repository` (shared with SPEC-FIND-DIFF), a helper listing uncommitted files with exclusions, and a helper returning the diff. | Git subprocesses stay here. Diagnostics go to `stderr`. |
+| `codemender/cm.py` | `Finding` dataclass and `CmAdapter` methods (`import_finding()`, `get_finding()`, `list_findings()` over `cm report --format json`). | Shared with `cm-runner verify` (E4), so both commands interact with findings the same way. |
+| `vcs/git.py` | `is_git_repository` (shared with SPEC-FIND-DIFF), `list_uncommitted_paths()` (with exclusions), and `diff_working_tree()` (returns the patch as bytes). | Git subprocesses stay here, run directly with `subprocess`, not `utils.run_command`. Diagnostics go to `stderr`. |
 
 ## Risks / Trade-offs
 
@@ -224,9 +225,8 @@ flowchart TD
   `cli/__main__.py`, add the helpers to `codemender/cm.py` and `vcs/git.py`,
   update `docs/guides/calling_cm_runner.md`, and add unit tests in
   `codemender-runner/tests/test_cli_fix.py` using stub `cm` binaries.
-- **`cm` version:** relies on `cm` 0.11.0 behaviour. The Docker image and
-  `cloudbuild.yaml` currently pin 0.9.0 and must be moved to at least 0.11.0,
-  which SPEC-FIND-DIFF also needs (`cm find --diff` arrived in 0.10.0).
+- **`cm` version:** relies on `cm` 0.11.0 behaviour. The Docker image,
+  `cloudbuild.yaml` and the image workflow pin 0.11.0 (PR #25).
 - **Verification:**
   `python3 -m unittest discover -s codemender-runner/tests -t codemender-runner -v`,
   plus one live run on the test VM.
@@ -234,11 +234,11 @@ flowchart TD
 
 ## Open Questions
 
-1. **Output format (Decision 2):** raw unified diff (proposed), SARIF with
-   `fixes` (A), or a JSON event (C)? Owner: cledoux@.
-1. **Shared finding import with `verify`:** both commands take a one-finding
-   SARIF file. The import helper in `codemender/cm.py` should be written once
-   and used by both. Owners: nasirmohammad@, yileil@.
+1. ~~**Output format (Decision 2)**~~ — **Resolved** on PR #23 (cledoux@,
+   2026-10-01): raw unified diff.
+1. ~~**Shared finding import with `verify`**~~ — **Resolved** on PR #23
+   (yileil@, 2026-09-30): both commands use `import_finding()` in
+   `codemender/cm.py`. `fix` adds it; `verify` switches to it afterwards.
 1. **Responsibility warning:** is it acceptable for `cm-runner` to pass
    `--bypass-warning` on every run, as the existing pipeline does, or should the
    caller have to opt in? Product decision.

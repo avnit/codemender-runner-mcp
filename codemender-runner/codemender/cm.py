@@ -27,6 +27,7 @@ Two audiences, kept apart on purpose:
 """
 
 import dataclasses
+import json
 import logging
 import re
 import shutil
@@ -85,6 +86,49 @@ class CmResult:
   def ok(self) -> bool:
     """True when `cm` ran to completion and exited 0."""
     return self.error is None and self.exit_code == 0
+
+
+# How long `cm report` and `cm report import` may take. Both only read or
+# write `cm`'s local database.
+_REPORT_TIMEOUT_SEC = 60.0
+
+
+@dataclasses.dataclass(frozen=True)
+class Finding:
+  """One finding in `cm`'s local database, as read from `cm report --format json`.
+
+  Attributes:
+    finding_id: The ID `cm` assigned to the finding.
+    status: `cm`'s lifecycle status (e.g. "OPEN", "FIXED", "VERIFIED").
+    title: Short title reported by `cm`, if present.
+    severity: Severity reported by `cm`, if present.
+    file_path: Repository-relative file path reported by `cm`, if present.
+  """
+
+  finding_id: str
+  status: str = ""
+  title: str = ""
+  severity: str = ""
+  file_path: str = ""
+
+  @classmethod
+  def from_report_item(cls, item: Dict[str, Any]) -> Optional["Finding"]:
+    """Builds a `Finding` from one JSON object in `cm report --format json`."""
+    finding_id = item.get("finding_id")
+    if not isinstance(finding_id, str) or not finding_id:
+      return None
+    return cls(
+        finding_id=finding_id,
+        status=str(item.get("status") or ""),
+        title=str(item.get("title") or ""),
+        severity=str(item.get("severity") or ""),
+        file_path=str(item.get("file_path") or ""),
+    )
+
+  @property
+  def is_fixed(self) -> bool:
+    """True when `cm fix` has marked this finding FIXED."""
+    return self.status == "FIXED"
 
 
 def _parse_token_count(text: str) -> int:
@@ -263,6 +307,142 @@ class CmAdapter:
       return None
     self._version = _normalise_version(result.stdout)
     return self._version
+
+  def list_findings(
+      self,
+      timeout_sec: float = _REPORT_TIMEOUT_SEC,
+  ) -> Optional[Dict[str, Finding]]:
+    """Returns every finding in `cm`'s local database, keyed by `finding_id`.
+
+    Reads `cm report --format json`. On `cm` 0.11.0 that prints a JSON array on
+    stdout, one object per finding with snake_case keys (`[]` when there are
+    none), and only log lines on stderr. Without `cm init` it exits 1.
+
+    Args:
+      timeout_sec: Seconds to wait for `cm`.
+
+    Returns:
+      Each `Finding` keyed by `finding_id`, or None, with the reason logged, if
+      `cm` failed or printed something else.
+    """
+    result = self.run(["report", "--format", "json"], timeout_sec=timeout_sec)
+    if result.stderr.strip():
+      logger.debug(
+          "cm report --format json stderr:\n%s", result.stderr.rstrip()
+      )
+    if not result.ok:
+      logger.error(
+          "'cm report --format json' failed (exit %s, error %s). stderr:\n%s",
+          result.exit_code,
+          result.error,
+          result.stderr.rstrip(),
+      )
+      return None
+    try:
+      raw_findings = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+      logger.error("'cm report --format json' did not print JSON: %s", exc)
+      return None
+    if not isinstance(raw_findings, list):
+      logger.error(
+          "'cm report --format json' printed a JSON %s, not a list of"
+          " findings.",
+          type(raw_findings).__name__,
+      )
+      return None
+    findings: Dict[str, Finding] = {}
+    for item in raw_findings:
+      if isinstance(item, dict):
+        finding = Finding.from_report_item(item)
+        if finding is not None:
+          findings[finding.finding_id] = finding
+    return findings
+
+  def import_finding(
+      self,
+      finding_file: str,
+      project_dir: str,
+      timeout_sec: float = _REPORT_TIMEOUT_SEC,
+  ) -> Optional[Finding]:
+    """Imports one finding into `cm`'s database and returns the `Finding`.
+
+    `cm fix` and `cm verify` take the ID of a finding already in `cm`'s
+    database, not a file. `cm report import` accepts a JSON or SARIF file, but
+    it does not print the ID it assigns, and it assigns a new one on every
+    import, even of the same file. So the findings are listed before and after
+    the import, and exactly one must be new. This also works when the database
+    already holds findings from earlier runs.
+
+    Args:
+      finding_file: Path to a JSON or SARIF file holding exactly one finding.
+      project_dir: The repository the finding's file paths are relative to.
+      timeout_sec: Seconds to wait for each `cm` call.
+
+    Returns:
+      The newly imported `Finding`, or None, with the reason logged, if any
+      step failed or the import did not add exactly one finding.
+    """
+    before = self.list_findings(timeout_sec)
+    if before is None:
+      return None
+
+    result = self.run(
+        ["report", "import", "-f", finding_file, "-p", project_dir],
+        timeout_sec=timeout_sec,
+    )
+    if result.stdout.strip():
+      logger.info("cm report import: %s", result.stdout.strip())
+    if result.stderr.strip():
+      logger.debug("cm report import stderr:\n%s", result.stderr.rstrip())
+    if not result.ok:
+      logger.error(
+          "'cm report import -f %s' failed (exit %s, error %s). stderr:\n%s",
+          finding_file,
+          result.exit_code,
+          result.error,
+          result.stderr.rstrip(),
+      )
+      return None
+
+    after = self.list_findings(timeout_sec)
+    if after is None:
+      return None
+    new_ids = sorted(set(after) - set(before))
+    if len(new_ids) != 1:
+      logger.error(
+          "Expected 'cm report import' to add exactly one finding; it added %d"
+          " (%s).",
+          len(new_ids),
+          ", ".join(new_ids) or "none",
+      )
+      return None
+    return after[new_ids[0]]
+
+  def get_finding(
+      self,
+      finding_id: str,
+      timeout_sec: float = _REPORT_TIMEOUT_SEC,
+  ) -> Optional[Finding]:
+    """Returns one `Finding` from `cm report --format json`.
+
+    `cm fix` and `cm verify` exit 0 whatever the outcome, so their result has to
+    be read from the finding's status afterwards.
+
+    Args:
+      finding_id: The finding to look up.
+      timeout_sec: Seconds to wait for `cm`.
+
+    Returns:
+      The `Finding`, or None, with the reason logged, if `cm` failed or the
+      finding is not in its database.
+    """
+    findings = self.list_findings(timeout_sec)
+    if findings is None:
+      return None
+    if finding_id not in findings:
+      logger.error("Finding %s is not in cm's database.", finding_id)
+      return None
+    return findings[finding_id]
 
 
 def _normalise_version(raw: Optional[str]) -> Optional[str]:

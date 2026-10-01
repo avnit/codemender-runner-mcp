@@ -7,5 +7,5 @@ capabilities.
 | Spec ID                             | Name                             | Level     | Status      | Primary Focus                                                                   |
 | :---------------------------------- | :------------------------------- | :-------- | :---------- | :------------------------------------------------------------------------------ |
 | [SPEC-FIND-DIFF](find-diff/spec.md) | [find-diff](find-diff/design.md) | Component | Implemented | Native Impact-Aware Differential Vulnerability Scanning (`cm-runner find-diff`) |
-| [SPEC-FIX](fix/spec.md) | [fix](fix/design.md) | Component | Implemented | Automated Patch Synthesis and Remediation (`cm-runner fix`) |
+| [SPEC-FIX](fix/spec.md)             | [fix](fix/design.md)             | Component | Implemented | Patch One Finding and Print the Diff (`cm-runner fix`)                          |
 | [SPEC-0003](runner-container-packaging/spec.md) | [runner-container-packaging](runner-container-packaging/design.md) | Component | Approved | Lean Runner Base Container & Modular BYOI Packaging |

@@ -27,12 +27,12 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import json
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from cli import exit_codes
+from cli import sarif
 from cli.events import EventEmitter
 from codemender.cm import CmAdapter
 from vcs import git
@@ -185,19 +185,16 @@ def run(
     return exit_codes.FAILED
 
   try:
-    sarif_doc = json.loads(sarif_result.stdout)
-  except (json.JSONDecodeError, TypeError) as exc:
+    sarif_doc = sarif.SarifDocument.from_json(sarif_result.stdout)
+  except sarif.SarifJsonError as exc:
     logger.error(
         "Could not parse SARIF JSON from 'cm report --format sarif': %s", exc
     )
     return exit_codes.FAILED
-
-  if not isinstance(sarif_doc, dict) or not isinstance(
-      sarif_doc.get("runs"), list
-  ):
+  except sarif.SarifSchemaError as exc:
     logger.error(
-        "Invalid SARIF 2.1.0 structure from 'cm report --format sarif': "
-        "expected a JSON object with a 'runs' list."
+        "Invalid SARIF 2.1.0 structure from 'cm report --format sarif': %s",
+        exc,
     )
     return exit_codes.FAILED
 
@@ -234,7 +231,7 @@ def run(
       )
       return exit_codes.FAILED
 
-  finding_count = _count_sarif_results(sarif_doc)
+  finding_count = sarif_doc.result_count
   if finding_count == 0:
     logger.info(
         "cm-runner find-diff completed cleanly against %s: 0 findings.",
@@ -247,17 +244,6 @@ def run(
         finding_count,
     )
 
-  emitter.stream.write(json.dumps(sarif_doc) + "\n")
+  emitter.stream.write(sarif_doc.to_json() + "\n")
   emitter.stream.flush()
   return exit_codes.OK
-
-
-def _count_sarif_results(sarif_doc: dict[str, Any]) -> int:
-  """Returns the total number of finding results across all SARIF runs."""
-  total = 0
-  for run_entry in sarif_doc.get("runs", []):
-    if isinstance(run_entry, dict):
-      results = run_entry.get("results")
-      if isinstance(results, list):
-        total += len(results)
-  return total

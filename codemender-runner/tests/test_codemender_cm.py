@@ -14,6 +14,7 @@
 
 """Unit tests for codemender.cm module."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -28,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from codemender.cm import (
     CmAdapter,
     CmResult,
+    Finding,
     TokenUsage,
     _normalise_version,
     detect_cm,
@@ -486,6 +488,125 @@ class TestCmAdapter(unittest.TestCase):
     self.assertEqual(result.stdout.strip(), "[]")
 
 
+
+class _ScriptedCm(CmAdapter):
+  """Returns queued results in order and records the arguments of each call."""
+
+  def __init__(self, *results):
+    super().__init__("/fake/bin/cm")
+    self.results = list(results)
+    self.calls = []
+
+  def run(self, args, cwd=None, env=None, timeout_sec=None):
+    self.calls.append(list(args))
+    return self.results.pop(0)
+
+
+def _result(stdout="", exit_code=0, stderr="", error=None):
+  return CmResult(
+      args=("/fake/bin/cm",),
+      exit_code=exit_code,
+      stdout=stdout,
+      stderr=stderr,
+      tokens=TokenUsage(),
+      error=error,
+  )
+
+
+def _listing(*pairs):
+  return _result(
+      json.dumps([{"finding_id": fid, "status": status} for fid, status in pairs])
+  )
+
+
+class TestListFindings(unittest.TestCase):
+  """`cm report --format json`, as `cm` 0.11.0 prints it."""
+
+  def test_maps_ids_to_findings(self):
+    adapter = _ScriptedCm(_listing(("a", "OPEN"), ("b", "FIXED")))
+    self.assertEqual(
+        adapter.list_findings(),
+        {
+            "a": Finding(finding_id="a", status="OPEN"),
+            "b": Finding(finding_id="b", status="FIXED"),
+        },
+    )
+    self.assertEqual(adapter.calls, [["report", "--format", "json"]])
+
+  def test_empty_database(self):
+    adapter = _ScriptedCm(_result("[]\n"))
+    self.assertEqual(adapter.list_findings(), {})
+
+  def test_failures_return_none(self):
+    cases = {
+        "not initialised": _result(exit_code=1, stderr="Error: not initialized"),
+        "timed out": _result(exit_code=None, error="timed out after 60.0 s"),
+        "not json": _result("No findings."),
+        "not a list": _result('{"findings": []}'),
+    }
+    for label, result in cases.items():
+      with self.subTest(case=label), self.assertLogs(
+          "codemender-orchestrator", level="ERROR"
+      ):
+        self.assertIsNone(_ScriptedCm(result).list_findings())
+
+
+class TestImportFinding(unittest.TestCase):
+  """The before/after comparison that finds the ID `cm report import` assigned."""
+
+  def test_returns_the_one_new_finding_among_old_ones(self):
+    adapter = _ScriptedCm(
+        _listing(("old", "FIXED")),
+        _result("Successfully imported 1 findings.\n"),
+        _listing(("old", "FIXED"), ("new", "OPEN")),
+    )
+    self.assertEqual(
+        adapter.import_finding("/tmp/f.sarif", "/repo"),
+        Finding(finding_id="new", status="OPEN"),
+    )
+    self.assertEqual(
+        adapter.calls[1],
+        ["report", "import", "-f", "/tmp/f.sarif", "-p", "/repo"],
+    )
+
+  def test_zero_or_two_new_ids_is_a_failure(self):
+    afters = (
+        [("old", "OPEN")],
+        [("old", "OPEN"), ("n1", "OPEN"), ("n2", "OPEN")],
+    )
+    for after in afters:
+      with self.subTest(after=after), self.assertLogs(
+          "codemender-orchestrator", level="ERROR"
+      ):
+        adapter = _ScriptedCm(
+            _listing(("old", "OPEN")), _result("ok"), _listing(*after)
+        )
+        self.assertIsNone(adapter.import_finding("f.sarif", "/repo"))
+
+  def test_failed_import_stops_before_listing_again(self):
+    adapter = _ScriptedCm(
+        _listing(), _result(exit_code=1, stderr="Error: no valid findings")
+    )
+    with self.assertLogs("codemender-orchestrator", level="ERROR") as logs:
+      self.assertIsNone(adapter.import_finding("f.sarif", "/repo"))
+    self.assertEqual(len(adapter.calls), 2)
+    self.assertIn("no valid findings", "\n".join(logs.output))
+
+
+class TestGetFinding(unittest.TestCase):
+  """Reading one finding after `cm fix` or `cm verify`."""
+
+  def test_reads_one_finding(self):
+    adapter = _ScriptedCm(_listing(("a", "OPEN"), ("b", "FIXED")))
+    finding = adapter.get_finding("b")
+    self.assertEqual(finding, Finding(finding_id="b", status="FIXED"))
+    self.assertTrue(finding.is_fixed)
+    self.assertFalse(Finding(finding_id="a", status="OPEN").is_fixed)
+
+  def test_unknown_id(self):
+    with self.assertLogs("codemender-orchestrator", level="ERROR"):
+      self.assertIsNone(_ScriptedCm(_listing()).get_finding("zz"))
+
+
 if __name__ == "__main__":
   unittest.main()
-

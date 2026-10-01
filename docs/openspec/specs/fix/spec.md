@@ -30,11 +30,9 @@ This specification defines the command-line interface, input contract,
 `cm` sandbox intact and relies on `cm`'s defaults and on
 `~/.codemender/config.yaml` (written by `cm-runner init`) for everything else.
 
-> [!IMPORTANT]
-> **The `stdout` format is proposed, not settled.** This spec proposes a raw
-> unified diff (REQ-0005). The two alternatives, SARIF with a `fixes` list and a
-> JSON event, are set out in [design.md](design.md#decision-2). Decide that
-> before the spec is accepted.
+The `stdout` format, a raw unified diff (REQ-0005), was agreed on PR #23
+(cledoux@, 2026-10-01). The alternatives considered are in
+[design.md](design.md#decision-2).
 
 The `cm` behaviour this spec relies on was checked against **`cm` 0.11.0** in a
 live run on 2026-09-30 (see [design.md](design.md#verified-cm-behaviour)).
@@ -178,8 +176,10 @@ with `cwd=str(cfg.repo)`. Git calls MUST go through `vcs/git.py`.
    exactly one `finding_id` that was not there in step 1. `cm report import`
    does not print the ID it assigns, and every import assigns a new one.
 1. **Fix:** `cm fix -y --bypass-warning <finding_id>`
-   (`_FIX_TIMEOUT_SEC = 1800.0`). All of `cm`'s `stdout` and `stderr` MUST be
-   forwarded to `cm-runner`'s `stderr`.
+   (`_FIX_TIMEOUT_SEC = 1800.0`). `fix` MUST log a line to `stderr` before
+   `cm fix` starts, saying it usually takes 10 minutes or more. `CmAdapter`
+   captures `cm`'s output, so all of `cm`'s `stdout` and `stderr` MUST be logged
+   to `cm-runner`'s `stderr` when `cm fix` exits, whatever the outcome.
 1. **Confirm:** run `cm report --format json` and read the finding's `status`.
    It MUST be `FIXED`. `cm fix` exits `0` whether or not it produced a patch,
    so its exit code alone is not trusted.
@@ -215,13 +215,12 @@ attempt. Retrying is left to the caller.
 
 ______________________________________________________________________
 
-### REQ-0005: Unified Diff on `stdout` (Proposed) {#req-0005}
+### REQ-0005: Unified Diff on `stdout` {#req-0005}
 
 - **CUJ UUID:** cuj-fix-diff-stdout
 
-> [!NOTE]
-> Proposed format. See [design.md, Decision 2](design.md#decision-2) for the
-> alternatives.
+See [design.md, Decision 2](design.md#decision-2) for the alternatives
+considered.
 
 When the finding is `FIXED`, `fix` MUST capture the patch with Git and write it
 to `stdout` **unchanged**:
@@ -230,6 +229,14 @@ to `stdout` **unchanged**:
    **excluding `.cm_project` and `.exploit/`**, and **including files the fix
    created** (untracked files are marked intent-to-add, `git add -N`, before
    diffing).
+1. Git's output MUST be read as **raw bytes**, with Git's `stderr` kept
+   separate, and written to `stdout` byte for byte. Reading it as text would
+   turn Windows line endings (`\r\n`) into `\n`, and the patch would then fail
+   `git apply`. Mixing in `stderr` would put Git's warnings inside the patch.
+1. The diff command MUST set colour, prefixes, external diff tools, text
+   conversion and relative paths explicitly (`--no-color`, `--src-prefix=a/`,
+   `--dst-prefix=b/`, `--no-ext-diff`, `--no-textconv`, `--no-relative`), so a
+   caller's Git configuration cannot change the format.
 1. `stdout` MUST contain the diff and nothing else, so that
    `cm-runner fix ... > fix.diff && git apply fix.diff` works.
 1. An empty diff MUST be treated as a failure (exit `3`, zero bytes on
@@ -324,16 +331,26 @@ ______________________________________________________________________
 - **CUJ UUID:** cuj-fix-caller-guide
 
 `docs/guides/calling_cm_runner.md` MUST show how to turn `find-diff`'s single
-SARIF document into one file per finding and fix each one:
+SARIF document into one file per finding and fix each one. Because `fix`
+refuses to run on uncommitted work (REQ-0003) and leaves its patch applied
+(REQ-0007), the example MUST:
+
+1. Keep the report, the split finding files, and the patches **outside** the
+   repository, so they don't count as uncommitted work.
+1. Check that the working tree is clean (ignoring `.cm_project` and
+   `.exploit/`) **before** the loop, and stop if it isn't.
+1. Reset the working tree (`git reset --hard && git clean -fd`) **after every**
+   `fix`, so the next one starts clean. The first check guarantees that this
+   only discards `cm`'s changes, which `--out` has already saved.
+
+The split uses this `jq` expression, checked with `jq` 1.6: each output line is
+a complete SARIF document holding one result.
 
 ```bash
-cm-runner find-diff --repo . --base origin/main > report.sarif
-jq -c '.runs[0].results[] as $r | .runs[0].results = [$r]' report.sarif \
-  | split -l 1 -d --additional-suffix=.sarif - finding-
-for f in finding-*.sarif; do
-  cm-runner fix --repo . --finding "$f" --out patches/ || echo "no fix for $f"
-done
+jq -c '.runs[0].results[] as $r | .runs[0].results = [$r]' "$work/report.sarif" \
+  | split -l 1 -d --additional-suffix=.sarif - "$work/finding-"
 ```
 
-The `jq` expression was checked with `jq` 1.6: each output line is a complete
-SARIF document holding one result.
+The loop assumes `find-diff`'s report holds only that scan's findings. If it
+also held findings from earlier runs, the loop would spend a `cm fix` run on
+each of them.

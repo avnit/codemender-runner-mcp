@@ -22,7 +22,7 @@ import os
 import re
 import shutil
 import subprocess
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 from utils import retry_on_exception
 
@@ -626,3 +626,134 @@ def push_branch_to_remote(
   push_cmd.extend(["origin", branch_name])
   from utils import run_command
   run_command(push_cmd, cwd=repo_dir, check=True)
+
+
+# How long the working-tree helpers below wait for one Git call.
+_WORKTREE_GIT_TIMEOUT_SEC = 120
+
+
+def _pathspecs_excluding(exclude: Sequence[str]) -> List[str]:
+  """Returns pathspecs for everything under the current folder except `exclude`."""
+  return ["--", ".", *(f":(exclude){path}" for path in exclude)]
+
+
+def _run_git_for_bytes(repo_dir: str, args: Sequence[str]) -> Optional[bytes]:
+  """Runs one Git command and returns its stdout exactly as Git wrote it.
+
+  stderr is captured separately, so a Git warning can never end up in the
+  returned bytes.
+
+  Args:
+    repo_dir: Folder to run Git in.
+    args: Arguments after `git`.
+
+  Returns:
+    stdout as bytes, or None (with the reason logged) if Git could not be run,
+    timed out, or exited non-zero.
+  """
+  try:
+    res = subprocess.run(
+        ["git", *args],
+        cwd=repo_dir,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=_WORKTREE_GIT_TIMEOUT_SEC,
+        check=False,
+    )
+  except (OSError, subprocess.SubprocessError) as exc:
+    logger.error("Could not run 'git %s' in %s: %s", args[0], repo_dir, exc)
+    return None
+  stderr = res.stderr.decode("utf-8", errors="replace").strip()
+  if res.returncode != 0:
+    logger.error(
+        "'git %s' in %s exited %d: %s", args[0], repo_dir, res.returncode, stderr
+    )
+    return None
+  if stderr:
+    logger.debug("'git %s' stderr: %s", args[0], stderr)
+  return res.stdout
+
+
+def list_uncommitted_paths(
+    repo_dir: str, exclude: Sequence[str] = ()
+) -> Optional[List[str]]:
+  """Lists modified, staged and untracked files under `repo_dir`.
+
+  Files ignored by `.gitignore` are not listed. Nor is anything in `exclude`
+  (paths relative to `repo_dir`) or beneath it.
+
+  Args:
+    repo_dir: A folder inside a Git working tree.
+    exclude: Paths to leave out, such as files another tool writes.
+
+  Returns:
+    The paths, as `git status` reports them, in Git's order. Empty when the
+    working tree is clean. None if Git failed.
+  """
+  out = _run_git_for_bytes(
+      repo_dir,
+      [
+          "status",
+          "--porcelain=v1",
+          "-z",
+          "--untracked-files=all",
+          *_pathspecs_excluding(exclude),
+      ],
+  )
+  if out is None:
+    return None
+  entries = out.decode("utf-8", errors="replace").split("\0")
+  paths = []
+  index = 0
+  while index < len(entries):
+    entry = entries[index]
+    index += 1
+    if len(entry) < 4:
+      continue
+    paths.append(entry[3:])
+    # With -z, a rename or copy entry is followed by the original path.
+    if any(code in "RC" for code in entry[:2]):
+      index += 1
+  return paths
+
+
+def diff_working_tree(
+    repo_dir: str, exclude: Sequence[str] = ()
+) -> Optional[bytes]:
+  """Returns every change under `repo_dir` since HEAD, as a patch.
+
+  Untracked files are first marked intent-to-add (`git add -N`) so that files
+  created since HEAD appear in the patch. This records only their names in the
+  index, not their contents. Ignored files, and anything in `exclude`, are left
+  out.
+
+  The patch is returned as bytes, exactly as Git wrote it, so Windows line
+  endings and binary changes survive and `git apply` accepts it. Colour,
+  prefixes, external diff tools and text conversion are set explicitly, so a
+  caller's Git configuration cannot change the format.
+
+  Args:
+    repo_dir: A folder inside a Git working tree.
+    exclude: Paths to leave out, such as files another tool writes.
+
+  Returns:
+    The patch, empty when nothing changed, or None if Git failed.
+  """
+  pathspecs = _pathspecs_excluding(exclude)
+  if _run_git_for_bytes(repo_dir, ["add", "--intent-to-add", *pathspecs]) is None:
+    return None
+  return _run_git_for_bytes(
+      repo_dir,
+      [
+          "diff",
+          "--binary",
+          "--no-color",
+          "--no-ext-diff",
+          "--no-textconv",
+          "--no-relative",
+          "--src-prefix=a/",
+          "--dst-prefix=b/",
+          "HEAD",
+          *pathspecs,
+      ],
+  )

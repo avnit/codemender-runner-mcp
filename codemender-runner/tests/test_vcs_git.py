@@ -16,6 +16,7 @@
 
 import base64
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,11 +25,13 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from vcs.git import (
+    diff_working_tree,
     enforce_https_url,
     filter_stageable_files,
     generate_branch_name,
     get_git_auth_header,
     is_git_repository,
+    list_uncommitted_paths,
     normalize_repo_relative_path,
     parse_repo_owner_and_name,
     ref_exists,
@@ -353,6 +356,113 @@ class TestVcsGit(unittest.TestCase):
       self.assertFalse(ref_exists(repo_dir, "   "))
       self.assertFalse(ref_exists(repo_dir, "--help"))
       self.assertFalse(ref_exists(repo_dir, "-q"))
+
+
+
+class TestWorkingTreeHelpers(unittest.TestCase):
+  """`list_uncommitted_paths` and `diff_working_tree`, used by `cm-runner fix`."""
+
+  _EXCLUDE = (".cm_project", ".exploit")
+
+  def setUp(self):
+    super().setUp()
+    self.repo = tempfile.mkdtemp(prefix="cm_runner_worktree_")
+    self.addCleanup(shutil.rmtree, self.repo, True)
+    self.git("init", "-q")
+    self.git("config", "user.name", "Test User")
+    self.git("config", "user.email", "test@example.com")
+    self.git("config", "core.autocrlf", "false")
+    self.write("app.py", b"x = 1\n")
+    self.write("crlf.txt", b"one\r\ntwo\r\n")
+    self.write("sub/old.py", b"y = 2\n")
+    self.write(".gitignore", b"*.log\n")
+    self.git("add", ".")
+    self.git("commit", "-q", "-m", "init")
+
+  def git(self, *args):
+    return subprocess.run(
+        ["git", *args], cwd=self.repo, check=True, capture_output=True,
+        timeout=30,
+    ).stdout
+
+  def write(self, path, data):
+    full = os.path.join(self.repo, path)
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, "wb") as handle:
+      handle.write(data)
+
+  def test_clean_tree_with_only_excluded_and_ignored_files(self):
+    self.write(".cm_project", b"{}")
+    self.write(".exploit/poc.sh", b"#!/bin/sh\n")
+    self.write("debug.log", b"noise\n")
+    self.assertEqual(list_uncommitted_paths(self.repo, self._EXCLUDE), [])
+    self.assertEqual(diff_working_tree(self.repo, self._EXCLUDE), b"")
+
+  def test_lists_modified_staged_untracked_and_renamed(self):
+    self.write("app.py", b"x = 3\n")
+    self.write("new.py", b"z = 4\n")
+    self.git("mv", "sub/old.py", "sub/renamed.py")
+    self.write(".cm_project", b"{}")
+    self.assertEqual(
+        sorted(list_uncommitted_paths(self.repo, self._EXCLUDE)),
+        ["app.py", "new.py", "sub/renamed.py"],
+    )
+
+  def test_not_a_repository(self):
+    plain = tempfile.mkdtemp(prefix="cm_runner_plain_")
+    self.addCleanup(shutil.rmtree, plain, True)
+    with self.assertLogs("codemender-orchestrator", level="ERROR"):
+      self.assertIsNone(list_uncommitted_paths(plain))
+      self.assertIsNone(diff_working_tree(plain))
+
+  def test_patch_round_trips_byte_for_byte(self):
+    self.write("app.py", b"x = 3\n")
+    self.write("crlf.txt", b"one\r\nTWO\r\n")
+    self.write("new.py", b"z = 4\n")
+    self.write("blob.bin", bytes(range(256)))
+    self.write(".cm_project", b"{}")
+    self.write(".exploit/poc.sh", b"#!/bin/sh\n")
+
+    patch = diff_working_tree(self.repo, self._EXCLUDE)
+
+    self.assertIn(b"one\r\n-two\r\n+TWO\r\n", patch)
+    self.assertNotIn(b".cm_project", patch)
+    self.assertNotIn(b".exploit", patch)
+    clone = tempfile.mkdtemp(prefix="cm_runner_clone_")
+    self.addCleanup(shutil.rmtree, clone, True)
+    subprocess.run(
+        ["git", "clone", "-q", "-c", "core.autocrlf=false", self.repo, clone],
+        check=True, capture_output=True, timeout=30,
+    )
+    subprocess.run(
+        ["git", "apply", "-"], cwd=clone, input=patch, check=True,
+        capture_output=True, timeout=30,
+    )
+    for name in ("app.py", "crlf.txt", "new.py", "blob.bin"):
+      with self.subTest(file=name):
+        with open(os.path.join(clone, name), "rb") as got, open(
+            os.path.join(self.repo, name), "rb"
+        ) as want:
+          self.assertEqual(got.read(), want.read())
+
+  def test_new_file_contents_are_not_staged(self):
+    self.write("new.py", b"z = 4\n")
+    diff_working_tree(self.repo, self._EXCLUDE)
+    self.assertEqual(self.git("diff", "--cached"), b"")
+    self.assertEqual(self.git("ls-files", "new.py").strip(), b"new.py")
+
+  def test_user_git_config_cannot_change_the_format(self):
+    for key, value in (
+        ("color.diff", "always"),
+        ("diff.noprefix", "true"),
+        ("diff.mnemonicPrefix", "true"),
+        ("diff.relative", "true"),
+    ):
+      self.git("config", key, value)
+    self.write("app.py", b"x = 3\n")
+    patch = diff_working_tree(os.path.join(self.repo), self._EXCLUDE)
+    self.assertTrue(patch.startswith(b"diff --git a/app.py b/app.py\n"), patch)
+    self.assertNotIn(b"\x1b[", patch)
 
 
 if __name__ == "__main__":

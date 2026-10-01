@@ -31,6 +31,7 @@ from typing import List, Optional
 
 from cli import exit_codes
 from cli.commands import find_diff
+from cli.commands import fix
 from cli.commands import init
 from cli.commands import version
 from cli.events import EventEmitter
@@ -176,6 +177,35 @@ def build_parser() -> argparse.ArgumentParser:
       metavar="DIR",
       help="directory to write report.sarif and report.md artifacts",
   )
+  fix_parser = subparsers.add_parser(
+      "fix",
+      parents=[common],
+      help="patch one finding and print the patch as a unified diff",
+      description=(
+          "Run 'cm fix' on one finding and print the resulting patch on"
+          " stdout as a unified diff, ready for 'git apply'. Refuses to run"
+          " on a repository with uncommitted work, which 'cm fix' would"
+          " discard."
+      ),
+  )
+  fix_parser.add_argument(
+      "--finding",
+      required=True,
+      metavar="FILE",
+      help="SARIF file holding exactly one finding, or '-' to read it from stdin",
+  )
+  fix_parser.add_argument(
+      "--repo",
+      default=".",
+      metavar="PATH",
+      help="the repository to fix (default: the current directory)",
+  )
+  fix_parser.add_argument(
+      "--out",
+      default=None,
+      metavar="DIR",
+      help="directory to also write the patch to, as <finding name>.diff",
+  )
   return parser
 
 
@@ -224,6 +254,8 @@ def main(argv: Optional[List[str]] = None) -> int:
       return init.run(init.config_from_args(args), adapter, emitter)
     if args.command == "find-diff":
       return find_diff.run(find_diff.config_from_args(args), adapter, emitter)
+    if args.command == "fix":
+      return fix.run(fix.config_from_args(args), adapter, emitter)
 
   parser.print_help(sys.stderr)
   return exit_codes.USAGE

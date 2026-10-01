@@ -5,8 +5,8 @@ what it gives back. The design reasoning is in
 [ADR-0001](../adr/ADR-0001-machine-readable-output-contract.md) (output) and
 [ADR-0002](../adr/ADR-0002-runner-layout-and-build.md) (layout and build).
 
-> **Status:** `version`, `init`, and `find-diff` work today. `fix` and `verify`
-> are in progress. Each will be added to this guide when it lands.
+> **Status:** `version`, `init`, `find-diff`, and `fix` work today. `verify` is
+> in progress and will be added to this guide when it lands.
 
 ## The command
 
@@ -19,7 +19,7 @@ cm-runner [--cm-binary PATH] [--log-level LEVEL] [--no-init] <command> [flags]
 | `version`   | Reports the runner's version and the `cm` binary it found.                                   | Available |
 | `init`      | Sets up `cm` for a repository and checks the result. See [`init`](#init).                    | Available |
 | `find-diff` | Scans a pull request's changes and outputs SARIF v2.1.0 JSON. See [`find-diff`](#find-diff). | Available |
-| `fix`       | Produces a patch for one finding.                                                            | Planned   |
+| `fix`       | Produces a patch for one finding, as a unified diff. See [`fix`](#fix).                      | Available |
 | `verify`    | Checks whether a finding is real, or whether a patch fixes it.                               | Planned   |
 
 ## Where to run it
@@ -60,6 +60,10 @@ be added. There is no text mode; to read it by hand, pipe it through
 ```json
 {"ts": "2026-09-30T23:41:12Z", "event": "version", "orchestrator": "0.1.0", "cm": {"found": true, "version": "0.11.0", "path": "/usr/local/bin/cm"}, "contract": "cm-0.11.x"}
 ```
+
+`find-diff` and `fix` are the exceptions: stdout carries their result in its
+standard format, and nothing else. For `find-diff` that is one SARIF document;
+for `fix` it is a unified diff.
 
 **stderr: logs.** Progress, warnings, errors, and all output from `cm`, `git`,
 and other programs. Show it to people; don't parse it.
@@ -207,3 +211,114 @@ report) before printing the compact SARIF line to `stdout`.
 | `0`  | Scan and report succeeded (`0` or more findings; `--fail-on NONE` ensures findings do not cause a non-zero exit).                                                           |
 | `2`  | Invalid flags (`--repo` is not a directory, `--base` is empty/whitespace, or `--out` points to an existing file). Nothing is written to `stdout`.                           |
 | `3`  | Execution failed (`--repo` is not a Git working tree, `--base` cannot be resolved, `cm` failed or timed out, or writing to `--out` failed). Nothing is written to `stdout`. |
+
+## `fix`
+
+```
+cm-runner fix --finding FILE [--repo PATH] [--out DIR]
+```
+
+Runs `cm fix` on one finding and prints the patch as a unified diff. `cm-runner`
+automatically runs [`init`](#init) for `--repo` first (logging `init` checks to
+`stderr` only) unless `--no-init` is passed.
+
+**Flags:**
+
+| Flag             | Default  | Meaning                                                                                   |
+| :--------------- | :------- | :---------------------------------------------------------------------------------------- |
+| `--finding FILE` | Required | A SARIF file holding exactly one finding. `-` reads it from stdin.                        |
+| `--repo PATH`    | `.`      | The Git working tree to fix.                                                              |
+| `--out DIR`      | None     | Folder to also write the patch to, as `<finding file name>.diff`. Created if it is missing. |
+
+There is no `--model` or retry flag. The model comes from `cm`'s default or
+`~/.codemender/config.yaml`. To retry, run the command again.
+
+**Before it starts.** `fix` checks two things and changes nothing if either
+fails:
+
+1. The finding is a SARIF document holding **exactly one** result. A
+   `find-diff` report with several findings is rejected; split it first (see
+   [From `find-diff` to `fix`](#from-find-diff-to-fix)). Exit `2`.
+1. `--repo` is a Git working tree with **no uncommitted work**: no modified,
+   staged, or untracked files, apart from `.cm_project` and `.exploit/`, which
+   `cm` writes itself. `cm fix` starts by running
+   `git checkout HEAD -- . && git clean -fd`, which would delete that work
+   without asking. Exit `3`, with the files listed on stderr. A fresh CI
+   checkout always passes.
+
+**What it runs.**
+
+1. `cm report --format json`, to list the findings already in `cm`'s database.
+1. `cm report import -f <finding> -p <repo>`. A finding from stdin is first
+   written to a temporary file outside the repository.
+1. `cm report --format json` again. Exactly one finding must be new; that is
+   the ID `cm` gave the import.
+1. `cm fix -y --bypass-warning <id>`, with a 30-minute limit. `--bypass-warning`
+   accepts `cm`'s responsibility warning for you, as the older pipeline does.
+1. `cm report --format json`, to check that the finding's status is now
+   `FIXED`. `cm fix` exits `0` even when it did not produce a patch.
+
+> [!IMPORTANT]
+> **`fix` is slow.** A one-line fix in a 10-line file took 8 to 9 minutes on
+> `cm` 0.11.0. `cm fix` prints nothing until it finishes, so its output appears
+> on stderr only at the end. To fix several findings faster, run one `fix` per
+> finding in parallel, each in its own checkout or container.
+
+**Output: the patch on stdout.** stdout holds the patch exactly as
+`git diff --binary HEAD` produced it, and nothing else. It includes files the
+fix created and leaves out `.cm_project` and `.exploit/`. Apply it with
+`git apply`:
+
+```bash
+cm-runner fix --finding finding.sarif > fix.diff && git apply fix.diff
+```
+
+The patch is also left applied in `--repo`. It is not committed or pushed;
+that is up to your CI job. Two runs on the same finding can produce different
+patches that are both correct, so don't compare patches by text.
+
+**Files (`--out`).** When `--out DIR` is passed, `fix` writes the same bytes to
+`DIR/<name>.diff` before printing anything, where `<name>` is the finding
+file's name without its extension (`finding` when the finding came from
+stdin). Without `--out` it writes no files of its own.
+
+**Exit code:**
+
+| Code | Meaning                                                                                                                                                                                              |
+| :--- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | The finding is `FIXED` and the patch was written.                                                                                                                                                    |
+| `2`  | Bad flags (`--repo` is not a folder, `--finding` is not a readable file, `--out` is a file) or a bad finding (not SARIF, or not exactly one result). Nothing is written to `stdout`.                 |
+| `3`  | Anything else: not a Git working tree, uncommitted work, `cm` not set up, import failed, `cm fix` failed or timed out, status not `FIXED`, empty patch, or writing `--out` failed. Nothing on `stdout`. |
+
+### From `find-diff` to `fix`
+
+`find-diff` prints one SARIF document for all findings; `fix` takes one finding
+at a time. This script splits the report and fixes each finding in turn:
+
+```bash
+set -euo pipefail
+shopt -s nullglob
+work="$(mktemp -d)"   # Outside the repository, so fix doesn't see these files.
+
+cm-runner find-diff --repo . --base origin/main > "$work/report.sarif"
+jq -c '.runs[0].results[] as $r | .runs[0].results = [$r]' "$work/report.sarif" \
+  | split -l 1 -d --additional-suffix=.sarif - "$work/finding-"
+
+# Each fix leaves its patch applied, and fix refuses to run on uncommitted work,
+# so the tree is reset after every fix. Check first that there is nothing of
+# yours to lose.
+if [ -n "$(git status --porcelain -- . ':!.cm_project' ':!.exploit')" ]; then
+  echo "Commit or stash your changes first." >&2
+  exit 1
+fi
+for f in "$work"/finding-*.sarif; do
+  cm-runner fix --repo . --finding "$f" --out "$work/patches" >/dev/null \
+    || echo "No fix for $f" >&2
+  git reset -q --hard && git clean -fdq
+done
+ls "$work/patches" 2>/dev/null || echo "No patches."
+```
+
+Each patch in `$work/patches` applies to the commit `find-diff` scanned. The
+patches were made independently, so two of them can conflict if they touch the
+same lines.
