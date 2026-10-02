@@ -11,3 +11,4 @@ capabilities.
 | [SPEC-0003](runner-container-packaging/spec.md) | [runner-container-packaging](runner-container-packaging/design.md) | Component | Approved    | Lean Runner Base Container & Modular BYOI Packaging                                 |
 | [SPEC-WIF](wif/spec.md)                         | [wif](wif/design.md)                                               | Component | Approved    | Composable Mode-Aware Workload Identity Federation Module (`terraform/wif`)         |
 | [SPEC-DIST](distribute/spec.md)                 | [distribute](distribute/design.md)                                 | Component | Proposed    | Customer Repository Distribution Engine & Propagation Kit (`scripts/distribute.sh`) |
+| [SPEC-GHA](github-actions/spec.md)              | [github-actions](github-actions/design.md)                         | Component | Draft       | GitHub Actions Orchestration & Dual Execution Backends (`LocalDocker` & `CloudRun`) |
