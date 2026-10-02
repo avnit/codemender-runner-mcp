@@ -1,11 +1,11 @@
 # CodeMender Runner: Canonical CodeMender Deployment Scenarios
 
-> [!NOTE]
-> While we hold this code to a high standard, this is example code and should
-> not be blindly applied in. Use these canoncial examples as the foundation to
-> build your deployed code upon rather than as ready to deploy. Your scenario
-> will likely differ in subtle ways that will require modifications to the
-> presented code before it it fit for purpose.
+> [!NOTE] While we hold this code to a high standard, this is example
+> code and should not be blindly applied in a customer repo. Use these
+> canoncial examples as the foundation to build your deployed code upon
+> rather than as ready to deploy. Your scenario will likely differ in
+> subtle ways that will require modifications to the presented code
+> before it it fit for purpose.
 
 This repository contains a set of opinionated deployment scenarioes for
 CodeMender.
@@ -41,7 +41,7 @@ We organize this repo using the following folders and meanings:
 
 ## Contributing
 
-1. Get access to this repo. Reach out to an existing Admin (ledoux@, TODO) and
+1. Get access to this repo. Reach out to an existing Admin and
    ask to be added as a contributor.
 1. Open a PR.
 1. Ask an admin or maintainer to review the PR. All code in this PR must be

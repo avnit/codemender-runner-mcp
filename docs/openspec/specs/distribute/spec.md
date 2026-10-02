@@ -1,5 +1,5 @@
 <!--*
-freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-01' }
+freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-02' }
 *-->
 
 <!--
@@ -39,14 +39,14 @@ The resulting distribution repository serves a **dual purpose**:
    functions out-of-the-box as a working reference implementation.
 1. **Customer Propagation Kit:** When the maintainer populates the distribution
    repository with `--include-distribute`, `scripts/distribute.sh` is included
-   in the distribution repository alongside the GCP Workload Identity Federation
-   (WIF) Terraform module (`terraform/gha_wif/`) and customer-focused
-   documentation (`README.md`, `docs/github_actions_setup.md`,
-   `docs/calling_cm_runner.md`). Customers can then run
-   `./scripts/distribute.sh --target /path/to/repo` from the distribution
-   repository (where `--include-distribute` is off by default) to set up
-   additional repositories without copying `scripts/distribute.sh` into those
-   repositories.
+   in the distribution repository alongside the root GCP Workload Identity
+   Federation (WIF) Terraform configuration (`terraform/` and
+   `terraform/modules/wif/`) and customer-focused documentation (`README.md`,
+   `docs/github_actions_setup.md`, `docs/calling_cm_runner.md`). Customers can
+   then run `./scripts/distribute.sh --target /path/to/repo` from the
+   distribution repository (where `--include-distribute` is off by default) to
+   set up additional repositories without copying `scripts/distribute.sh` into
+   those repositories.
 
 This specification is governed by and references:
 
@@ -54,10 +54,13 @@ This specification is governed by and references:
   subcommand (`cm-runner find-diff`).
 - [SPEC-FIX](../fix/spec.md) — Automated patch synthesis and remediation
   subcommand (`cm-runner fix`).
-- [ADR-0001: Machine-Readable Output Contract](../../adr/ADR-0001-machine-readable-output-contract.md)
-- [ADR-0002: Runner Layout and Build](../../adr/ADR-0002-runner-layout-and-build.md)
-- [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../adr/ADR-0003-environment-scrubbing.md)
-- [ADR-0004: Project Tech Stack & Scenario-Decoupled Monorepo Architecture](../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md)
+- [SPEC-WIF](../wif/spec.md) — Unified Terraform root and composable mode-aware
+  Workload Identity Federation module (`terraform/` &
+  `terraform/modules/{wif,gcp}`).
+- [ADR-0001: Machine-Readable Output Contract](../../../adr/ADR-0001-machine-readable-output-contract.md)
+- [ADR-0002: Runner Layout and Build](../../../adr/ADR-0002-runner-layout-and-build.md)
+- [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../../adr/ADR-0003-environment-scrubbing.md)
+- [ADR-0004: Project Tech Stack & Scenario-Decoupled Monorepo Architecture](../../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md)
 
 ## Requirements
 
@@ -229,11 +232,18 @@ repositories:
        `test_pr_review_suggestions.py`, `test_storage.py`, `test_utils.py`,
        `test_vcs_github.py`, `test_codemender_db.py`, `test_command_builder.py`,
        `e2e_test_local.py`, `dummy_cm.py`, `tests/cm`).
-1. **GCP Workload Identity Federation Module (`terraform/gha_wif/`):**
-   - Copy `terraform/gha_wif/` to `terraform/gha_wif/`.
-   - Exclude in-progress Cloud Run files (`terraform/gcp/`,
-     `workflows/gcp_parallel_workflow.yaml`, `cloudbuild.yaml`) until Cloud Run
-     support is ready to be added to `scripts/distribute.sh` in a future commit.
+1. **GCP Workload Identity Federation Terraform Configuration (`terraform/` &
+   `terraform/modules/wif/`):**
+   - Copy the root `terraform/` files (`main.tf`, `variables.tf`, `outputs.tf`,
+     `provider.tf`, `terraform.tfvars.example`, `.terraform.lock.hcl`, and
+     `tests/root_test.tftest.hcl`) and `terraform/modules/wif/` to `terraform/`.
+   - Explicitly exclude/strip `terraform/modules/gcp/`, `terraform/gcp.tf`,
+     `terraform/gcp_override.tf`, `terraform/tests/root_gcp_test.tftest.hcl`,
+     `workflows/gcp_parallel_workflow.yaml`, and `cloudbuild.yaml` until Cloud
+     Run support is ready to be added to `scripts/distribute.sh` in a future
+     commit, ensuring `terraform init`, `terraform validate`, and
+     `terraform test` succeed directly in `terraform/` inside the distributed
+     repository with zero dangling local, module, or output references.
 1. **Customer Documentation (`docs/`):**
    - Map `docs/guides/calling_cm_runner.md` (or `docs/calling_cm_runner.md` when
      running from a distributed repository) to `docs/calling_cm_runner.md` and
@@ -257,12 +267,15 @@ repositories:
 - **WHEN** `./scripts/distribute.sh --target /tmp/cm-distro` completes
 - **THEN** `/tmp/cm-distro` contains `.github/actions/codemender/action.yml`,
   `.github/workflows/cm-merge-scan.yml`,
-  `.github/workflows/build_runner_image.yml`, `terraform/gha_wif/`, `README.md`,
-  `docs/calling_cm_runner.md`, and `docs/github_actions_setup.md`
+  `.github/workflows/build_runner_image.yml`, `terraform/main.tf`,
+  `terraform/terraform.tfvars.example`, `terraform/tests/root_test.tftest.hcl`,
+  `terraform/modules/wif/`, `README.md`, `docs/calling_cm_runner.md`, and
+  `docs/github_actions_setup.md`
 - **AND** `/tmp/cm-distro` contains no files under `codemender-runner/runners/`,
-  `docs/openspec/`, `docs/adr/`, or `terraform/gcp/`, nor
-  `codemender-runner/main.py`, `codemender-runner/utils.py`, or
-  `scripts/distribute.sh`
+  `docs/openspec/`, `docs/adr/`, or `terraform/modules/gcp/`, nor
+  `terraform/gcp.tf`, `terraform/gcp_override.tf`,
+  `terraform/tests/root_gcp_test.tftest.hcl`, `codemender-runner/main.py`,
+  `codemender-runner/utils.py`, or `scripts/distribute.sh`
 - **AND** running
   `python3 -m unittest discover -s codemender-runner/tests -t codemender-runner`
   and `python3 -m unittest discover -s .github/actions/codemender/tests` inside
@@ -460,7 +473,8 @@ repository) that documents:
    `docker build codemender-runner`) builds and publishes the `cm-runner`
    container image.
 1. **Step 2 — Setting Up GCP Workload Identity Federation (WIF):** How to use
-   `terraform/gha_wif/` so `cm-runner` can authenticate to Google Cloud.
+   `terraform/` (`cd terraform && cp terraform.tfvars.example terraform.tfvars && terraform init && terraform apply`)
+   so `cm-runner` can authenticate to Google Cloud.
 1. **Step 3 — Setting Up Additional Repositories:** How to run
    `./scripts/distribute.sh --target /path/to/repo` from the distribution
    repository to set up another repository without copying the distribution
@@ -478,4 +492,4 @@ repository) that documents:
 - **THEN** every linked target (`docs/github_actions_setup.md`,
   `docs/calling_cm_runner.md`, `.github/workflows/cm-merge-scan.yml`,
   `.github/workflows/build_runner_image.yml`, `scripts/distribute.sh`,
-  `terraform/gha_wif/`) exists at its resolved path inside `/tmp/cm-distro`.
+  `terraform/`) exists at its resolved path inside `/tmp/cm-distro`.

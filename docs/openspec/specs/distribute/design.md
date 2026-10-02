@@ -1,5 +1,5 @@
 <!--*
-freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-01' }
+freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-02' }
 *-->
 
 <!--
@@ -19,7 +19,9 @@ sdd_cujspec_product: codemender-runner
 containing multiple parallel workstreams, legacy orchestration pipelines
 (`main.py`, `runners/`, `.github/workflows/codemender_parallel.yml`), internal
 Architecture Decision Records (`docs/adr/`), OpenSpec specifications
-(`docs/openspec/`), and in-progress Cloud Run components (`terraform/gcp/`).
+(`docs/openspec/`), and in-progress Cloud Run components
+(`terraform/modules/gcp/`, `terraform/gcp.tf`, `terraform/gcp_override.tf`,
+`terraform/tests/root_gcp_test.tftest.hcl`).
 
 Sharing this internal repository directly with customers exposes unstable
 work-in-progress changes and legacy code paths. Instead, we need a repeatable
@@ -28,11 +30,11 @@ repository—starting with the GitHub Actions runner layout today and expanding 
 include Cloud Run in future syncs—and pushes updates into a standalone,
 customer-facing Git repository without clobbering target repository changes.
 
-Governed by [SPEC-DIST](spec.md),
-[ADR-0001](../../adr/ADR-0001-machine-readable-output-contract.md),
-[ADR-0002](../../adr/ADR-0002-runner-layout-and-build.md),
-[ADR-0003](../../adr/ADR-0003-environment-scrubbing.md), and
-[ADR-0004](../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md).
+Governed by [SPEC-DIST](spec.md), [SPEC-WIF](../wif/spec.md),
+[ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
+[ADR-0002](../../../adr/ADR-0002-runner-layout-and-build.md),
+[ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md), and
+[ADR-0004](../../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md).
 
 ## Goals / Non-Goals
 
@@ -55,6 +57,13 @@ Governed by [SPEC-DIST](spec.md),
   `utils.py`, `codemender/db.py`, `vcs/github.py`) so only the new `cm-runner`
   CLI (`cli/`, including `version`, `init`, `find-diff`, and additional
   subcommands such as `fix` as they land in the existing layout) is shipped.
+- Ship the root `terraform/` entrypoint (`main.tf`, `variables.tf`,
+  `outputs.tf`, `provider.tf`, `terraform.tfvars.example`,
+  `.terraform.lock.hcl`, `tests/root_test.tftest.hcl`) and
+  `terraform/modules/wif/` while stripping `terraform/modules/gcp/`,
+  `terraform/gcp.tf`, `terraform/gcp_override.tf`, and
+  `terraform/tests/root_gcp_test.tftest.hcl` until Cloud Run is ready for
+  distribution.
 - Allow new top-level components (such as Cloud Run) to be added to
   `scripts/distribute.sh` in future commits without needing profile flags.
 
@@ -64,9 +73,10 @@ Governed by [SPEC-DIST](spec.md),
   (it is run in Linux environments).
 - Modifying `github-actions/actions/codemender/` implementation logic (handled
   by Workstream 2).
-- Shipping Cloud Run infrastructure (`terraform/gcp/`, `gcp-cloudrun/`) in the
-  initial sync (it will be added directly to `scripts/distribute.sh` when
-  ready).
+- Shipping Cloud Run infrastructure (`terraform/modules/gcp/`,
+  `terraform/gcp.tf`, `terraform/gcp_override.tf`,
+  `terraform/tests/root_gcp_test.tftest.hcl`, `gcp-cloudrun/`) in the initial
+  sync (it will be added directly to `scripts/distribute.sh` when ready).
 
 ## Decisions
 
@@ -186,7 +196,7 @@ Governed by [SPEC-DIST](spec.md),
   `vcs.git` only for modern helpers (`is_git_repository`, `ref_exists`), neither
   of which uses `utils.py`. Lazy importing `utils` inside the legacy functions
   (matching the pattern established in `codemender/cm.py` under
-  [ADR-0002](../../adr/ADR-0002-runner-layout-and-build.md)) and guarding
+  [ADR-0002](../../../adr/ADR-0002-runner-layout-and-build.md)) and guarding
   legacy-only tests allows the stripped `codemender-runner/` package in the
   distribution repository to run and pass its entire unit test suite without
   shipping `utils.py`, `main.py`, or `requests`.
@@ -205,17 +215,24 @@ Governed by [SPEC-DIST](spec.md),
     contents naturally grow as features mature.
 - **Rationale:**
   - For the initial sync, `scripts/distribute.sh` includes the GitHub Actions
-    layout, stripped `codemender-runner/` CLI, `terraform/gha_wif/`, and
-    customer documentation.
+    layout, stripped `codemender-runner/` CLI, the root `terraform/` files
+    (`main.tf`, `variables.tf`, `outputs.tf`, `provider.tf`,
+    `terraform.tfvars.example`, `.terraform.lock.hcl`,
+    `tests/root_test.tftest.hcl`) plus `terraform/modules/wif/` (with
+    `terraform/modules/gcp/`, `terraform/gcp.tf`, `terraform/gcp_override.tf`,
+    and `terraform/tests/root_gcp_test.tftest.hcl` stripped), and customer
+    documentation.
   - As new subcommands (`fix`, `verify`) land in `codemender-runner/cli/` or new
     workflows land in `github-actions/workflows/`, they are picked up
     automatically with zero changes to `scripts/distribute.sh`.
-  - When Cloud Run is ready to distribute in a later commit, we simply add the
-    Cloud Run directories to `scripts/distribute.sh` in that commit. Because
-    `$base_tree` is built using `<prev_source_sha>`'s version of
-    `scripts/distribute.sh` (which did not include Cloud Run) and `$new_tree` is
-    built using the new version of `scripts/distribute.sh` (which includes Cloud
-    Run), the 3-way merge cleanly adds all Cloud Run files on the next sync.
+  - When Cloud Run is ready to distribute in a later commit, we simply retain
+    `terraform/modules/gcp/`, `terraform/gcp.tf`, `terraform/gcp_override.tf`,
+    and `terraform/tests/root_gcp_test.tftest.hcl` in `scripts/distribute.sh`
+    in that commit. Because `$base_tree` is built using `<prev_source_sha>`'s
+    version of `scripts/distribute.sh` (which stripped Cloud Run) and
+    `$new_tree` is built using the new version of `scripts/distribute.sh` (which
+    retains Cloud Run), the 3-way merge cleanly adds all Cloud Run files on the
+    next sync.
 
 ## Architecture
 
@@ -238,7 +255,7 @@ Find latest 'Codemender-Source-Commit: <prev_sha>'"]
     stageNew["git archive <source_ref> -> filter (REQ-0002, REQ-0003, REQ-0005)
 - github-actions/ -> .github/
 - codemender-runner/ (stripped to new CLI)
-- terraform/gha_wif/ -> terraform/gha_wif/
+- terraform/ + terraform/modules/wif/ (modules/gcp/, gcp.tf, gcp_override.tf & root_gcp_test stripped)
 - dist/README.md -> README.md
 - scripts/distribute.sh (ONLY if --include-distribute)
 -> git write-tree -> $new_tree"]
@@ -271,7 +288,7 @@ flowchart LR
         s_wf["github-actions/workflows/*.yml"]
         s_build[".github/workflows/build_runner_image.yml"]
         s_cmr["codemender-runner/\n(cli/, codemender/cm.py, config.py, vcs/git.py, Dockerfile)"]
-        s_wif["terraform/gha_wif/"]
+        s_wif["terraform/ + terraform/modules/wif/\n(modules/gcp/, gcp.tf, gcp_override.tf & root_gcp_test stripped)"]
         s_docs1["docs/guides/calling_cm_runner.md"]
         s_docs2["github-actions/README.md"]
         s_dist_readme["dist/README.md"]
@@ -283,7 +300,7 @@ flowchart LR
         t_wf[".github/workflows/*.yml"]
         t_build[".github/workflows/build_runner_image.yml"]
         t_cmr["codemender-runner/\n(Legacy main.py, runners/, utils.py stripped)"]
-        t_wif["terraform/gha_wif/"]
+        t_wif["terraform/ + terraform/modules/wif/"]
         t_docs1["docs/calling_cm_runner.md"]
         t_docs2["docs/github_actions_setup.md"]
         t_readme["README.md"]
@@ -312,17 +329,17 @@ flowchart LR
 
 ### Module & File Inventory
 
-| Source Path                                                                                                                        | Target Distro Path                                           | Responsibility                                                                                                                           |
-| :--------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
-| `scripts/distribute.sh`                                                                                                            | `scripts/distribute.sh` *(only with `--include-distribute`)* | Extracts `git archive`, applies layout transformations, writes Git trees, and runs 3-way `cherry-pick --no-commit` sync into `--target`. |
-| `dist/README.md`                                                                                                                   | `README.md`                                                  | Customer-facing landing page explaining the live example repo, image build, WIF setup, and `./scripts/distribute.sh --target <dir>`.     |
-| `github-actions/actions/codemender/`                                                                                               | `.github/actions/codemender/`                                | Composite GitHub Action and unit tests.                                                                                                  |
-| `github-actions/workflows/*.yml`                                                                                                   | `.github/workflows/*.yml`                                    | GitHub Actions workflow templates (e.g. `cm-merge-scan.yml`, active in the distro repo and synced into downstream repos).                |
-| `.github/workflows/build_runner_image.yml`                                                                                         | `.github/workflows/build_runner_image.yml`                   | Builds `codemender-runner/Dockerfile` and publishes the image to GHCR.                                                                   |
-| `codemender-runner/{Dockerfile,.dockerignore,requirements.txt,__main__.py,bin/,cli/,codemender/cm.py,config.py,vcs/git.py,tests/}` | `codemender-runner/...`                                      | Stripped `cm-runner` CLI (`cli/`, including `version`, `init`, `find-diff`, and `fix` as added) and hermetic unit tests.                 |
-| `terraform/gha_wif/`                                                                                                               | `terraform/gha_wif/`                                         | Terraform module for keyless GitHub Actions GCP Workload Identity Federation.                                                            |
-| `docs/guides/calling_cm_runner.md`                                                                                                 | `docs/calling_cm_runner.md`                                  | CLI reference for `cm-runner`.                                                                                                           |
-| `github-actions/README.md`                                                                                                         | `docs/github_actions_setup.md`                               | Detailed setup and security architecture guide for the GitHub Action.                                                                    |
+| Source Path                                                                                                                                      | Target Distro Path                                           | Responsibility                                                                                                                                                                                        |
+| :----------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/distribute.sh`                                                                                                                          | `scripts/distribute.sh` *(only with `--include-distribute`)* | Extracts `git archive`, applies layout transformations, writes Git trees, and runs 3-way `cherry-pick --no-commit` sync into `--target`.                                                              |
+| `dist/README.md`                                                                                                                                 | `README.md`                                                  | Customer-facing landing page explaining the live example repo, image build, WIF setup (`cd terraform`), and `./scripts/distribute.sh --target <dir>`.                                                 |
+| `github-actions/actions/codemender/`                                                                                                             | `.github/actions/codemender/`                                | Composite GitHub Action and unit tests.                                                                                                                                                               |
+| `github-actions/workflows/*.yml`                                                                                                                 | `.github/workflows/*.yml`                                    | GitHub Actions workflow templates (e.g. `cm-merge-scan.yml`, active in the distro repo and synced into downstream repos).                                                                             |
+| `.github/workflows/build_runner_image.yml`                                                                                                       | `.github/workflows/build_runner_image.yml`                   | Builds `codemender-runner/Dockerfile` and publishes the image to GHCR.                                                                                                                                |
+| `codemender-runner/{Dockerfile,.dockerignore,requirements.txt,__main__.py,bin/,cli/,codemender/cm.py,config.py,vcs/git.py,tests/}`               | `codemender-runner/...`                                      | Stripped `cm-runner` CLI (`cli/`, including `version`, `init`, `find-diff`, and `fix` as added) and hermetic unit tests.                                                                              |
+| `terraform/{main.tf,variables.tf,outputs.tf,provider.tf,terraform.tfvars.example,.terraform.lock.hcl,tests/root_test.tftest.hcl,modules/wif/}`   | `terraform/...`                                              | Root Terraform configuration and `terraform/modules/wif/` child module for GCP Workload Identity Federation (with `terraform/modules/gcp/`, `gcp.tf`, `gcp_override.tf`, and `root_gcp_test` stripped). |
+| `docs/guides/calling_cm_runner.md`                                                                                                               | `docs/calling_cm_runner.md`                                  | CLI reference for `cm-runner`.                                                                                                                                                                        |
+| `github-actions/README.md`                                                                                                                       | `docs/github_actions_setup.md`                               | Detailed setup and security architecture guide for the GitHub Action.                                                                                                                                 |
 
 ## Risks / Trade-offs
 
