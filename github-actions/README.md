@@ -4,7 +4,7 @@ A GitHub Action that runs CodeMender (`cm-runner`) on pull requests and reports
 the results back on the PR.
 
 > **Status: M0 (walking skeleton).** On every pull request the action runs
-> `cm-runner version` in a `docker run` sandbox and posts one PR comment with
+> `cm-runner version` in a `docker run` container under gVisor and posts one PR comment with
 > the result. `find-diff`, `fix`, and `verify` will be wired in once those
 > `cm-runner` commands exist (see [Roadmap](#roadmap)).
 
@@ -15,7 +15,7 @@ flowchart LR
     gh["GitHub PR event"] --> wf["Repo's workflow file"]
     wf --> action["actions/codemender/action.yml"]
     action --> runner["src/gha_runner.py"]
-    runner -->|"launcher: docker run, no GitHub token"| cm["cm-runner container"]
+    runner -->|"launcher: docker run under gVisor, no GitHub token"| cm["cm-runner container"]
     cm -->|"NDJSON on stdout"| runner
     runner -->|"vcs/github.py"| pr["PR comment"]
 ```
@@ -35,13 +35,13 @@ action's source lives with the action, so the directory is self-contained.
 github-actions/
 ├── actions/
 │   └── codemender/
-│       ├── action.yml             # Composite action: pulls the image, runs src/gha_runner.py
+│       ├── action.yml             # Composite action: installs gVisor, pulls the image, runs src/gha_runner.py
 │       ├── requirements.txt       # Dependencies of this action (not of cm-runner)
 │       ├── src/
 │       │   ├── gha_runner.py      # Entry point: reads the GitHub event, runs cm-runner, posts the result
 │       │   ├── launcher/
 │       │   │   ├── base.py        # Launcher interface + ADR-0001 output contract (NDJSON, exit codes)
-│       │   │   └── local_docker.py  # Vanilla launcher: `docker run` on the GitHub Actions VM
+│       │   │   └── local_docker.py  # `docker run` on the GitHub Actions VM, under gVisor by default
 │       │   └── vcs/
 │       │       └── github.py      # GitHub REST API: create/update the CodeMender PR comment
 │       └── tests/                 # Unit tests (no network, no Docker needed)
@@ -158,6 +158,8 @@ Later pushes update the same comment.
 | `runner_image` | — (**required**) | cm-runner image. Pin a commit SHA tag, not `:latest`. |
 | `registry_token` | *(workflow token)* | Optional. Used **only** to pull the image, when the repository's token can't read it. |
 | `log_level` | `info` | cm-runner log level. Logs appear in the job log. |
+| `container_runtime` | `runsc` | `runsc` runs cm-runner under gVisor, which `cm`'s sandbox needs (see [Security model](#security-model)). `runc` is an explicit opt-out: plain Docker, where `cm`'s sandbox can't start. |
+| `gvisor_release` | `20260921.0` | gVisor release installed when `container_runtime` is `runsc`: `yyyymmdd` or `yyyymmdd.N` ([versions](https://gvisor.dev/docs/user_guide/install/#versions)). Pinned so every run uses the same build. |
 
 ### Required workflow permissions
 
@@ -187,7 +189,7 @@ There are two sandbox layers:
 
 | Layer | Owner | Protects against |
 | :--- | :--- | :--- |
-| **Outer**: the container (`docker run`) | This action (the launcher) | cm-runner reaching the GitHub token, the host, or other jobs |
+| **Outer**: the container (`docker run`, under gVisor) | This action (the launcher) | cm-runner reaching the GitHub token, the host, or other jobs |
 | **Inner**: `cm`'s own process sandbox | cm-runner (configures `cm`) | The agent's tool calls (builds, PoCs) escaping the workspace or network |
 
 - `docker run` is started **without any `-e`/`--env` flags**, so no host
@@ -197,6 +199,47 @@ There are two sandbox layers:
 - cm-runner output is treated as untrusted. Values are escaped before being
   rendered, and comments are truncated to GitHub's limit.
 - Fork PRs run only if the repository allows it (see below).
+
+### Why gVisor
+
+`cm`'s inner sandbox creates Linux namespaces. Docker's default profile blocks
+that, so under plain `docker run` the sandbox fails with
+`failed to create sandbox box: ... operation not permitted`.
+
+The action therefore installs [gVisor](https://gvisor.dev) (a pinned release,
+checked against its sha512) and the launcher runs the container with:
+
+```text
+docker run --rm --runtime=runsc --cap-add SYS_ADMIN <image> ...
+```
+
+- **`SYS_ADMIN` is granted by gVisor only.** Under `runsc`, the container's
+  system calls are handled by gVisor's user-space kernel, so the capability
+  applies inside gVisor, not to the runner VM's real kernel. That's what lets
+  `cm` create its namespaces safely.
+- **Never used:** `--privileged`, or `--security-opt seccomp=unconfined` /
+  `apparmor=unconfined`. Those would hand the same capability to the real
+  kernel.
+- **`runc` opt-out:** `container_runtime: runc` skips gVisor and adds no
+  capabilities. Only the outer container then protects the runner, and `cm`'s
+  sandbox can't start.
+- **Cost:** the install step downloads ~130 MB and logs how long it took.
+
+### Sandbox network: closed by default
+
+cm-runner sets `cm`'s sandbox network profile from
+`CODEMENDER_SANDBOX_NETWORK_PROFILE`. The default is `permissive-closed`: the
+agent's commands (builds, tests, PoCs during `verify`/`fix`) get no network.
+`permissive-open` gives them full network access and must be set explicitly,
+e.g. for projects whose build or tests download dependencies. `find` is
+unaffected, as its agent has no network tools.
+
+### Known limitation: violations aren't reported under gVisor
+
+Under gVisor, `cm`'s "Sandbox violations detected" output is **always empty**.
+`cm` collects violations with `SECCOMP_FILTER_FLAG_NEW_LISTENER`, which gVisor
+doesn't support. Blocking still works: network, out-of-workspace reads, and
+out-of-workspace writes are denied; they just aren't listed.
 
 ### Fork pull requests
 
@@ -223,11 +266,6 @@ Without these settings, the job fails and the log names the setting to enable.
 - **To check at M1:** whether GCP Workload Identity Federation tokens are
   issued to fork workflows under these settings.
 
-> **Open item for cm-runner:** `cm`'s inner sandbox uses Linux user namespaces,
-> which Docker's default profile may block. cm-runner should check this (e.g.
-> in `init`) and offer an explicit "outer boundary only" mode. Not relevant to
-> M0, since `version` doesn't start the sandbox.
-
 ## Running the tests
 
 ```bash
@@ -239,7 +277,7 @@ python3 -m unittest discover -s tests -v
 
 | Milestone | What it adds | Blocked on |
 | :--- | :--- | :--- |
-| **M0** (this) | `cm-runner version` via `docker run`, PR comment | — |
+| **M0** (this) | `cm-runner version` via `docker run` under gVisor, PR comment | — |
 | M1 | Real findings posted to the PR, SARIF artifacts, GCP auth (WIF) | `cm-runner find-diff` |
 | M2 | One-click fix suggestions on the PR | `cm-runner fix` |
 | M3 | `@codemender verify <id>` and the Security Gate status check | `cm-runner verify` |

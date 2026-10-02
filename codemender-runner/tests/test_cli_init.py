@@ -341,14 +341,32 @@ class TestInitConfig(InitTestBase):
     self.assertEqual(settings["project_paths"], [self.repo])
     self.assertEqual(settings["vcs"]["type"], "git")
 
-  def test_legacy_sandbox_network_default_is_kept(self):
-    """No override: the legacy default, `permissive-open`, is written."""
+  def test_sandbox_network_is_closed_by_default(self):
+    """No override: `permissive-closed` (no network for the agent) is written."""
     stub = self.write_stub_cm()
 
     result = self.run_init("--repo", self.repo, "--cm-binary", stub)
 
     message = self.config_event(result)["message"]
+    self.assertIn("sandbox network permissive-closed", message)
+    self.assertEqual(
+        self.read_config()["sandbox"]["network"]["profile"], "permissive-closed"
+    )
+
+  def test_open_sandbox_network_is_an_explicit_opt_in(self):
+    """CODEMENDER_SANDBOX_NETWORK_PROFILE=permissive-open is still honored."""
+    stub = self.write_stub_cm()
+
+    result = self.run_init(
+        "--repo", self.repo, "--cm-binary", stub,
+        extra_env={"CODEMENDER_SANDBOX_NETWORK_PROFILE": "permissive-open"},
+    )
+
+    message = self.config_event(result)["message"]
     self.assertIn("sandbox network permissive-open", message)
+    self.assertEqual(
+        self.read_config()["sandbox"]["network"]["profile"], "permissive-open"
+    )
 
   def test_build_command_is_guessed_from_the_repo(self):
     """A package.json with a test script gives `npm test`, as in legacy."""

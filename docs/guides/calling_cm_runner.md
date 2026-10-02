@@ -136,7 +136,7 @@ isn't a folder.
 | `CODEMENDER_BUILD_COMMAND`           | The command `cm` runs to build and test a fix. If unset, it's taken from the repository's `.codemender.yaml`, or guessed from project files (e.g. `package.json` → `npm test`). If none is found, `cm init --verify` warns about it (on stderr) and fixes aren't tested. |
 | `CODEMENDER_MODEL`                   | The model `cm` uses.                                                                                                                                                                                                                                                     |
 | `CODEMENDER_SANDBOX_ENABLED`         | Whether `cm` runs its agent in a sandbox.                                                                                                                                                                                                                                |
-| `CODEMENDER_SANDBOX_NETWORK_PROFILE` | The sandbox's network access. Defaults to `permissive-open`. Only affects `fix` and `verify`; the right default is still to be decided.                                                                                                                                  |
+| `CODEMENDER_SANDBOX_NETWORK_PROFILE` | The sandbox's network access. Defaults to `permissive-closed` (no network for the agent's commands); set `permissive-open` to allow full network access, e.g. when the build or tests download dependencies. Only affects `fix` and `verify`.                                    |
 
 `cm init --verify` also needs a GCP project ID, from `GOOGLE_CLOUD_PROJECT`,
 application default credentials, or the gcloud config. Without one, `cm_verify`

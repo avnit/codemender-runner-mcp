@@ -19,6 +19,18 @@ step of the job (including the ones holding GITHUB_TOKEN) runs inside the same
 environment as the agent. With `docker run`, cm-runner is a separate process
 that only receives what we explicitly pass in. `docker run` does not inherit
 the host environment, so GITHUB_TOKEN never reaches the container.
+
+Container runtime (`runtime`):
+  runsc (default)  gVisor. The container gets `--cap-add SYS_ADMIN` so that
+                   cm's own sandbox can create its namespaces. Under runsc
+                   that capability is granted by gVisor's user-space kernel
+                   only, never by the runner VM's real kernel.
+  runc             Docker's default runtime, no extra capabilities. cm's
+                   sandbox can't start under it (`operation not permitted`),
+                   so this is only an explicit opt-out.
+
+Never added, whatever the runtime: `--privileged`, any
+`--security-opt ...=unconfined`, or any `-e`/`--env` flag.
 """
 
 import logging
@@ -31,6 +43,17 @@ logger = logging.getLogger("codemender-github-actions")
 
 _DEFAULT_TIMEOUT_SECONDS = 60 * 60
 
+RUNTIME_GVISOR = "runsc"
+RUNTIME_RUNC = "runc"
+SUPPORTED_RUNTIMES = (RUNTIME_GVISOR, RUNTIME_RUNC)
+
+# Extra `docker run` flags per runtime. SYS_ADMIN is safe only under runsc,
+# where gVisor's own kernel grants it.
+_RUNTIME_FLAGS = {
+    RUNTIME_GVISOR: ("--runtime=runsc", "--cap-add", "SYS_ADMIN"),
+    RUNTIME_RUNC: (),
+}
+
 
 class LocalDockerLauncher(Launcher):
   """Runs cm-runner in a throwaway container on the local Docker daemon."""
@@ -41,6 +64,7 @@ class LocalDockerLauncher(Launcher):
       log_level: str = "info",
       timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
       docker_binary: str = "docker",
+      runtime: str = RUNTIME_GVISOR,
   ):
     """Initializes the launcher.
 
@@ -49,13 +73,23 @@ class LocalDockerLauncher(Launcher):
       log_level: Passed to `cm-runner --log-level`. Logs go to stderr.
       timeout_seconds: Hard limit for one cm-runner command.
       docker_binary: Docker CLI to invoke (overridable for tests).
+      runtime: Container runtime, `runsc` (gVisor, default) or `runc`.
+
+    Raises:
+      ValueError: if `image` is empty or `runtime` is not supported.
     """
     if not image:
       raise ValueError("A cm-runner image is required.")
+    if runtime not in SUPPORTED_RUNTIMES:
+      raise ValueError(
+          f"Unsupported container runtime {runtime!r}; expected one of"
+          f" {', '.join(SUPPORTED_RUNTIMES)}."
+      )
     self.image = image
     self.log_level = log_level
     self.timeout_seconds = timeout_seconds
     self.docker_binary = docker_binary
+    self.runtime = runtime
 
   def build_command(self, command: str, args: Sequence[str] = ()) -> List[str]:
     """Builds the `docker run` argv for one cm-runner command.
@@ -63,14 +97,14 @@ class LocalDockerLauncher(Launcher):
     The image's ENTRYPOINT is `cm-runner`, so everything after the image name
     is passed to cm-runner. No `-e`/`--env` flags are added: the container
     gets no host environment variables, and in particular no GitHub token.
+    The only runtime-dependent flags are the ones in `_RUNTIME_FLAGS`.
     """
     return [
         self.docker_binary,
         "run",
         "--rm",
+        *_RUNTIME_FLAGS[self.runtime],
         self.image,
-        "--output",
-        "json",
         "--log-level",
         self.log_level,
         command,

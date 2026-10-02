@@ -1407,7 +1407,7 @@ Build and push your image to GitHub Container Registry
 | `CODEMENDER_SKIP_EXPLOIT_VERIFICATION` | `false` | When `true`, skips dynamic exploit verification and generates patches directly. |
 | `CODEMENDER_SKIP_VERIFY` | `true` | When `true` (default), skips `cm verify` and proceeds directly to `cm fix`. Set to `false` to run verification before fix. |
 | `CODEMENDER_SANDBOX_ENABLED` | `true` | Enable `cm` process namespace and filesystem isolation. |
-| `CODEMENDER_SANDBOX_NETWORK_PROFILE` | `permissive-open` | Sandbox network policy (`permissive-open` or `restricted-local`). |
+| `CODEMENDER_SANDBOX_NETWORK_PROFILE` | `permissive-closed` | Sandbox network policy: `permissive-closed` (no network for the agent's commands) or `permissive-open` (full network access; explicit opt-in). |
 | `CODEMENDER_FORCE_OVERWRITE` | `false` | When `true`, overwrites existing branches and PRs instead of skipping duplicates. |
 
 --------------------------------------------------------------------------------

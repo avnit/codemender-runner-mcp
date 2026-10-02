@@ -225,9 +225,10 @@ def _write_config(
   so without the read-back a failed write would pass.
 
   The sandbox network setting is whatever `inject_codemender_config` writes:
-  `permissive-open` unless CODEMENDER_SANDBOX_NETWORK_PROFILE says otherwise.
-  Whether that is the right default is to be decided in the fix/verify work;
-  `find` is unaffected, as its agent has no network tools.
+  `permissive-closed` (no network for the agent's commands) unless
+  CODEMENDER_SANDBOX_NETWORK_PROFILE says otherwise, e.g. `permissive-open`
+  for projects whose build or tests need the network. `find` is unaffected,
+  as its agent has no network tools.
 
   Returns:
     True if the config was rewritten and points at `repo`.

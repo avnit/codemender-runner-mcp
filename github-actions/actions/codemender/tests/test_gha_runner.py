@@ -170,6 +170,34 @@ class TestMain(unittest.TestCase):
     self.assertEqual(event["pull_request"]["number"], 7)
     self.assertEqual(launcher.image, "img:sha")
     self.assertEqual(launcher.log_level, "debug")
+    self.assertEqual(launcher.runtime, "runsc")  # gVisor by default
+
+  def _main_with_event(self, **extra_env):
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+      json.dump(_pr_event(), f)
+    try:
+      return gha_runner.main(dict(_ENV, GITHUB_EVENT_PATH=f.name, **extra_env))
+    finally:
+      os.unlink(f.name)
+
+  @patch.object(gha_runner, "run_pr", return_value=0)
+  def test_runc_is_an_explicit_opt_out(self, mock_run_pr):
+    self.assertEqual(
+        self._main_with_event(CODEMENDER_CONTAINER_RUNTIME="runc"), 0
+    )
+    self.assertEqual(mock_run_pr.call_args.args[2].runtime, "runc")
+
+  @patch.object(gha_runner, "run_pr", return_value=0)
+  def test_empty_runtime_falls_back_to_gvisor(self, mock_run_pr):
+    self.assertEqual(self._main_with_event(CODEMENDER_CONTAINER_RUNTIME=""), 0)
+    self.assertEqual(mock_run_pr.call_args.args[2].runtime, "runsc")
+
+  @patch.object(gha_runner, "run_pr")
+  def test_unknown_runtime_fails_before_running(self, mock_run_pr):
+    self.assertEqual(
+        self._main_with_event(CODEMENDER_CONTAINER_RUNTIME="kata"), 1
+    )
+    mock_run_pr.assert_not_called()
 
 
 if __name__ == "__main__":

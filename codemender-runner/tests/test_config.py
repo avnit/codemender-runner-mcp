@@ -26,6 +26,7 @@ from config import get_cleanup_ports
 from config import get_github_credentials
 from config import get_scrubbed_env
 from config import inject_codemender_config
+from config import OrchestratorConfig
 import yaml
 
 
@@ -125,6 +126,34 @@ class TestConfig(unittest.TestCase):
 
 
 
+  def test_sandbox_network_profile_defaults_to_closed(self):
+    """With no override, cm's sandbox gets no network (`permissive-closed`)."""
+    with unittest.mock.patch.dict(os.environ, {}, clear=True):
+      self.assertEqual(
+          OrchestratorConfig.from_env().sandbox_network_profile,
+          "permissive-closed",
+      )
+    self.assertEqual(
+        OrchestratorConfig().sandbox_network_profile, "permissive-closed"
+    )
+
+  def test_sandbox_network_profile_open_is_explicit_opt_in(self):
+    """`permissive-open` is still honored when asked for explicitly."""
+    env = {"CODEMENDER_SANDBOX_NETWORK_PROFILE": "permissive-open"}
+    with unittest.mock.patch.dict(os.environ, env, clear=True):
+      self.assertEqual(
+          OrchestratorConfig.from_env().sandbox_network_profile,
+          "permissive-open",
+      )
+
+  def test_sandbox_stays_enabled_in_github_actions(self):
+    """GitHub Actions mode keeps cm's sandbox on unless explicitly disabled."""
+    env = {"GITHUB_ACTIONS": "true"}
+    with unittest.mock.patch.dict(os.environ, env, clear=True):
+      cfg = OrchestratorConfig.from_env()
+    self.assertEqual(cfg.storage_mode, "github_actions")
+    self.assertTrue(cfg.sandbox_enabled)
+
   def test_inject_codemender_config_sandbox(self):
     """Verify sandbox settings and project_paths normalization in config.yaml."""
     with tempfile.TemporaryDirectory() as temp_home:
@@ -137,7 +166,7 @@ class TestConfig(unittest.TestCase):
           yaml.dump(local_config, f)
 
         with unittest.mock.patch("os.path.expanduser", return_value=temp_home):
-          inject_codemender_config(repo_dir)
+          inject_codemender_config(repo_dir, config=OrchestratorConfig())
 
           out_config = os.path.join(temp_home, ".codemender", "config.yaml")
           self.assertTrue(os.path.exists(out_config))
@@ -149,7 +178,7 @@ class TestConfig(unittest.TestCase):
           self.assertIn("sandbox", data)
           self.assertTrue(data["sandbox"]["enabled"])
           self.assertEqual(data["sandbox"]["mounts"]["target_dir"], os.path.abspath(repo_dir))
-          self.assertEqual(data["sandbox"]["network"]["profile"], "permissive-open")
+          self.assertEqual(data["sandbox"]["network"]["profile"], "permissive-closed")
 
           # Verify project_paths are all absolute
           self.assertIn("project_paths", data)

@@ -56,25 +56,66 @@ class TestParseNdjson(unittest.TestCase):
 
 class TestLocalDockerLauncher(unittest.TestCase):
 
-  def test_requires_image(self):
-    with self.assertRaises(ValueError):
-      LocalDockerLauncher(image="")
-
-  def test_build_command_passes_no_environment(self):
-    launcher = LocalDockerLauncher(image="img:sha", log_level="debug")
-    argv = launcher.build_command("version")
-
-    self.assertEqual(
-        argv,
-        ["docker", "run", "--rm", "img:sha",
-         "--output", "json", "--log-level", "debug", "version"],
-    )
+  def assert_no_host_env_or_escalation(self, argv):
     # Security boundary: nothing from the host env (e.g. GITHUB_TOKEN) is
     # forwarded into the container.
     self.assertNotIn("-e", argv)
     self.assertNotIn("--env", argv)
     self.assertNotIn("--env-file", argv)
     self.assertFalse(any("TOKEN" in a for a in argv))
+    # Never weaken the real kernel's confinement.
+    self.assertFalse(any(a.startswith("--privileged") for a in argv))
+    self.assertFalse(any(a.startswith("--security-opt") for a in argv))
+    self.assertFalse(any("unconfined" in a for a in argv))
+
+  def test_requires_image(self):
+    with self.assertRaises(ValueError):
+      LocalDockerLauncher(image="")
+
+  def test_default_runtime_is_gvisor(self):
+    self.assertEqual(LocalDockerLauncher(image="img:sha").runtime, "runsc")
+
+  def test_build_command_runsc_adds_gvisor_and_sys_admin_only(self):
+    launcher = LocalDockerLauncher(
+        image="img:sha", log_level="debug", runtime="runsc"
+    )
+    argv = launcher.build_command("version")
+
+    self.assertEqual(
+        argv,
+        ["docker", "run", "--rm", "--runtime=runsc", "--cap-add", "SYS_ADMIN",
+         "img:sha", "--log-level", "debug", "version"],
+    )
+    self.assert_no_host_env_or_escalation(argv)
+
+  def test_build_command_runc_adds_no_runtime_flags(self):
+    launcher = LocalDockerLauncher(
+        image="img:sha", log_level="debug", runtime="runc"
+    )
+    argv = launcher.build_command("version")
+
+    self.assertEqual(
+        argv,
+        ["docker", "run", "--rm", "img:sha",
+         "--log-level", "debug", "version"],
+    )
+    # SYS_ADMIN on runc would be granted by the real kernel: never add it.
+    self.assertNotIn("--cap-add", argv)
+    self.assertNotIn("SYS_ADMIN", argv)
+    self.assert_no_host_env_or_escalation(argv)
+
+  def test_unknown_runtime_is_rejected(self):
+    for runtime in ("", "kata", "RUNSC", "runsc --privileged"):
+      with self.subTest(runtime=runtime):
+        with self.assertRaises(ValueError):
+          LocalDockerLauncher(image="img:sha", runtime=runtime)
+
+  def test_runtime_flags_come_before_image(self):
+    # Anything after the image is passed to cm-runner, not to docker.
+    argv = LocalDockerLauncher(image="img:sha").build_command("version")
+    image_at = argv.index("img:sha")
+    self.assertLess(argv.index("--runtime=runsc"), image_at)
+    self.assertLess(argv.index("SYS_ADMIN"), image_at)
 
   @patch("launcher.local_docker.subprocess.run")
   def test_run_returns_exit_code_and_events(self, mock_run):

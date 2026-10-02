@@ -46,6 +46,15 @@ PR_MODE_REVIEW_SUGGESTION = "review_suggestion"
 PR_MODE_CHILD_PR = "child_pr"
 VALID_PR_REMEDIATION_MODES = (PR_MODE_REVIEW_SUGGESTION, PR_MODE_CHILD_PR)
 
+# cm sandbox network profiles (`sandbox.network.profile` in cm's config.yaml).
+#   permissive-closed: cm's own default. The sandbox gets its own network
+#                      namespace, so the agent's commands have no network.
+#   permissive-open:   cm skips the network namespace, so the agent's commands
+#                      have full network access. Explicit opt-in only.
+# cm treats every value other than `permissive-open` as closed.
+SANDBOX_NETWORK_CLOSED = "permissive-closed"
+SANDBOX_NETWORK_OPEN = "permissive-open"
+
 
 @dataclass(frozen=True)
 class OrchestratorConfig:
@@ -98,7 +107,7 @@ class OrchestratorConfig:
 
   # Sandbox & Security Settings
   sandbox_enabled: bool = True
-  sandbox_network_profile: str = "permissive-open"
+  sandbox_network_profile: str = SANDBOX_NETWORK_CLOSED
   cleanup_ports: List[int] = field(
       default_factory=lambda: [3000, 3001, 5000, 8000, 8080, 8081, 9000]
   )
@@ -258,8 +267,10 @@ class OrchestratorConfig:
     else:
       sandbox_enabled = True
 
+    # Closed by default: `permissive-open` gives the agent's commands full
+    # network access, so it must be requested explicitly.
     sandbox_network_profile = os.environ.get(
-        "CODEMENDER_SANDBOX_NETWORK_PROFILE", "permissive-open"
+        "CODEMENDER_SANDBOX_NETWORK_PROFILE", SANDBOX_NETWORK_CLOSED
     )
 
     ports_env = os.environ.get("CODEMENDER_CLEANUP_PORTS")

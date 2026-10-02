@@ -44,3 +44,7 @@ jobs:
           # commit SHA tag. Replace with your own registry/image.
           runner_image: <your-registry>/codemender-runner:<commit-sha>
           # log_level: debug
+          # Defaults: run cm-runner under gVisor (needed for cm's sandbox),
+          # pinned to a tested release. See README.md → "Inputs".
+          # container_runtime: runsc
+          # gvisor_release: '20260921.0'

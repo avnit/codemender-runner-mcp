@@ -29,6 +29,7 @@ once those cm-runner commands exist. Nothing here assumes their flags yet.
 Configuration comes from environment variables set by `action.yml`:
   CODEMENDER_RUNNER_IMAGE  cm-runner image (pinned SHA tag). Required.
   CODEMENDER_LOG_LEVEL     cm-runner --log-level. Default: info.
+  CODEMENDER_CONTAINER_RUNTIME  `runsc` (gVisor, default) or `runc`.
   GITHUB_TOKEN             Token used only here, to post the PR comment.
   GITHUB_EVENT_NAME, GITHUB_EVENT_PATH, GITHUB_REPOSITORY,
   GITHUB_SERVER_URL, GITHUB_RUN_ID   Standard GitHub Actions variables.
@@ -41,7 +42,7 @@ import sys
 from typing import Any, Dict, Mapping, Optional
 
 from launcher.base import Launcher, LauncherError, RunResult
-from launcher.local_docker import LocalDockerLauncher
+from launcher.local_docker import RUNTIME_GVISOR, LocalDockerLauncher
 from vcs.github import post_or_update_sticky_comment
 
 logger = logging.getLogger("codemender-github-actions")
@@ -175,10 +176,16 @@ def main(env: Mapping[str, str] = os.environ) -> int:
   with open(env["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
     event = json.load(f)
 
-  launcher = LocalDockerLauncher(
-      image=env["CODEMENDER_RUNNER_IMAGE"],
-      log_level=env.get("CODEMENDER_LOG_LEVEL", "info"),
-  )
+  try:
+    launcher = LocalDockerLauncher(
+        image=env["CODEMENDER_RUNNER_IMAGE"],
+        log_level=env.get("CODEMENDER_LOG_LEVEL", "info"),
+        runtime=env.get("CODEMENDER_CONTAINER_RUNTIME") or RUNTIME_GVISOR,
+    )
+  except ValueError as e:
+    print(f"::error::{e}")
+    return 1
+  print(f"::notice::cm-runner container runtime: {launcher.runtime}")
   return run_pr(event, env, launcher)
 
 
