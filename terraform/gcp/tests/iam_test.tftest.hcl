@@ -15,18 +15,60 @@
 # Unit tests for GCP IAM and Service Accounts
 mock_provider "google" {}
 
+override_resource {
+  target          = random_id.role_suffix
+  override_during = plan
+  values = {
+    hex = "12345678"
+  }
+}
+
+override_resource {
+  target          = google_service_account.runner_sa
+  override_during = plan
+  values = {
+    name  = "projects/test-project-123/serviceAccounts/test-iam-runner-sa@test-project-123.iam.gserviceaccount.com"
+    email = "test-iam-runner-sa@test-project-123.iam.gserviceaccount.com"
+  }
+}
+
+override_resource {
+  target          = google_service_account.worker_sa
+  override_during = plan
+  values = {
+    name  = "projects/test-project-123/serviceAccounts/test-iam-worker-sa@test-project-123.iam.gserviceaccount.com"
+    email = "test-iam-worker-sa@test-project-123.iam.gserviceaccount.com"
+  }
+}
+
 variables {
-  project_id           = "test-project-123"
-  region               = "us-central1"
-  resource_prefix      = "test-iam"
+  project_id      = "test-project-123"
+  region          = "us-central1"
+  resource_prefix = "test-iam"
 }
 
 run "iam_resources_created_correctly" {
   command = plan
 
+  # Governing: SPEC-WIF, REQ-0005
   assert {
     condition     = google_service_account.runner_sa.account_id == "test-iam-runner-sa"
     error_message = "Runner Service Account ID does not match expected prefix."
+  }
+
+  assert {
+    condition     = google_service_account.worker_sa.account_id == "test-iam-worker-sa"
+    error_message = "Worker Service Account ID does not match expected prefix."
+  }
+
+  assert {
+    condition     = output.runner_service_account_email == "test-iam-runner-sa@test-project-123.iam.gserviceaccount.com"
+    error_message = "runner_service_account_email output does not match expected runner SA email."
+  }
+
+  assert {
+    condition     = output.worker_service_account_email == "test-iam-worker-sa@test-project-123.iam.gserviceaccount.com"
+    error_message = "worker_service_account_email output does not match expected worker SA email."
   }
 
   assert {
@@ -40,7 +82,7 @@ run "iam_resources_created_correctly" {
   }
 
   assert {
-    condition     = google_project_iam_custom_role.workflow_job_runner.role_id == "testiamWorkflowJobRunner"
+    condition     = google_project_iam_custom_role.workflow_job_runner.role_id == "testiamWorkflowJobRunner_12345678"
     error_message = "Workflow custom role ID does not match expected prefix (should have dashes removed)."
   }
 }

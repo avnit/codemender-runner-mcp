@@ -152,7 +152,7 @@ multiple environments via `codemender-runner/storage.py`:
   artifact actions (`@actions/upload-artifact` and
   `@actions/download-artifact`).
 - **Automated GCP WIF & GitHub Configuration**: The repository provides an
-  automated Terraform module at [`terraform/gha_wif/`](../terraform/gha_wif/)
+  automated Terraform module at [`terraform/wif/`](../terraform/wif/)
   that provisions GCP Workload Identity Federation (WIF), IAM Service Accounts
   with `roles/aiplatform.user`, the optional `codemender-scan` PR trigger label,
   and non-sensitive GitHub Actions secrets (`GCP_WORKLOAD_IDENTITY_PROVIDER`,
@@ -298,7 +298,7 @@ dedicated guides in the `docs/` folder:
 - 🚀
   **[Automated Terraform Deployment Guide](../docs/guides/terraform_deployment_guide.md)**:
   Step-by-step instructions to provision GCP infrastructure (Cloud Run &
-  Workflows) and GitHub Actions WIF modules (`terraform/gha_wif/`) using
+  Workflows) and GitHub Actions WIF modules (`terraform/wif/`) using
   Terraform.
 - ⚡
   **[GitHub Actions Orchestration Architecture](../docs/architecture/github_actions_orchestration_design.md)**:
@@ -389,7 +389,7 @@ documentation:
 │   │   ├── variables.tf                # Configurable Terraform variables
 │   │   ├── vpc.tf                      # Serverless VPC Access & Cloud NAT
 │   │   └── tests/                      # Terraform integration tests (`terraform test`)
-│   └── gha_wif/                        # GitHub Actions Workload Identity Federation & GitHub setup module
+│   └── wif/                            # GitHub Actions Workload Identity Federation & GitHub setup module
 │       ├── apis.tf                     # GCP API enablement (IAM, IAM Credentials, Vertex AI)
 │       ├── github.tf                   # GitHub repository secrets & label configuration
 │       ├── iam.tf                      # Service account & Workload Identity Pool/Provider
@@ -443,7 +443,7 @@ Unit tests and Terraform module tests are modular and automated:
 
   ```bash
   # Test GitHub Actions WIF module
-  cd terraform/gha_wif && terraform init -backend=false && terraform test
+  cd terraform/wif && terraform init -backend=false && terraform test
 
   # Test GCP deployment module
   cd terraform/gcp && terraform init -backend=false && terraform test

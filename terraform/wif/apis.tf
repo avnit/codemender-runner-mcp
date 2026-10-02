@@ -12,13 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Governing: SPEC-WIF, REQ-0003, REQ-0004
+
 locals {
-  required_apis = [
+  baseline_apis = [
     "cloudresourcemanager.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
+  ]
+
+  codemender_apis = [
     "aiplatform.googleapis.com",
   ]
+
+  gcp_cloud_run_apis = [
+    "run.googleapis.com",
+    "storage.googleapis.com",
+  ]
+
+  required_apis = concat(
+    local.baseline_apis,
+    var.execution_mode == "local" ? local.codemender_apis : [],
+    var.execution_mode == "cloud_run" ? local.gcp_cloud_run_apis : [],
+  )
 }
 
 resource "google_project_service" "enabled_apis" {

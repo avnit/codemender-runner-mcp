@@ -12,11 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Governing: SPEC-WIF, REQ-0001, REQ-0002, REQ-0005
+
 # --- GCP Infrastructure Variables ---
 
 variable "gcp_project_id" {
   type        = string
-  description = "The GCP Project ID hosting Vertex AI where Gemini LLM APIs will be queried."
+  description = "The GCP Project ID hosting Vertex AI or Cloud Run Jobs."
 }
 
 variable "gcp_region" {
@@ -27,20 +29,56 @@ variable "gcp_region" {
 
 variable "gcp_service_account_id" {
   type        = string
-  default     = "codemender-gha-sa"
-  description = "ID of the dedicated Service Account to create for CodeMender runner in GCP."
+  default     = "codemender-wif-sa"
+  description = "ID of the dedicated Service Account to create for CodeMender WIF authentication in GCP."
 }
 
 variable "gcp_wif_pool_id" {
   type        = string
-  default     = "codemender-gha-pool"
+  default     = "codemender-wif-pool"
   description = "ID of the Workload Identity Pool to create in GCP."
 }
 
 variable "gcp_wif_provider_id" {
   type        = string
-  default     = "codemender-gha-provider"
+  default     = "codemender-wif-provider"
   description = "ID of the Workload Identity Provider to create in GCP."
+}
+
+# --- Execution Mode & Cloud Run Composition (SPEC-WIF, REQ-0002, REQ-0005) ---
+
+variable "execution_mode" {
+  type        = string
+  default     = "local"
+  description = "Execution mode for GitHub Actions workflows: 'local' (runs cm-runner on runner with Vertex AI access) or 'cloud_run' (stages repository to GCS transit bucket and invokes Cloud Run Job)."
+
+  validation {
+    condition     = contains(["local", "cloud_run"], var.execution_mode)
+    error_message = "execution_mode must be either 'local' or 'cloud_run'."
+  }
+}
+
+variable "gcs_transit_bucket_name" {
+  type        = string
+  default     = ""
+  description = "Name of the GCS transit bucket (e.g. reports_bucket_name from terraform/gcp) used for source snapshot staging and receipt retrieval when execution_mode is 'cloud_run'."
+
+  validation {
+    condition     = var.execution_mode != "cloud_run" || length(trimspace(var.gcs_transit_bucket_name)) > 0
+    error_message = "gcs_transit_bucket_name is required when execution_mode is 'cloud_run'."
+  }
+}
+
+variable "cloud_run_runtime_sa_emails" {
+  type        = list(string)
+  default     = []
+  description = "List of Cloud Run Job runtime Service Account email addresses (e.g. runner_service_account_email and worker_service_account_email from terraform/gcp) that the WIF Service Account is authorized to actAs (roles/iam.serviceAccountUser) when execution_mode is 'cloud_run'."
+}
+
+variable "cloud_run_job_name" {
+  type        = string
+  default     = ""
+  description = "Optional Cloud Run Job name (e.g. runner_job_name from terraform/gcp) to configure as CLOUD_RUN_JOB_NAME repository variable when execution_mode is 'cloud_run'."
 }
 
 # --- Workload Identity Federation (WIF) Scoping ---

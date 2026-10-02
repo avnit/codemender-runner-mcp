@@ -12,23 +12,57 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Governing: SPEC-WIF, REQ-0001, REQ-0003, REQ-0004
+
 # 1. Dedicated Service Account for CodeMender Runner in GitHub Actions
 resource "google_service_account" "runner_sa" {
   project      = var.gcp_project_id
   account_id   = var.gcp_service_account_id
   display_name = "CodeMender GitHub Actions Runner SA"
-  description  = "Assumed by GitHub Actions runners via Workload Identity Federation for Vertex AI Gemini LLM reasoning"
+  description  = "Assumed by GitHub Actions runners via Workload Identity Federation for CodeMender execution"
   depends_on   = [google_project_service.enabled_apis["iam.googleapis.com"]]
 }
 
-# 2. Grant Vertex AI User role for Gemini model inference
+# 2a. Local Mode: Grant Vertex AI User role for Gemini model inference (REQ-0003)
 resource "google_project_iam_member" "vertex_ai_user" {
+  count   = var.execution_mode == "local" ? 1 : 0
   project = var.gcp_project_id
   role    = "roles/aiplatform.user"
   member  = "serviceAccount:${google_service_account.runner_sa.email}"
 }
 
-# 3. Workload Identity Pool for GitHub Actions
+# 2b. Cloud Run Mode: Predefined Caller IAM, Transit Bucket Access & Runtime SA actAs (REQ-0004)
+# Needed so the GitHub Actions WIF caller SA can trigger Cloud Run Job executions with
+# per-run container argument/volume overrides (`gcloud run jobs execute --args ... --wait`)
+# and poll execution/operation completion status.
+resource "google_project_iam_member" "cloud_run_job_caller_binding" {
+  count   = var.execution_mode == "cloud_run" ? 1 : 0
+  project = var.gcp_project_id
+  role    = "roles/run.developer"
+  member  = "serviceAccount:${google_service_account.runner_sa.email}"
+}
+
+# Needed so the GitHub Actions runner can upload the repository snapshot/findings tarball
+# to the GCS transit bucket before job execution and download the execution receipt,
+# SARIF report, and patch artifacts afterward.
+resource "google_storage_bucket_iam_member" "transit_bucket_access" {
+  count  = var.execution_mode == "cloud_run" ? 1 : 0
+  bucket = var.gcs_transit_bucket_name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${google_service_account.runner_sa.email}"
+}
+
+# Needed because GCP Cloud Run enforces an `iam.serviceAccounts.actAs` check on the
+# Cloud Run Job's attached runtime Service Account whenever a caller invokes
+# `run.jobs.run` / `run.jobs.runWithOverrides`.
+resource "google_service_account_iam_member" "cloud_run_runtime_sa_act_as" {
+  for_each           = var.execution_mode == "cloud_run" ? toset(var.cloud_run_runtime_sa_emails) : toset([])
+  service_account_id = "projects/${var.gcp_project_id}/serviceAccounts/${each.value}"
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.runner_sa.email}"
+}
+
+# 3. Workload Identity Pool for GitHub Actions (REQ-0001)
 resource "google_iam_workload_identity_pool" "github_pool" {
   project                   = var.gcp_project_id
   workload_identity_pool_id = var.gcp_wif_pool_id
@@ -37,7 +71,7 @@ resource "google_iam_workload_identity_pool" "github_pool" {
   depends_on                = [google_project_service.enabled_apis["iam.googleapis.com"]]
 }
 
-# 4. Workload Identity Pool OIDC Provider with Scoping Conditions
+# 4. Workload Identity Pool OIDC Provider with Scoping Conditions (REQ-0001)
 locals {
   # Build attribute condition based on selected scope type
   attribute_condition = (
@@ -71,7 +105,7 @@ resource "google_iam_workload_identity_pool_provider" "github_provider" {
   }
 }
 
-# 5a. Service Account Binding for Org / User Scope
+# 5a. Service Account Binding for Org / User Scope (REQ-0001)
 resource "google_service_account_iam_member" "wif_user_org_binding" {
   count              = (var.github_scope_type == "org" || var.github_scope_type == "user") ? 1 : 0
   service_account_id = google_service_account.runner_sa.name
@@ -79,7 +113,7 @@ resource "google_service_account_iam_member" "wif_user_org_binding" {
   member             = local.owner_principal_set
 }
 
-# 5b. Service Account Binding for Specific Repository List Scope
+# 5b. Service Account Binding for Specific Repository List Scope (REQ-0001)
 resource "google_service_account_iam_member" "wif_repo_binding" {
   for_each           = var.github_scope_type == "repositories" ? toset(var.wif_allowed_repositories) : toset([])
   service_account_id = google_service_account.runner_sa.name

@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Governing: SPEC-WIF, REQ-0006
+
 locals {
   # Normalize target repo list: use var.target_github_repositories if provided,
   # or fall back to var.wif_allowed_repositories if scope is 'repositories'
@@ -56,4 +58,28 @@ resource "github_actions_secret" "app_id" {
   repository  = each.value
   secret_name = "GH_APP_ID"
   value       = var.github_app_id
+}
+
+# 5. Configure GCS_TRANSIT_BUCKET repository variable in Cloud Run execution mode
+resource "github_actions_variable" "gcs_transit_bucket" {
+  for_each      = var.execution_mode == "cloud_run" ? local.target_repos : toset([])
+  repository    = each.value
+  variable_name = "GCS_TRANSIT_BUCKET"
+  value         = var.gcs_transit_bucket_name
+}
+
+# 6. Configure CLOUD_RUN_JOB_NAME repository variable in Cloud Run execution mode (when provided)
+resource "github_actions_variable" "cloud_run_job_name" {
+  for_each      = (var.execution_mode == "cloud_run" && var.cloud_run_job_name != "") ? local.target_repos : toset([])
+  repository    = each.value
+  variable_name = "CLOUD_RUN_JOB_NAME"
+  value         = var.cloud_run_job_name
+}
+
+# 7. Configure GCP_REGION repository variable in Cloud Run execution mode (when non-default)
+resource "github_actions_variable" "gcp_region" {
+  for_each      = (var.execution_mode == "cloud_run" && var.gcp_region != "" && var.gcp_region != "global") ? local.target_repos : toset([])
+  repository    = each.value
+  variable_name = "GCP_REGION"
+  value         = var.gcp_region
 }

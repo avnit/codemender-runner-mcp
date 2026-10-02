@@ -38,6 +38,17 @@ output "runner_job_name" {
   value       = google_cloud_run_v2_job.runner.name
 }
 
+# Governing: SPEC-WIF, REQ-0005
+output "runner_service_account_email" {
+  description = "Email address of the Cloud Run orchestrator/runner Service Account."
+  value       = google_service_account.runner_sa.email
+}
+
+output "worker_service_account_email" {
+  description = "Email address of the Cloud Run worker Service Account."
+  value       = google_service_account.worker_sa.email
+}
+
 output "workflow_name" {
   description = "Cloud Workflows workflow name."
   value       = google_workflows_workflow.coordinator.name

@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Governing: SPEC-WIF, REQ-0001, REQ-0004
+
 terraform {
   required_version = ">= 1.5.0"
   required_providers {

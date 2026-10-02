@@ -359,11 +359,11 @@ label, and configure the initial secrets:
 #### Path A: Automated Provisioning via Terraform (Recommended)
 
 The repository provides a complete Terraform module at
-[`terraform/gha_wif/`](../../terraform/gha_wif/) that automates:
+[`terraform/wif/`](../../terraform/wif/) that automates:
 
 *   Enabling required GCP APIs (`aiplatform.googleapis.com`,
     `iam.googleapis.com`, `iamcredentials.googleapis.com`).
-*   Creating the dedicated Service Account (`codemender-gha-sa`) with
+*   Creating the dedicated Service Account (`codemender-wif-sa`) with
     `roles/aiplatform.user`.
 *   Creating the Workload Identity Pool and OIDC Provider with custom scoping.
 *   Configuring the `codemender-scan` PR trigger label on target repositories.
@@ -376,7 +376,7 @@ Navigate to the Terraform directory and create your `terraform.tfvars` file by
 running the following command:
 
 ```bash
-cd terraform/gha_wif
+cd terraform/wif
 
 cat << 'EOF' > terraform.tfvars
 # =============================================================================
@@ -441,14 +441,14 @@ target_github_repositories = [
 #   "your-org/frontend-app"
 # ]
 
-# Custom Service Account ID (default: "codemender-gha-sa")
-# gcp_service_account_id = "codemender-gha-sa"
+# Custom Service Account ID (default: "codemender-wif-sa")
+# gcp_service_account_id = "codemender-wif-sa"
 
-# Custom Workload Identity Pool ID (default: "codemender-gha-pool")
-# gcp_wif_pool_id = "codemender-gha-pool"
+# Custom Workload Identity Pool ID (default: "codemender-wif-pool")
+# gcp_wif_pool_id = "codemender-wif-pool"
 
-# Custom Workload Identity Provider ID (default: "codemender-gha-provider")
-# gcp_wif_provider_id = "codemender-gha-provider"
+# Custom Workload Identity Provider ID (default: "codemender-wif-provider")
+# gcp_wif_provider_id = "codemender-wif-provider"
 EOF
 ```
 
@@ -521,9 +521,9 @@ If you prefer to configure resources manually without Terraform:
 # 1. Base configuration variables
 PROJECT_ID="your-gcp-project-id"
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
-POOL_NAME="codemender-gha-pool"
-PROVIDER_NAME="codemender-gha-provider"
-SA_NAME="codemender-gha-sa"
+POOL_NAME="codemender-wif-pool"
+PROVIDER_NAME="codemender-wif-provider"
+SA_NAME="codemender-wif-sa"
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
 # 2. Enable required APIs

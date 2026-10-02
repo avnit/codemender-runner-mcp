@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Governing: SPEC-WIF, REQ-0002, REQ-0006
+
 output "gcp_workload_identity_provider" {
   description = "Full resource name of the Workload Identity Provider for GitHub Actions secret GCP_WORKLOAD_IDENTITY_PROVIDER."
   value       = google_iam_workload_identity_pool_provider.github_provider.name
@@ -20,6 +22,11 @@ output "gcp_workload_identity_provider" {
 output "gcp_service_account" {
   description = "Service Account email for GitHub Actions secret GCP_SERVICE_ACCOUNT."
   value       = google_service_account.runner_sa.email
+}
+
+output "execution_mode" {
+  description = "Configured CodeMender execution mode ('local' or 'cloud_run')."
+  value       = var.execution_mode
 }
 
 output "next_step_private_key_injection" {
