@@ -56,13 +56,27 @@ class TestParseNdjson(unittest.TestCase):
 
 class TestLocalDockerLauncher(unittest.TestCase):
 
+  _ALLOWED_ENV_KEYS = frozenset({
+      "GIT_CONFIG_COUNT",
+      "GIT_CONFIG_KEY_0",
+      "GIT_CONFIG_VALUE_0",
+      "GOOGLE_APPLICATION_CREDENTIALS",
+      "GOOGLE_CLOUD_PROJECT",
+  })
+
   def assert_no_host_env_or_escalation(self, argv):
-    # Security boundary: nothing from the host env (e.g. GITHUB_TOKEN) is
-    # forwarded into the container.
-    self.assertNotIn("-e", argv)
+    # Security boundary (ADR-0003): no bare `-e KEY` (host env passthrough),
+    # no `--env-file`, and no repository-host token (`GITHUB_TOKEN`, etc.).
     self.assertNotIn("--env", argv)
     self.assertNotIn("--env-file", argv)
     self.assertFalse(any("TOKEN" in a for a in argv))
+    for i, token in enumerate(argv):
+      if token == "-e":
+        self.assertLess(i + 1, len(argv))
+        kv = argv[i + 1]
+        self.assertIn("=", kv, "Every -e flag must be explicit KEY=VALUE")
+        key, _ = kv.split("=", 1)
+        self.assertIn(key, self._ALLOWED_ENV_KEYS)
     # Never weaken the real kernel's confinement.
     self.assertFalse(any(a.startswith("--privileged") for a in argv))
     self.assertFalse(any(a.startswith("--security-opt") for a in argv))
@@ -86,6 +100,7 @@ class TestLocalDockerLauncher(unittest.TestCase):
         ["docker", "run", "--rm", "--runtime=runsc", "--cap-add", "SYS_ADMIN",
          "img:sha", "--log-level", "debug", "version"],
     )
+    self.assertNotIn("-e", argv)
     self.assert_no_host_env_or_escalation(argv)
 
   def test_build_command_runc_adds_no_runtime_flags(self):
@@ -102,6 +117,68 @@ class TestLocalDockerLauncher(unittest.TestCase):
     # SYS_ADMIN on runc would be granted by the real kernel: never add it.
     self.assertNotIn("--cap-add", argv)
     self.assertNotIn("SYS_ADMIN", argv)
+    self.assertNotIn("-e", argv)
+    self.assert_no_host_env_or_escalation(argv)
+
+  def test_build_command_with_mounts_and_gcp_auth(self):
+    launcher = LocalDockerLauncher(
+        image="img:sha",
+        log_level="info",
+        runtime="runsc",
+        workspace_dir="/tmp/work/workspace",
+        cm_home_dir="/tmp/work/cm-home",
+        out_dir="/tmp/work/out",
+        gcp_credentials_file="/tmp/creds/adc.json",
+        gcp_project="my-gcp-proj",
+    )
+    argv = launcher.build_command(
+        "find-diff",
+        ["--repo", "/workspace", "--base", "abc1234", "--out", "/out"],
+    )
+
+    self.assertEqual(
+        argv,
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--runtime=runsc",
+            "--cap-add",
+            "SYS_ADMIN",
+            "-v",
+            "/tmp/work/workspace:/workspace",
+            "-e",
+            "GIT_CONFIG_COUNT=1",
+            "-e",
+            "GIT_CONFIG_KEY_0=safe.directory",
+            "-e",
+            "GIT_CONFIG_VALUE_0=/workspace",
+            "-v",
+            "/tmp/work/cm-home:/root/.codemender",
+            "-v",
+            "/tmp/work/out:/out",
+            "-v",
+            "/tmp/creds/adc.json:/creds/adc.json:ro",
+            "-e",
+            "GOOGLE_APPLICATION_CREDENTIALS=/creds/adc.json",
+            "-e",
+            "GOOGLE_CLOUD_PROJECT=my-gcp-proj",
+            "img:sha",
+            "--log-level",
+            "info",
+            "find-diff",
+            "--repo",
+            "/workspace",
+            "--base",
+            "abc1234",
+            "--out",
+            "/out",
+        ],
+    )
+    image_at = argv.index("img:sha")
+    for idx, tok in enumerate(argv):
+      if tok in ("-v", "-e"):
+        self.assertLess(idx, image_at)
     self.assert_no_host_env_or_escalation(argv)
 
   def test_unknown_runtime_is_rejected(self):

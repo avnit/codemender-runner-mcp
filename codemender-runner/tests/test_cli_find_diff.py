@@ -437,6 +437,7 @@ class TestFindDiffAdapterExecutionAndSarifOutput(FindDiffTestBase):
                     repo_path.as_posix(),
                     "-y",
                     "--diff=origin/main",
+                    "--diff-workers=16",
                     "--fail-on",
                     "NONE",
                 ],
@@ -509,7 +510,7 @@ case "$*" in
   --version)
     echo "cm version 0.9.0"
     ;;
-  "find {os.path.realpath(self.repo)} -y --diff=origin/main --fail-on NONE")
+  "find {os.path.realpath(self.repo)} -y --diff=origin/main --diff-workers=16 --fail-on NONE")
     echo "Impact-Aware PR Delta Scan"
     echo "Scanning diff..." >&2
     exit 0
@@ -563,6 +564,7 @@ class TestFindDiffOutArtifacts(FindDiffTestBase):
                 str(repo_path),
                 "-y",
                 "--diff=origin/main",
+                "--diff-workers=16",
                 "--fail-on",
                 "NONE",
             ],
@@ -609,6 +611,7 @@ class TestFindDiffFailureAtomicity(FindDiffTestBase):
         str(repo_path),
         "-y",
         "--diff=HEAD",
+        "--diff-workers=16",
         "--fail-on",
         "NONE",
     )
@@ -640,6 +643,7 @@ class TestFindDiffFailureAtomicity(FindDiffTestBase):
         str(repo_path),
         "-y",
         "--diff=HEAD",
+        "--diff-workers=16",
         "--fail-on",
         "NONE",
     )

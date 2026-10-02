@@ -3,10 +3,12 @@
 A GitHub Action that runs CodeMender (`cm-runner`) on pull requests and reports
 the results back on the PR.
 
-> **Status: M0 (walking skeleton).** On every pull request the action runs
-> `cm-runner version` in a `docker run` container under gVisor and posts one PR comment with
-> the result. `find-diff`, `fix`, and `verify` will be wired in once those
-> `cm-runner` commands exist (see [Roadmap](#roadmap)).
+> **Status: M1 (`init` + `find-diff`).** On every pull request the action
+> authenticates to Google Cloud via Workload Identity Federation (WIF), runs
+> `cm-runner init` and `cm-runner find-diff` in a `docker run` container under
+> gVisor, uploads `report.sarif` and `report.md` as workflow artifacts, and
+> posts a top-level Markdown PR comment with any vulnerabilities found. `fix`
+> and `verify` will be wired in next (see [Roadmap](#roadmap)).
 
 ## How it fits together
 
@@ -15,8 +17,8 @@ flowchart LR
     gh["GitHub PR event"] --> wf["Repo's workflow file"]
     wf --> action["actions/codemender/action.yml"]
     action --> runner["src/gha_runner.py"]
-    runner -->|"launcher: docker run under gVisor, no GitHub token"| cm["cm-runner container"]
-    cm -->|"NDJSON on stdout"| runner
+    runner -->|"launcher: docker run under gVisor (init + find-diff), no GitHub token"| cm["cm-runner container"]
+    cm -->|"SARIF JSON on stdout + /out/report.{sarif,md}"| runner
     runner -->|"vcs/github.py"| pr["PR comment"]
 ```
 
@@ -128,19 +130,21 @@ runner) and then runs `uses: ./.github/actions/codemender`. It runs only on
 PRs targeting `main` or `master`; edit `branches:` if your default branch is
 named differently.
 
-### 3. Point the workflow at a cm-runner image
+### 3. Configure the cm-runner image and Google Cloud (WIF)
 
-`runner_image` is **required**. Set it to a cm-runner image your repository can
-pull, pinned to a commit SHA tag (not `:latest`).
+Set the required inputs in `.github/workflows/cm-merge-scan.yml`:
 
-No tokens or secrets are needed. The action uses the workflow's automatic
-token (scoped by `permissions:`) to pull the image and to post the comment,
-as `github-actions[bot]`. This works when the image is in your org's GHCR with
-Actions access granted to the repository, or is public.
-
-Only if the image is in a registry the repository's token can't read (e.g.
-another org), pass a token with `registry_token: ${{ secrets.<NAME> }}`. It is
-used only for `docker pull`.
+- **`runner_image`**: Set to a cm-runner image your repository can pull, pinned
+  to a commit SHA tag (not `:latest`). The action uses the workflow's automatic
+  token (scoped by `permissions:`) to pull the image and to post the comment as
+  `github-actions[bot]`. Only if the image is in a registry the repository's
+  token can't read (e.g. another org), pass a token with
+  `registry_token: ${{ secrets.<NAME> }}`. It is used only for `docker pull`.
+- **`gcp_project_id`**, **`gcp_workload_identity_provider`**, and
+  **`gcp_service_account`**: `cm` calls Vertex AI during `init` and `find-diff`.
+  The action authenticates via `google-github-actions/auth@v2` using keyless
+  Workload Identity Federation (`id-token: write`) and mounts the short-lived
+  ADC file read-only into the container.
 
 > [!NOTE]
 > How customers build and host their own cm-runner image (e.g. in their own
@@ -148,24 +152,32 @@ used only for `docker pull`.
 
 ### 4. Open a pull request
 
-A **CodeMender** comment appears, showing the cm-runner and `cm` versions.
-Later pushes update the same comment.
+A **CodeMender** comment appears on the PR with either a clean scan message or a
+summary table of vulnerabilities found in the diff (with links to the affected
+lines and collapsible analysis details). `report.sarif` and `report.md` are also
+uploaded as a workflow artifact (`codemender-report-pr-<N>`). Later pushes
+update the same comment.
 
 ### Inputs
 
 | Input | Default | Description |
 | :--- | :--- | :--- |
 | `runner_image` | — (**required**) | cm-runner image. Pin a commit SHA tag, not `:latest`. |
+| `gcp_project_id` | — (**required**) | Google Cloud project ID used by `cm` for Vertex AI API calls. |
+| `gcp_workload_identity_provider` | — (**required**) | Full Workload Identity Provider resource name (`projects/<num>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`). |
+| `gcp_service_account` | — (**required**) | Service account email that Workload Identity Federation impersonates (needs `roles/aiplatform.user`). |
 | `registry_token` | *(workflow token)* | Optional. Used **only** to pull the image, when the repository's token can't read it. |
 | `log_level` | `info` | cm-runner log level. Logs appear in the job log. |
 | `container_runtime` | `runsc` | `runsc` runs cm-runner under gVisor, which `cm`'s sandbox needs (see [Security model](#security-model)). `runc` is an explicit opt-out: plain Docker, where `cm`'s sandbox can't start. |
 | `gvisor_release` | `20260921.0` | gVisor release installed when `container_runtime` is `runsc`: `yyyymmdd` or `yyyymmdd.N` ([versions](https://gvisor.dev/docs/user_guide/install/#versions)). Pinned so every run uses the same build. |
+| `artifact_retention_days` | `'3'` | Days to retain the uploaded `codemender-report-pr-<N>` artifact (`report.sarif` and `report.md`). |
 
 ### Required workflow permissions
 
 | Permission | Why |
 | :--- | :--- |
-| `contents: read` | Check out the repository (the action lives in it) |
+| `contents: read` | Check out the repository (`fetch-depth: 0` so the PR base commit is present for `find-diff`) |
+| `id-token: write` | Request a GitHub OIDC token for Google Cloud Workload Identity Federation |
 | `packages: read` | Pull the cm-runner image from GHCR with the workflow token |
 | `pull-requests: write` | Post / update the CodeMender comment |
 
@@ -176,7 +188,7 @@ To test with the upstream development image from a repository that can't read
 
 1. Set `runner_image` to a commit tag of
    `ghcr.io/cloud-gtm/codemender-runner` that has been published, e.g.
-   `ghcr.io/cloud-gtm/codemender-runner:465f1ca4382de8113acbb3378d5da96f46d6cb44`.
+   `ghcr.io/cloud-gtm/codemender-runner:d1bc34c...`.
 2. Create a classic PAT with only the `read:packages` scope and authorize it
    for `cloud-gtm` SSO (Settings → Developer settings → Tokens (classic) →
    Configure SSO).
@@ -192,9 +204,13 @@ There are two sandbox layers:
 | **Outer**: the container (`docker run`, under gVisor) | This action (the launcher) | cm-runner reaching the GitHub token, the host, or other jobs |
 | **Inner**: `cm`'s own process sandbox | cm-runner (configures `cm`) | The agent's tool calls (builds, PoCs) escaping the workspace or network |
 
-- `docker run` is started **without any `-e`/`--env` flags**, so no host
-  environment variable (in particular `GITHUB_TOKEN`) reaches the container.
-- The token is used only on the host: to pull the image (followed by
+- `docker run` never receives `GITHUB_TOKEN`, `--env-file`, or bare `-e KEY`
+  passthroughs. Only explicit, non-GitHub environment variables
+  (`GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_CLOUD_PROJECT`, and Git
+  `safe.directory` config for `/workspace`) are passed into the container, along
+  with isolated staging bind mounts (`/workspace`, `/root/.codemender`, `/out`,
+  and read-only `/creds/adc.json`).
+- The GitHub token is used only on the host: to pull the image (followed by
   `docker logout`) and to post the comment.
 - cm-runner output is treated as untrusted. Values are escaped before being
   rendered, and comments are truncated to GitHub's limit.
@@ -277,8 +293,8 @@ python3 -m unittest discover -s tests -v
 
 | Milestone | What it adds | Blocked on |
 | :--- | :--- | :--- |
-| **M0** (this) | `cm-runner version` via `docker run` under gVisor, PR comment | — |
-| M1 | Real findings posted to the PR, SARIF artifacts, GCP auth (WIF) | `cm-runner find-diff` |
+| M0 | `cm-runner version` via `docker run` under gVisor, PR comment | — |
+| **M1** (this) | Real findings posted to the PR (`init` + `find-diff`), SARIF/Markdown artifacts, GCP auth (WIF) | — |
 | M2 | One-click fix suggestions on the PR | `cm-runner fix` |
 | M3 | `@codemender verify <id>` and the Security Gate status check | `cm-runner verify` |
 | Later | Cloud Run / GKE launchers | Workstream 3 |

@@ -26,10 +26,11 @@ SARIF `stdout` output contract, and `--out` artifact contract for the
 
 `cm-runner find-diff` provides a streamlined CLI command built on CodeMender's
 native impact-aware differential scanner
-(`cm find <repo> -y --diff=<base> --fail-on NONE`) followed by report extraction
-(`cm report --format sarif`, and `cm report --format md` when `--out` is
-specified). It relies on `cm`'s built-in defaults for diff filtering, impact
-resolution, and worker concurrency, leaves the `cm` sandbox intact, writes a
+(`cm find <repo> -y --diff=<base> --diff-workers=16 --fail-on NONE`) followed by
+report extraction (`cm report --format sarif`, and `cm report --format md` when
+`--out` is specified). It relies on `cm`'s built-in defaults for diff filtering
+and impact resolution while configuring `--diff-workers=16` (the maximum
+supported by `cm`) for parallelization, leaves the `cm` sandbox intact, writes a
 single compact (non-pretty-printed)
 [OASIS SARIF v2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
 JSON document to `stdout`, and optionally writes `report.sarif` and `report.md`
@@ -170,10 +171,12 @@ in two steps via `CmAdapter.run()`, relying on `cm find --diff` to filter
 findings to those relevant to the diff:
 
 1. **Step 1 — Differential Scan (`cm find --diff`):** Invoke `CmAdapter.run()`
-   using `cm`'s built-in defaults for diff filtering, neighbor depth, worker
-   concurrency, and sandbox isolation:
+   using `cm`'s built-in defaults for diff filtering, neighbor depth, and
+   sandbox isolation, with `--diff-workers=16`:
    - Positional target `<repo_path>` and non-interactive confirmation flag `-y`.
    - `--diff=<base_ref>` (where `<base_ref>` defaults to `HEAD`).
+   - `--diff-workers=16` (`_DEFAULT_DIFF_WORKERS = 16`, the maximum worker
+     concurrency supported by `cm`).
    - `--fail-on NONE` so that `cm find --diff` does not exit with code `1` when
      vulnerabilities are discovered, allowing `cm-runner` to distinguish clean
      scan completion (exit `0`) from genuine execution errors (exit `3`).
@@ -195,7 +198,7 @@ findings to those relevant to the diff:
 - **GIVEN** `--repo /workspace` and `--base origin/main`
 - **WHEN** `cm-runner find-diff --repo /workspace --base origin/main` executes
 - **THEN** `CmAdapter.run()` is first called with
-  `["find", "/workspace", "-y", "--diff=origin/main", "--fail-on", "NONE"]`,
+  `["find", "/workspace", "-y", "--diff=origin/main", "--diff-workers=16", "--fail-on", "NONE"]`,
   `cwd="/workspace"`, and `timeout_sec=360.0`, and upon exit code `0` is next
   called with `["report", "--format", "sarif"]`, `cwd="/workspace"`, and
   `timeout_sec=60.0`.

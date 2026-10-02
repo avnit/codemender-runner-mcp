@@ -54,13 +54,14 @@ exposes this native capability as a first-class subcommand of the generic
 ### Goals
 
 - Execute differential scanning via a two-step `CmAdapter` flow:
-  `cm find <repo> -y --diff=<base> --fail-on NONE` followed by
+  `cm find <repo> -y --diff=<base> --diff-workers=16 --fail-on NONE` followed by
   `cm report --format sarif` (and `cm report --format md` when `--out DIR` is
   specified).
 - Keep the CLI surface minimal (`--repo`, `--base`, `--out`), relying on `cm`'s
-  built-in defaults for diff relevance filtering, neighbor depth, worker
-  concurrency, and sandbox isolation, and on `~/.codemender/config.yaml`
-  (populated by `cm-runner init`) for model configuration.
+  built-in defaults for diff relevance filtering, neighbor depth, and sandbox
+  isolation, configuring `--diff-workers=16` for maximum parallelization, and
+  relying on `~/.codemender/config.yaml` (populated by `cm-runner init`) for
+  model configuration.
 - Emit a single, compact (non-pretty-printed)
   [OASIS SARIF v2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
   JSON document on `stdout`.
@@ -74,7 +75,8 @@ exposes this native capability as a first-class subcommand of the generic
 
 - Exposing `cm find --diff` tuning knobs (`--diff-depth`, `--diff-workers`,
   `--diff-max-neighbors`, `--fail-on-truncation`, `--staged`, `--unrestricted`)
-  until a concrete caller use case requires overriding `cm`'s defaults (YAGNI).
+  until a concrete caller use case requires overriding `cm-runner`'s defaults
+  (YAGNI).
 - Executing vulnerability verification (`cm verify`) or patch synthesis
   (`cm fix`), which belong to the dedicated `cm-runner verify` and
   `cm-runner fix` subcommands.
@@ -85,14 +87,16 @@ exposes this native capability as a first-class subcommand of the generic
 
 ### Decision 1: Two-Step `cm find --diff` + `cm report --format sarif` Execution via `CmAdapter`
 
-- **Choice:** First invoke `cm find <repo> -y --diff=<base> --fail-on NONE`
-  through `codemender.cm.CmAdapter` using `cm`'s built-in defaults (`1`-hop
-  depth, `4` workers, `10` max neighbors, sandbox intact) to scan the diff and
-  persist findings into `~/.codemender/state.db`. After `cm find --diff`
-  completes with exit code `0`, invoke `cm report --format sarif` via
-  `CmAdapter` to retrieve the SARIF 2.1.0 JSON document on `CmResult.stdout`
-  (and when `--out DIR` is passed, invoke `cm report --format md` via
-  `CmAdapter` to retrieve the Markdown report for `<out>/report.md`).
+- **Choice:** First invoke
+  `cm find <repo> -y --diff=<base> --diff-workers=16 --fail-on NONE` through
+  `codemender.cm.CmAdapter` using `cm`'s built-in defaults (`1`-hop depth, `10`
+  max neighbors, sandbox intact) and `16` concurrent workers (the maximum
+  supported by `cm`) to scan the diff and persist findings into
+  `~/.codemender/state.db`. After `cm find --diff` completes with exit code `0`,
+  invoke `cm report --format sarif` via `CmAdapter` to retrieve the SARIF 2.1.0
+  JSON document on `CmResult.stdout` (and when `--out DIR` is passed, invoke
+  `cm report --format md` via `CmAdapter` to retrieve the Markdown report for
+  `<out>/report.md`).
 - **Alternatives Considered:**
   - *Full-repo `cm find .` with custom Python diff filtering:* Fails on
     medium/large repositories due to single-session attention diffusion and
@@ -163,7 +167,7 @@ flowchart TD
     gitCheck["vcs.git.is_git_repository(cfg.repo)
 & vcs.git.ref_exists(cfg.repo, cfg.base)"]
     cmFind["CmAdapter.run()
-cm find <repo> -y --diff=<base> --fail-on NONE"]
+cm find <repo> -y --diff=<base> --diff-workers=16 --fail-on NONE"]
     cmReportSarif["CmAdapter.run()
 cm report --format sarif
 & Parse SARIF 2.1.0 JSON"]
@@ -211,7 +215,7 @@ sequenceDiagram
     Cmd->>Cmd: cfg.validate()
     Cmd->>Git: is_git_repository(cfg.repo) & ref_exists(cfg.repo, cfg.base)
     Git-->>Cmd: True
-    Cmd->>Adapter: run(["find", repo, "-y", "--diff=origin/main", "--fail-on", "NONE"], cwd=repo, timeout_sec=360.0)
+    Cmd->>Adapter: run(["find", repo, "-y", "--diff=origin/main", "--diff-workers=16", "--fail-on", "NONE"], cwd=repo, timeout_sec=360.0)
     Adapter->>CM: spawn cm find --diff (env=None)
     CM-->>Adapter: exit 0 (persists findings to state.db)
     Adapter-->>Cmd: CmResult(exit_code=0, stdout=..., stderr=...)

@@ -6,11 +6,14 @@
 #   - uses: actions/checkout@v4
 #   - uses: ./.github/actions/codemender
 #
-# M0 (walking skeleton): on a pull request, run `cm-runner version` in a
-# `docker run` sandbox and post the result as one PR comment.
+# M1 (differential PR scan): on a pull request, authenticate to Google Cloud via
+# Workload Identity Federation, run `cm-runner init` + `cm-runner find-diff` in
+# a `docker run` container under gVisor, upload `report.sarif` and `report.md`
+# as workflow artifacts, and post/update the sticky PR summary comment.
 #
-# Security boundary: tokens are used only by the steps below, on the host.
-# They are never passed into the cm-runner container.
+# Security boundary: GitHub tokens are used only by host steps below (pulling
+# the image and posting the PR comment). They are never passed into the
+# cm-runner container (ADR-0003).
 #
 # Container runtime: by default the container runs under gVisor (`runsc`)
 # with `--cap-add SYS_ADMIN`, so cm's own sandbox can start. That capability
@@ -25,6 +28,19 @@ inputs:
     description: >-
       cm-runner container image the repository can pull, pinned to a commit SHA
       tag (not :latest) so every run uses the same build.
+    required: true
+  gcp_project_id:
+    description: >-
+      Google Cloud project ID used by CodeMender (`GOOGLE_CLOUD_PROJECT`).
+    required: true
+  gcp_workload_identity_provider:
+    description: >-
+      Full Google Cloud Workload Identity Provider resource name
+      (`projects/<num>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`).
+    required: true
+  gcp_service_account:
+    description: >-
+      Google Cloud service account email for Workload Identity Federation.
     required: true
   registry_token:
     description: >-
@@ -52,6 +68,12 @@ inputs:
       run uses the same build.
     required: false
     default: '20260921.0'
+  artifact_retention_days:
+    description: >-
+      Number of days to retain uploaded `report.sarif` and `report.md` workflow
+      artifacts.
+    required: false
+    default: '3'
 
 runs:
   using: composite
@@ -64,6 +86,32 @@ runs:
     - name: Install action dependencies
       shell: bash
       run: python -m pip install --quiet -r "${{ github.action_path }}/requirements.txt"
+
+    - name: Verify PR base commit is present
+      shell: bash
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${BASE_SHA}" ]]; then
+          exit 0
+        fi
+        if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+          echo "Base commit ${BASE_SHA} not in shallow clone; attempting git fetch..."
+          git fetch --no-tags --depth=1 origin "${BASE_SHA}" || {
+            echo "::error::Base commit ${BASE_SHA} is not present in the local checkout. Set 'fetch-depth: 0' on actions/checkout."
+            exit 1
+          }
+        fi
+
+    - name: Authenticate to Google Cloud (WIF)
+      id: gcp_auth
+      uses: google-github-actions/auth@v2
+      with:
+        project_id: ${{ inputs.gcp_project_id }}
+        workload_identity_provider: ${{ inputs.gcp_workload_identity_provider }}
+        service_account: ${{ inputs.gcp_service_account }}
+        create_credentials_file: true
 
     # Download the pinned release, check its sha512, and register `runsc` as
     # a Docker runtime. Inputs are passed through env and validated, never
@@ -127,5 +175,21 @@ runs:
         CODEMENDER_RUNNER_IMAGE: ${{ inputs.runner_image }}
         CODEMENDER_LOG_LEVEL: ${{ inputs.log_level }}
         CODEMENDER_CONTAINER_RUNTIME: ${{ inputs.container_runtime }}
+        CODEMENDER_OUT_DIR: ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}
+        GOOGLE_CLOUD_PROJECT: ${{ inputs.gcp_project_id }}
+        GOOGLE_GHA_CREDS_PATH: ${{ steps.gcp_auth.outputs.credentials_file_path }}
         GITHUB_TOKEN: ${{ github.token }}
-      run: python "${{ github.action_path }}/src/gha_runner.py"
+      run: |
+        chmod a+r "${GOOGLE_GHA_CREDS_PATH}"
+        python "${{ github.action_path }}/src/gha_runner.py"
+
+    - name: Upload CodeMender report artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: codemender-report-pr-${{ github.event.pull_request.number || github.run_id }}
+        path: |
+          ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}/report.sarif
+          ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}/report.md
+        if-no-files-found: ignore
+        retention-days: ${{ inputs.artifact_retention_days }}

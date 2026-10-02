@@ -15,8 +15,9 @@
 """`cm-runner find-diff` -- impact-aware differential vulnerability scan.
 
 Runs CodeMender's differential scanner (`cm find <repo> -y --diff=<base>
---fail-on NONE`) followed by report extraction (`cm report --format sarif`, and
-`cm report --format md` when `--out` is given) through `CmAdapter`.
+--diff-workers=16 --fail-on NONE`) followed by report extraction (`cm report
+--format sarif`, and `cm report --format md` when `--out` is given) through
+`CmAdapter`.
 
 On success, writes a single compact (1-line) OASIS SARIF v2.1.0 JSON document to
 stdout and logs human-readable progress and summaries to stderr. On any usage
@@ -44,6 +45,9 @@ logger = logging.getLogger(__name__)
 # grace window for server LRO cancellation before terminating the child.
 _FIND_DIFF_TIMEOUT_SEC = 360.0
 _CM_REPORT_TIMEOUT_SEC = 60.0
+
+# Default number of concurrent `cm find --diff` workers (1..16 supported by cm).
+_DEFAULT_DIFF_WORKERS = 16
 
 
 @dataclasses.dataclass
@@ -145,6 +149,7 @@ def run(
           cfg.repo.as_posix(),
           "-y",
           f"--diff={cfg.base}",
+          f"--diff-workers={_DEFAULT_DIFF_WORKERS}",
           "--fail-on",
           "NONE",
       ],
