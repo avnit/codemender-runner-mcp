@@ -39,7 +39,7 @@ cloud-gtm/codemender-runner
 ├── gcp-gke/                # (Future) Deployment scenario: GKE sandboxing
 ├── bitbucket-pipelines/    # (Future) Deployment scenario: Bitbucket pipelines
 ├── docs/                   # ADRs, OpenSpecs, architecture designs, and guides
-└── terraform/              # Infrastructure-as-code modules (wif, gcp)
+└── terraform/              # Unified root module and child modules (modules/wif, modules/gcp)
 ```
 
 ### Tech Stack Standards

@@ -73,11 +73,13 @@ resource "google_iam_workload_identity_pool" "github_pool" {
 
 # 4. Workload Identity Pool OIDC Provider with Scoping Conditions (REQ-0001)
 locals {
+  full_repo_names = [for r in var.github_repositories : strcontains(trimspace(r), "/") ? trimspace(r) : "${var.github_owner}/${trimspace(r)}"]
+
   # Build attribute condition based on selected scope type
   attribute_condition = (
     var.github_scope_type == "org" || var.github_scope_type == "user"
     ? "assertion.repository_owner == '${var.github_owner}'"
-    : "assertion.repository in ${jsonencode(var.wif_allowed_repositories)}"
+    : "assertion.repository in ${jsonencode(local.full_repo_names)}"
   )
 
   # Principal set for user or org wide scope
@@ -115,7 +117,7 @@ resource "google_service_account_iam_member" "wif_user_org_binding" {
 
 # 5b. Service Account Binding for Specific Repository List Scope (REQ-0001)
 resource "google_service_account_iam_member" "wif_repo_binding" {
-  for_each           = var.github_scope_type == "repositories" ? toset(var.wif_allowed_repositories) : toset([])
+  for_each           = var.github_scope_type == "repositories" ? toset(local.full_repo_names) : toset([])
   service_account_id = google_service_account.runner_sa.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_pool.name}/attribute.repository/${each.value}"

@@ -100,29 +100,21 @@ variable "github_owner" {
   description = "GitHub organization name (e.g. 'my-org') or username (e.g. 'octocat'). Required if github_scope_type is 'org' or 'user'."
 }
 
-variable "wif_allowed_repositories" {
+variable "github_repositories" {
   type        = list(string)
   default     = []
-  description = "List of allowed GitHub repositories in 'owner/repo' format. Defines the GCP IAM security perimeter (REQUIRED ONLY if github_scope_type is 'repositories')."
+  description = "List of target GitHub repositories in 'repo' or 'owner/repo' format."
+
+  validation {
+    condition     = var.github_scope_type != "repositories" || length(var.github_repositories) > 0
+    error_message = "github_repositories must contain at least one repository when github_scope_type is 'repositories'."
+  }
 }
 
 # --- GitHub Platform Configuration ---
-
-variable "target_github_repositories" {
-  type        = list(string)
-  default     = []
-  description = "List of target repository names where GitHub Actions secrets and the 'codemender-scan' label should be configured (defaults to wif_allowed_repositories if left empty when github_scope_type is 'repositories')."
-}
 
 variable "github_app_id" {
   type        = string
   default     = ""
   description = "Numeric GitHub App ID to automatically populate as GH_APP_ID secret in target repositories."
-}
-
-variable "github_mgmt_token" {
-  type        = string
-  default     = null
-  sensitive   = true
-  description = "GitHub Personal Access Token with repository admin permissions (can also be provided via GITHUB_TOKEN environment variable)."
 }

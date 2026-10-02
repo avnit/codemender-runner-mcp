@@ -15,21 +15,15 @@
 # Governing: SPEC-WIF, REQ-0006
 
 locals {
-  # Normalize target repo list: use var.target_github_repositories if provided,
-  # or fall back to var.wif_allowed_repositories if scope is 'repositories'
-  raw_repo_list = length(var.target_github_repositories) > 0 ? var.target_github_repositories : (
-    var.github_scope_type == "repositories" ? var.wif_allowed_repositories : []
-  )
-
-  # Extract pure repository name if formatted as "owner/repo"
-  target_repos = toset([
-    for r in local.raw_repo_list : element(reverse(split("/", r)), 0)
+  # Extract pure repository name if formatted as "owner/repo" or "repo"
+  short_repo_names = toset([
+    for r in var.github_repositories : element(reverse(split("/", trimspace(r))), 0)
   ])
 }
 
 # 1. Create 'codemender-scan' label in target repositories
 resource "github_issue_label" "codemender_scan" {
-  for_each    = local.target_repos
+  for_each    = local.short_repo_names
   repository  = each.value
   name        = "codemender-scan"
   description = "Triggers CodeMender automated security scan and remediation"
@@ -38,7 +32,7 @@ resource "github_issue_label" "codemender_scan" {
 
 # 2. Configure GCP_WORKLOAD_IDENTITY_PROVIDER secret in target repositories
 resource "github_actions_secret" "wif_provider" {
-  for_each    = local.target_repos
+  for_each    = local.short_repo_names
   repository  = each.value
   secret_name = "GCP_WORKLOAD_IDENTITY_PROVIDER"
   value       = google_iam_workload_identity_pool_provider.github_provider.name
@@ -46,7 +40,7 @@ resource "github_actions_secret" "wif_provider" {
 
 # 3. Configure GCP_SERVICE_ACCOUNT secret in target repositories
 resource "github_actions_secret" "runner_sa" {
-  for_each    = local.target_repos
+  for_each    = local.short_repo_names
   repository  = each.value
   secret_name = "GCP_SERVICE_ACCOUNT"
   value       = google_service_account.runner_sa.email
@@ -54,7 +48,7 @@ resource "github_actions_secret" "runner_sa" {
 
 # 4. Configure GH_APP_ID secret in target repositories (when provided)
 resource "github_actions_secret" "app_id" {
-  for_each    = var.github_app_id != "" ? local.target_repos : toset([])
+  for_each    = var.github_app_id != "" ? local.short_repo_names : toset([])
   repository  = each.value
   secret_name = "GH_APP_ID"
   value       = var.github_app_id
@@ -62,7 +56,7 @@ resource "github_actions_secret" "app_id" {
 
 # 5. Configure GCS_TRANSIT_BUCKET repository variable in Cloud Run execution mode
 resource "github_actions_variable" "gcs_transit_bucket" {
-  for_each      = var.execution_mode == "cloud_run" ? local.target_repos : toset([])
+  for_each      = var.execution_mode == "cloud_run" ? local.short_repo_names : toset([])
   repository    = each.value
   variable_name = "GCS_TRANSIT_BUCKET"
   value         = var.gcs_transit_bucket_name
@@ -70,7 +64,7 @@ resource "github_actions_variable" "gcs_transit_bucket" {
 
 # 6. Configure CLOUD_RUN_JOB_NAME repository variable in Cloud Run execution mode (when provided)
 resource "github_actions_variable" "cloud_run_job_name" {
-  for_each      = (var.execution_mode == "cloud_run" && var.cloud_run_job_name != "") ? local.target_repos : toset([])
+  for_each      = (var.execution_mode == "cloud_run" && var.cloud_run_job_name != "") ? local.short_repo_names : toset([])
   repository    = each.value
   variable_name = "CLOUD_RUN_JOB_NAME"
   value         = var.cloud_run_job_name
@@ -78,7 +72,7 @@ resource "github_actions_variable" "cloud_run_job_name" {
 
 # 7. Configure GCP_REGION repository variable in Cloud Run execution mode (when non-default)
 resource "github_actions_variable" "gcp_region" {
-  for_each      = (var.execution_mode == "cloud_run" && var.gcp_region != "" && var.gcp_region != "global") ? local.target_repos : toset([])
+  for_each      = (var.execution_mode == "cloud_run" && var.gcp_region != "" && var.gcp_region != "global") ? local.short_repo_names : toset([])
   repository    = each.value
   variable_name = "GCP_REGION"
   value         = var.gcp_region

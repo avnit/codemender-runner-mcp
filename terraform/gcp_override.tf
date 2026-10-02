@@ -12,28 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: SPEC-WIF, REQ-0001, REQ-0004
+# Governing: docs/openspec/specs/wif/spec.md#req-0001, docs/openspec/specs/wif/spec.md#req-0005
 
-terraform {
-  required_version = ">= 1.5.0"
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = ">= 5.0.0"
-    }
-    github = {
-      source  = "integrations/github"
-      version = ">= 6.0.0"
-    }
-  }
-}
-
-provider "google" {
-  project = var.gcp_project_id
-  region  = var.gcp_region
-}
-
-provider "github" {
-  owner = var.github_owner != "" ? var.github_owner : null
-  token = var.github_mgmt_token != "" ? var.github_mgmt_token : null
+locals {
+  gcp_module_bucket_name = var.execution_mode == "cloud_run" ? module.gcp[0].reports_bucket_name : ""
+  gcp_module_job_name    = var.execution_mode == "cloud_run" ? module.gcp[0].runner_job_name : ""
+  gcp_module_runtime_sa_emails = var.execution_mode == "cloud_run" ? [
+    module.gcp[0].runner_service_account_email,
+    module.gcp[0].worker_service_account_email,
+  ] : []
 }

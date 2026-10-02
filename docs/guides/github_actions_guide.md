@@ -358,115 +358,138 @@ label, and configure the initial secrets:
 
 #### Path A: Automated Provisioning via Terraform (Recommended)
 
-The repository provides a complete Terraform module at
-[`terraform/wif/`](../../terraform/wif/) that automates:
+The repository provides a complete unified Terraform module at
+[`terraform/`](../../terraform/) (with child module at
+[`terraform/modules/wif/`](../../terraform/modules/wif/)) that automates:
 
 *   Enabling required GCP APIs (`aiplatform.googleapis.com`,
-    `iam.googleapis.com`, `iamcredentials.googleapis.com`).
+    `iam.googleapis.com`, `iamcredentials.googleapis.com`, and conditionally
+    `run.googleapis.com`, `storage.googleapis.com` in `cloud_run` mode).
 *   Creating the dedicated Service Account (`codemender-wif-sa`) with
-    `roles/aiplatform.user`.
+    `roles/aiplatform.user` (default `local` mode) or Cloud Run caller
+    permissions (`roles/run.developer`, GCS transit bucket
+    `roles/storage.objectUser`, and runtime SA `roles/iam.serviceAccountUser` in
+    `cloud_run` mode).
 *   Creating the Workload Identity Pool and OIDC Provider with custom scoping.
 *   Configuring the `codemender-scan` PR trigger label on target repositories.
-*   Configuring the 3 non-sensitive GitHub Actions secrets
-    (`GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `GH_APP_ID`).
+*   Configuring non-sensitive GitHub Actions secrets
+    (`GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `GH_APP_ID`) and
+    variables (`GCS_TRANSIT_BUCKET`, `CLOUD_RUN_JOB_NAME` in `cloud_run` mode).
 
 ##### 1. Create and Configure `terraform.tfvars`
 
-Navigate to the Terraform directory and create your `terraform.tfvars` file by
+Navigate to the root Terraform directory and create your `terraform.tfvars` file by
 running the following command:
 
 ```bash
-cd terraform/wif
+cd terraform
 
 cat << 'EOF' > terraform.tfvars
-# =============================================================================
-# CodeMender GitHub Actions WIF & GitHub Configuration
-# =============================================================================
-
-# 1. Google Cloud Project Configuration (REQUIRED)
-# The GCP Project ID hosting Vertex AI where Gemini LLM APIs will be queried.
+# ==============================================================================
+# SECTION 1: GCP Project & Identity Naming
+# ==============================================================================
+# Required: The Google Cloud Project ID where WIF resources will be deployed.
 gcp_project_id = "your-gcp-project-id"
 
-# The GCP region for resource deployment (default: "global")
-gcp_region     = "global"
+# The Google Cloud region for regional resources (default: "us-central1").
+gcp_region = "us-central1"
+
+# The Service Account ID (name) created for GitHub Actions authentication.
+# Default: "codemender-wif-sa"
+gcp_service_account_id = "codemender-wif-sa"
+
+# The Workload Identity Pool ID.
+# Default: "codemender-wif-pool"
+gcp_wif_pool_id = "codemender-wif-pool"
+
+# The Workload Identity Pool Provider ID.
+# Default: "codemender-wif-provider"
+gcp_wif_provider_id = "codemender-wif-provider"
 
 
-# 2. GitHub Organization / User Configuration (REQUIRED)
-# GitHub organization name (e.g. "my-org") or username (e.g. "octocat").
+# ==============================================================================
+# SECTION 2: Execution Mode & Cloud Run Infrastructure
+# ==============================================================================
+# Controls the architectural execution mode:
+# - "local": (Default) Runs cm-runner directly on GitHub Actions runner.
+#   The WIF Service Account is granted roles/aiplatform.user for Vertex AI.
+# - "cloud_run": Automatically provisions terraform/modules/gcp (Cloud Run Jobs,
+#   GCS transit bucket, runtime SAs) and wires them into module.wif.
+execution_mode = "local" # or "cloud_run"
+
+
+# ==============================================================================
+# SECTION 3: GCP WIF OIDC Trust Perimeter & Target Repositories
+# ==============================================================================
+# GitHub organization name (e.g. "my-org") or personal account username.
+# Required if github_scope_type is "org" or "user".
 github_owner = "your-github-org-or-username"
 
-# Numeric App ID from Step 1.1 (from GitHub App settings page, e.g. "123456").
-# Configured automatically as the GH_APP_ID secret in target repositories.
-github_app_id = "123456"
+# Scoping model for WIF authentication:
+# - "org": WIF trusts the entire organization (assertion.repository_owner == github_owner).
+#          github_repositories lists repos to bootstrap (or empty [] to skip GitHub API calls).
+# - "user": WIF trusts all repos owned by the user (assertion.repository_owner == github_owner).
+#           github_repositories lists repos to bootstrap (or empty [] to skip GitHub API calls).
+# - "repositories": WIF trust is strictly constrained to the repositories explicitly enumerated
+#                   in github_repositories. At least one repository is required.
+github_scope_type = "org" # or "user", "repositories"
 
-
-# 3. Workload Identity Federation (WIF) Scoping Type (REQUIRED)
-# Choose one of:
-#   - "org"          : Authorizes ALL repositories under github_owner organization (Recommended for orgs)
-#   - "user"         : Authorizes ALL repositories under github_owner user account (For personal accounts)
-#   - "repositories" : Restricts GCP WIF access strictly to repositories listed in 'wif_allowed_repositories'
-github_scope_type = "org"
-
-
-# 4. Target GitHub Repositories for Actions Secrets & PR Label Setup
-# List of repository names where Terraform will configure GitHub Secrets
-# (GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT, GH_APP_ID) and the
-# 'codemender-scan' PR trigger label.
-#
-# NOTE:
-#   - When github_scope_type is "org" or "user": Set this list to the repos you are onboarding.
-#   - When github_scope_type is "repositories": You can leave this empty ([]), and Terraform
-#     will automatically use 'wif_allowed_repositories' below.
-#
-# Examples: ["backend-service", "frontend-app", "juice-shop-local"]
-target_github_repositories = [
+# Target repositories list:
+# - Accepts either short names ("repo") or full repository names ("owner/repo").
+# - Both formats are automatically normalized by the module.
+# - When github_scope_type = "repositories", at least one repository is required and defines
+#   both the GCP WIF trust perimeter and target repos to bootstrap.
+# - When github_scope_type = "org" or "user", WIF trusts the entire org/user, and this list
+#   determines which repositories have GitHub secrets/variables/labels bootstrapped
+#   (or set to empty [] to skip all GitHub API operations).
+github_repositories = [
   "backend-service",
   "frontend-app"
 ]
 
 
-# =============================================================================
-# OPTIONAL ADVANCED CONFIGURATIONS (Uncomment if customizing)
-# =============================================================================
-
-# -----------------------------------------------------------------------------
-# WIF Allowed Repositories (REQUIRED ONLY IF github_scope_type = "repositories")
-# -----------------------------------------------------------------------------
-# Defines the GCP IAM security perimeter (which repositories are allowed to
-# authenticate with GCP Vertex AI). Must be formatted as "owner/repo".
-# (Ignored when github_scope_type is "org" or "user").
+# ==============================================================================
+# SECTION 4: Optional GitHub Repository Bootstrap & Provider Auth
+# ==============================================================================
+# When github_repositories is non-empty, CodeMender bootstraps target repositories
+# with required GitHub Actions Secrets (GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT,
+# GH_APP_ID), Labels (codemender-scan), and Variables (GCS_TRANSIT_BUCKET, CLOUD_RUN_JOB_NAME
+# in cloud_run mode).
 #
-# wif_allowed_repositories = [
-#   "your-org/backend-service",
-#   "your-org/frontend-app"
-# ]
-
-# Custom Service Account ID (default: "codemender-wif-sa")
-# gcp_service_account_id = "codemender-wif-sa"
-
-# Custom Workload Identity Pool ID (default: "codemender-wif-pool")
-# gcp_wif_pool_id = "codemender-wif-pool"
-
-# Custom Workload Identity Provider ID (default: "codemender-wif-provider")
-# gcp_wif_provider_id = "codemender-wif-provider"
+# Choose from 3-tier GitHub Provider Authentication methods:
+#
+# Tier 1: Ambient CLI / Environment (Default)
+# Leave the variables below empty/null. The GitHub provider will automatically use:
+# - `gh auth login` credentials from your local machine, or
+# - GITHUB_TOKEN environment variable in CI pipelines.
+#
+# Tier 2: GitHub App app_auth (Recommended for Organizations)
+# Authenticates as a GitHub App installation with fine-grained repository permissions:
+# github_app_id              = "123456"
+# github_app_installation_id = "654321"
+# github_app_pem_file        = "path/to/private-key.pem" # Or raw PEM file content
+#
+# Tier 3: Explicit Token
+# Provide a GitHub Personal Access Token (PAT) with repo administration access:
+# github_mgmt_token = "ghp_yourManagementTokenWithAdminRepoAccess"
 EOF
 ```
 
 > [!TIP]
-> **Understanding `target_github_repositories` vs.
-> `wif_allowed_repositories`**: * **`target_github_repositories` (GitHub API)**:
-> Tells Terraform which repositories should receive the GitHub Actions Secrets
-> and the `codemender-scan` label. * **`wif_allowed_repositories` (GCP IAM /
-> WIF)**: Tells GCP IAM which repositories are cryptographically authorized to
-> assume the GCP Service Account via OIDC.
+> **Understanding `github_repositories`**:
+> The unified `github_repositories` variable accepts either short names (`"repo"`)
+> or full repository identifiers (`"owner/repo"`), and automatically normalizes both:
 >
-> **Rules of Thumb**: 1. **Org-Wide Scope (`github_scope_type = "org"`)**: Set
-> `target_github_repositories = ["repo-1", "repo-2"]`. Leave
-> `wif_allowed_repositories` commented out (GCP automatically trusts the whole
-> org). 2. **Repository List Scope (`github_scope_type = "repositories"`)**: Set
-> `wif_allowed_repositories = ["org/repo-1", "org/repo-2"]`. You can leave
-> `target_github_repositories = []` (Terraform automatically applies to the same
-> list).
+> 1. **Org-Wide or User Scope (`github_scope_type = "org"` or `"user"`)**:
+>    GCP WIF automatically trusts all repositories owned by `github_owner`. The
+>    `github_repositories` list specifies which repositories Terraform will bootstrap
+>    with GitHub Actions secrets (`GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`,
+>    `GH_APP_ID`), variables, and the `codemender-scan` label. Set to `[]` if you
+>    manage secrets out-of-band.
+> 2. **Repository List Scope (`github_scope_type = "repositories"`)**:
+>    Restricts GCP WIF OIDC trust strictly to the repositories enumerated in
+>    `github_repositories`. These repositories are also configured with GitHub
+>    Actions secrets and labels.
 
 ##### 2. Apply Terraform
 
@@ -474,13 +497,14 @@ Authenticate with GCP and GitHub, then apply:
 
 *   **Option 1: Running in GCP Cloud Shell (Fastest & Recommended)**: In Cloud
     Shell, `gcloud` is already logged in. If you are logged into GitHub CLI (`gh
-    auth login`), export your active token directly:
+    auth login`), export your active token directly (or omit `GITHUB_TOKEN` if using
+    Tier 2 GitHub App authentication in `terraform.tfvars`):
 
     ```bash
     # Set active GCP project in Cloud Shell
     gcloud config set project "your-gcp-project-id"
 
-    # Export GitHub token directly from active GitHub CLI session
+    # Export GitHub token directly from active GitHub CLI session (if using ambient token auth)
     export GITHUB_TOKEN=$(gh auth token)
 
     # Initialize and apply
@@ -494,7 +518,7 @@ Authenticate with GCP and GitHub, then apply:
     # 1. Log in to GCP Application Default Credentials
     gcloud auth application-default login
 
-    # 2. Export your GitHub Personal Access Token (with repo admin access)
+    # 2. Export your GitHub Personal Access Token (if using ambient token auth)
     export GITHUB_TOKEN="ghp_yourManagementTokenWithAdminRepoAccess"
 
     # 3. Initialize and apply
@@ -505,7 +529,7 @@ Authenticate with GCP and GitHub, then apply:
 > [!NOTE]
 > Terraform automatically populates `GCP_WORKLOAD_IDENTITY_PROVIDER`,
 > `GCP_SERVICE_ACCOUNT`, `GH_APP_ID`, and creates the `codemender-scan` label on
-> all specified `target_github_repositories`. Proceed to
+> all specified `github_repositories`. Proceed to
 > [Step 1.3](#step-13-secret-injection) for the single decoupled step to inject
 > `GH_APP_PRIVATE_KEY`.
 
@@ -1420,7 +1444,7 @@ Build and push your image to GitHub Container Registry
     `attribute_condition` or the runner Service Account does not have
     `roles/iam.workloadIdentityUser`.
 *   **Fix**:
-    1.  Check that `github_owner` / `allowed_repositories` in your Terraform
+    1.  Check that `github_owner` / `github_repositories` in your Terraform
         configuration or `gcloud` command includes the repository triggering the
         workflow.
     2.  Verify the caller workflow has top-level permission `permissions:

@@ -18,11 +18,11 @@ mock_provider "google" {}
 mock_provider "github" {}
 
 variables {
-  gcp_project_id             = "test-codemender-project"
-  gcp_region                 = "global"
-  github_owner               = "test-org"
-  github_app_id              = "123456"
-  target_github_repositories = ["repo-a", "test-org/repo-b"]
+  gcp_project_id      = "test-codemender-project"
+  gcp_region          = "global"
+  github_owner        = "test-org"
+  github_app_id       = "123456"
+  github_repositories = ["repo-a", "test-org/repo-b"]
 }
 
 run "default_local_mode_wif_and_github_resources" {
@@ -192,9 +192,8 @@ run "repository_list_scoping" {
   command = plan
 
   variables {
-    github_scope_type          = "repositories"
-    wif_allowed_repositories   = ["test-org/repo-a", "test-org/repo-b"]
-    target_github_repositories = []
+    github_scope_type   = "repositories"
+    github_repositories = ["repo-a", "test-org/repo-b"]
   }
 
   assert {
@@ -208,14 +207,27 @@ run "repository_list_scoping" {
   }
 
   assert {
-    condition     = length(google_service_account_iam_member.wif_repo_binding) == 2
-    error_message = "Per-repository WIF IAM bindings must be created for each allowed repository."
+    condition     = length(google_service_account_iam_member.wif_repo_binding) == 2 && contains(keys(google_service_account_iam_member.wif_repo_binding), "test-org/repo-a") && contains(keys(google_service_account_iam_member.wif_repo_binding), "test-org/repo-b")
+    error_message = "Per-repository WIF IAM bindings must be created for each normalized full repository name."
   }
 
   assert {
-    condition     = length(github_issue_label.codemender_scan) == 2
-    error_message = "Labels must be created based on wif_allowed_repositories fallback."
+    condition     = length(github_issue_label.codemender_scan) == 2 && contains(keys(github_issue_label.codemender_scan), "repo-a") && contains(keys(github_issue_label.codemender_scan), "repo-b")
+    error_message = "Labels must be created based on short_repo_names."
   }
+}
+
+run "repositories_scope_requires_non_empty_github_repositories" {
+  command = plan
+
+  variables {
+    github_scope_type   = "repositories"
+    github_repositories = []
+  }
+
+  expect_failures = [
+    var.github_repositories,
+  ]
 }
 
 run "cloud_run_mode_requires_gcs_transit_bucket_name" {

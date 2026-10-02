@@ -8,8 +8,9 @@ This guide provides step-by-step instructions to setup, deploy, and run the
 
 ## 1. Architecture Overview
 
-The parallel scanning pipeline uses **Infrastructure as Code (IaC)** to
-provision:
+The parallel scanning pipeline uses **Infrastructure as Code (IaC)** via the unified
+root Terraform module (`terraform/`) with `execution_mode = "cloud_run"` and its
+`terraform/modules/gcp` child module to provision:
 
 *   **Google Cloud Storage (GCS)**: Private bucket for scan reports (`reports`).
 *   **Artifact Registry**: Docker container repository for runner images
@@ -97,48 +98,58 @@ Ensure you have the following before starting:
 
 ### Step 1: Provision Infrastructure with Terraform
 
-Clone the repository and navigate to the `terraform/gcp/` directory:
+Clone the repository and navigate to the unified root `terraform/` directory:
 
 ```bash
 git clone https://github.com/your-username/codemender-agent.git
-cd codemender-agent/terraform/gcp
+cd codemender-agent/terraform
 ```
 
 #### Where to create `terraform.tfvars`:
 
 The `terraform.tfvars` file **must be created directly inside
-`terraform/gcp/terraform.tfvars`**.
+`terraform/terraform.tfvars`**.
 
-#### Setting Environment Prefix & Cloud Run Resources (`runner_cpu` / `runner_memory`):
+#### Setting Execution Mode, Environment Prefix & Cloud Run Resources (`runner_cpu` / `runner_memory`):
 
-Set your project variables, environment prefix, and desired Cloud Run Job
-CPU/Memory limits:
+Set your project variables, environment prefix, Cloud Run Job CPU/Memory limits, and set `execution_mode = "cloud_run"` (which automatically provisions GCP infrastructure via `terraform/modules/gcp` and wires it to Workload Identity Federation):
 
 ```bash
 # Set your active GCP Project ID and Environment Prefix
 export PROJECT_ID=$(gcloud config get-value project)
 export PREFIX="codemender-dev"  # <-- Set your environment prefix here
 
-# Generate terraform.tfvars inside terraform/gcp/
+# Generate terraform.tfvars inside terraform/
 cat <<EOF > terraform.tfvars
-project_id           = "${PROJECT_ID}"
-region               = "us-central1"    # Target GCP region for all resources
+# SECTION 1: GCP Project & Identity Naming
+gcp_project_id       = "${PROJECT_ID}"
+gcp_region           = "us-central1"    # Target GCP region for all resources
+
+# SECTION 2: Execution Mode & Cloud Run Infrastructure
+execution_mode       = "cloud_run"      # Automatically provisions terraform/modules/gcp
 resource_prefix      = "${PREFIX}"      # Base prefix used to name all created resources
 runner_cpu           = "2"              # Cloud Run Job vCPU limit ("1", "2", "4", "8")
 runner_memory        = "4Gi"            # Cloud Run Job RAM limit ("2Gi", "4Gi", "8Gi", "16Gi")
 create_vpc_and_nat   = false            # Set to true to create a private VPC and Cloud NAT for egress
 scheduler_cron       = "0 2 * * *"      # Cron expression for the nightly scheduled run
+
+# SECTION 3: GCP WIF OIDC Trust Perimeter & Target Repositories
+github_owner         = "your-github-org-or-username"
+github_scope_type    = "org"            # "org", "user", or "repositories"
+github_repositories  = [
+  # "your-org/your-repo"
+]
 EOF
 ```
 
-*(Alternatively, create `terraform/gcp/terraform.tfvars` manually using `nano`
-or `touch` and set `runner_cpu = "4"` / `runner_memory = "8Gi"`).*
+*(Alternatively, copy `terraform/terraform.tfvars.example` to `terraform/terraform.tfvars` and customize settings such as `runner_cpu = "4"` / `runner_memory = "8Gi"`).*
 
 #### Apply Terraform Configuration:
 
 Initialize and apply the Terraform configuration to provision the GCS buckets,
 Artifact Registry, Service Accounts, IAM bindings, Cloud Run Job, Workflows,
-Secret Manager secret, and enable all required GCP APIs:
+Secret Manager secret, and enable all required GCP APIs via the unified root module
+and `terraform/modules/gcp` child module:
 
 ```bash
 # Initialize provider plugins
@@ -169,7 +180,7 @@ runner container image using Cloud Build (which fetches the stable `cm` binary,
 pushes the container to Artifact Registry, and updates the Cloud Run Jobs):
 
 ```bash
-cd ../..
+cd ..
 
 export PROJECT_ID=$(gcloud config get-value project)
 export REPO_NAME="${PREFIX}-runner"
@@ -410,7 +421,7 @@ gcloud scheduler jobs create http ${PREFIX}-second-repo-nightly \
 *   **Clean Up Resources**: To tear down the infrastructure:
 
     ```bash
-    cd terraform/gcp
+    cd terraform
     terraform destroy
     ```
 
@@ -477,11 +488,11 @@ environment.
 
 ### 1. Create a New Terraform Workspace
 
-Navigate to your `terraform/gcp` directory and create a new workspace for your
+Navigate to your `terraform/` directory and create a new workspace for your
 second environment:
 
 ```bash
-cd codemender-agent/terraform/gcp
+cd codemender-agent/terraform
 terraform workspace new prod  # Name it whatever you like (e.g., prod, testing)
 ```
 
@@ -494,13 +505,22 @@ export PROJECT_ID=$(gcloud config get-value project)
 export PREFIX="codemender-prod"  # <-- Your second environment prefix
 
 cat <<VARS > prod.tfvars
-project_id           = "${PROJECT_ID}"
-region               = "us-central1"    # Target GCP region for all resources
+# SECTION 1: GCP Project & Identity Naming
+gcp_project_id       = "${PROJECT_ID}"
+gcp_region           = "us-central1"    # Target GCP region for all resources
+
+# SECTION 2: Execution Mode & Cloud Run Infrastructure
+execution_mode       = "cloud_run"      # Automatically provisions terraform/modules/gcp
 resource_prefix      = "${PREFIX}"      # Base prefix used to name all created resources
 runner_cpu           = "2"              # Cloud Run Job vCPU limit ("1", "2", "4", "8")
 runner_memory        = "4Gi"            # Cloud Run Job RAM limit ("2Gi", "4Gi", "8Gi", "16Gi")
 create_vpc_and_nat   = false            # Set to true to create a private VPC and Cloud NAT for egress
 scheduler_cron       = "0 2 * * *"      # Cron expression for the nightly scheduled run
+
+# SECTION 3: GCP WIF OIDC Trust Perimeter & Target Repositories
+github_owner         = "your-github-org-or-username"
+github_scope_type    = "org"
+github_repositories  = []
 VARS
 ```
 

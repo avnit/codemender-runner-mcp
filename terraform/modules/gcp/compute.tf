@@ -139,7 +139,7 @@ resource "google_workflows_workflow" "coordinator" {
   deletion_protection = false
   description         = "Coordinates parallel CodeMender security scan and fix executions"
   service_account     = google_service_account.workflow_sa.id
-  source_contents     = file("${path.module}/../../workflows/gcp_parallel_workflow.yaml")
+  source_contents     = file("${path.module}/../../../workflows/gcp_parallel_workflow.yaml")
 
   depends_on = [
     time_sleep.wait_for_apis_and_iam
