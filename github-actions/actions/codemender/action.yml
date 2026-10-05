@@ -152,6 +152,7 @@ runs:
     # credential isn't left in ~/.docker/config.json. The container never
     # sees it either way.
     - name: Pull cm-runner image
+      id: pull-image
       shell: bash
       env:
         IMAGE: ${{ inputs.runner_image }}
@@ -164,15 +165,23 @@ runs:
           exit 1
         fi
         if [[ "$IMAGE" == ghcr.io/* ]]; then
+          repo_part="${IMAGE%:*}"
+          tag_part="${IMAGE##*:}"
+          if [[ "${repo_part}" == "${IMAGE}" ]]; then
+            IMAGE="${IMAGE,,}:latest"
+          else
+            IMAGE="${repo_part,,}:${tag_part}"
+          fi
           trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
           echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
         fi
         docker pull "$IMAGE"
+        echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
 
     - name: Run CodeMender
       shell: bash
       env:
-        CODEMENDER_RUNNER_IMAGE: ${{ inputs.runner_image }}
+        CODEMENDER_RUNNER_IMAGE: ${{ steps.pull-image.outputs.image }}
         CODEMENDER_LOG_LEVEL: ${{ inputs.log_level }}
         CODEMENDER_CONTAINER_RUNTIME: ${{ inputs.container_runtime }}
         CODEMENDER_OUT_DIR: ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}

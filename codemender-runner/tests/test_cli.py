@@ -50,11 +50,6 @@ from cli.events import EventEmitter
 # Directory containing the `cli` package, used as cwd so `python -m cli` works.
 _PKG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# The repo's pre-existing fake cm. It implements init/find/fix/verify/report
-# but *not* `--version`, on which it exits non-zero. That makes it a ready-made
-# fixture for the "binary is present but will not report a version" case.
-_FAKE_CM = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cm")
-
 # A stub cm that only answers `--version`, which is all `main` needs from it.
 _WORKING_CM_BODY = '#!/bin/sh\necho "cm version 0.9.0"\n'
 
@@ -275,10 +270,13 @@ class TestCmDetection(CLIContractTestBase):
   def test_binary_present_but_version_unreadable_fails(self):
     """A cm that fails `--version` is found but does not run: exit 3.
 
-    Uses the repo's existing dummy cm, which rejects `--version`. Stdout
+    Uses an inline stub cm that rejects `--version`. Stdout
     stays empty, and the child's error text does not leak onto it.
     """
-    result = self.run_cli("version", "--cm-binary", _FAKE_CM)
+    fake = self._write_fake_cm(
+        "#!/bin/sh\necho 'unrecognized option' >&2\nexit 1\n"
+    )
+    result = self.run_cli("version", "--cm-binary", fake)
 
     self.assertEqual(result.returncode, exit_codes.FAILED, result.stderr)
     self.assertEqual(result.stdout, "")
@@ -442,6 +440,10 @@ class TestCmRunnerScript(unittest.TestCase):
     payload = json.loads(result.stdout.strip())
     self.assertEqual(payload["event"], "version")
 
+  @unittest.skipUnless(
+      os.path.exists(os.path.join(_PKG_DIR, "main.py")),
+      "requires legacy main.py",
+  )
   def test_script_runs_legacy(self):
     # Running legacy invokes main.py. Without env vars it exits with code 1.
     result = subprocess.run(
@@ -468,7 +470,7 @@ class TestCmRunnerScript(unittest.TestCase):
 
   def test_script_respects_cm_runner_python(self):
     env = dict(os.environ)
-    env["CM_RUNNER_PYTHON"] = "/nonexistent/custom/python"
+    env["CM_RUNNER_PYTHON"] = os.path.join(_temp_dir(self), "custom", "python")
     result = subprocess.run(
         [self._script, "version"],
         cwd=_PKG_DIR,
@@ -497,6 +499,10 @@ class TestPackageDirectoryExecution(unittest.TestCase):
     payload = json.loads(result.stdout.strip())
     self.assertEqual(payload["event"], "version")
 
+  @unittest.skipUnless(
+      os.path.exists(os.path.join(_PKG_DIR, "main.py")),
+      "requires legacy main.py",
+  )
   def test_package_directory_runs_legacy(self):
     result = subprocess.run(
         [sys.executable, _PKG_DIR, "legacy"],
@@ -686,6 +692,10 @@ class TestCliArchitectureRules(unittest.TestCase):
 class TestStdoutRedirectDuringCommand(unittest.TestCase):
   """ADR-0002 Confirmation: while a command runs, stray stdout writes land on stderr."""
 
+  @unittest.skipUnless(
+      os.path.exists(os.path.join(_PKG_DIR, "utils.py")),
+      "requires legacy utils.py",
+  )
   def test_git_helper_inside_command_leaves_stdout_clean(self):
     """A vcs/git.py helper and a bare print() inside a command reach stderr only.
 

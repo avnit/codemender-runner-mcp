@@ -30,20 +30,28 @@ resource "github_issue_label" "codemender_scan" {
   color       = "0E8A16"
 }
 
-# 2. Configure GCP_WORKLOAD_IDENTITY_PROVIDER secret in target repositories
+# 2. Configure CODEMENDER_WORKLOAD_IDENTITY_PROVIDER secret in target repositories
 resource "github_actions_secret" "wif_provider" {
   for_each    = local.short_repo_names
   repository  = each.value
-  secret_name = "GCP_WORKLOAD_IDENTITY_PROVIDER"
+  secret_name = "CODEMENDER_WORKLOAD_IDENTITY_PROVIDER"
   value       = google_iam_workload_identity_pool_provider.github_provider.name
 }
 
-# 3. Configure GCP_SERVICE_ACCOUNT secret in target repositories
+# 3. Configure CODEMENDER_SERVICE_ACCOUNT secret in target repositories
 resource "github_actions_secret" "runner_sa" {
   for_each    = local.short_repo_names
   repository  = each.value
-  secret_name = "GCP_SERVICE_ACCOUNT"
+  secret_name = "CODEMENDER_SERVICE_ACCOUNT"
   value       = google_service_account.runner_sa.email
+}
+
+# Configure the project for running codemender in.
+resource "github_actions_variable" "gcp_project_id" {
+  for_each      = local.short_repo_names
+  repository    = each.value
+  variable_name = "CODEMENDER_GCP_PROJECT_ID"
+  value         = var.gcp_project_id
 }
 
 # 4. Configure GH_APP_ID secret in target repositories (when provided)
@@ -54,26 +62,26 @@ resource "github_actions_secret" "app_id" {
   value       = var.github_app_id
 }
 
-# 5. Configure GCS_TRANSIT_BUCKET repository variable in Cloud Run execution mode
+# 5. Configure CODEMENDER_GCS_TRANSIT_BUCKET repository variable in Cloud Run execution mode
 resource "github_actions_variable" "gcs_transit_bucket" {
   for_each      = var.execution_mode == "cloud_run" ? local.short_repo_names : toset([])
   repository    = each.value
-  variable_name = "GCS_TRANSIT_BUCKET"
+  variable_name = "CODEMENDER_GCS_TRANSIT_BUCKET"
   value         = var.gcs_transit_bucket_name
 }
 
-# 6. Configure CLOUD_RUN_JOB_NAME repository variable in Cloud Run execution mode (when provided)
+# 6. Configure CODEMENDER_CLOUD_RUN_JOB_NAME repository variable in Cloud Run execution mode (when provided)
 resource "github_actions_variable" "cloud_run_job_name" {
   for_each      = (var.execution_mode == "cloud_run" && var.cloud_run_job_name != "") ? local.short_repo_names : toset([])
   repository    = each.value
-  variable_name = "CLOUD_RUN_JOB_NAME"
+  variable_name = "CODEMENDER_CLOUD_RUN_JOB_NAME"
   value         = var.cloud_run_job_name
 }
 
-# 7. Configure GCP_REGION repository variable in Cloud Run execution mode (when non-default)
+# 7. Configure CODEMENDER_GCP_REGION repository variable in Cloud Run execution mode (when non-default)
 resource "github_actions_variable" "gcp_region" {
   for_each      = (var.execution_mode == "cloud_run" && var.gcp_region != "" && var.gcp_region != "global") ? local.short_repo_names : toset([])
   repository    = each.value
-  variable_name = "GCP_REGION"
+  variable_name = "CODEMENDER_GCP_REGION"
   value         = var.gcp_region
 }

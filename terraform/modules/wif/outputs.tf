@@ -15,12 +15,12 @@
 # Governing: SPEC-WIF, REQ-0002, REQ-0006
 
 output "gcp_workload_identity_provider" {
-  description = "Full resource name of the Workload Identity Provider for GitHub Actions secret GCP_WORKLOAD_IDENTITY_PROVIDER."
+  description = "Full resource name of the Workload Identity Provider for GitHub Actions secret CODEMENDER_WORKLOAD_IDENTITY_PROVIDER."
   value       = google_iam_workload_identity_pool_provider.github_provider.name
 }
 
 output "gcp_service_account" {
-  description = "Service Account email for GitHub Actions secret GCP_SERVICE_ACCOUNT."
+  description = "Service Account email for GitHub Actions secret CODEMENDER_SERVICE_ACCOUNT."
   value       = google_service_account.runner_sa.email
 }
 

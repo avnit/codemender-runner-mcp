@@ -447,21 +447,23 @@ options across four structured sections:
    and `cloud_run` Modes):**
    - `github_issue_label.codemender_scan`: Creates the `codemender-scan` label
      in each repository in `local.short_repo_names`.
-   - `github_actions_secret.wif_provider`: Sets `GCP_WORKLOAD_IDENTITY_PROVIDER`
+   - `github_actions_secret.wif_provider`: Sets `CODEMENDER_WORKLOAD_IDENTITY_PROVIDER`
      to `google_iam_workload_identity_pool_provider.github_provider.name`.
-   - `github_actions_secret.runner_sa`: Sets `GCP_SERVICE_ACCOUNT` to
+   - `github_actions_secret.runner_sa`: Sets `CODEMENDER_SERVICE_ACCOUNT` to
      `google_service_account.runner_sa.email`.
+   - `github_actions_variable.gcp_project_id`: Sets `CODEMENDER_GCP_PROJECT_ID`
+     to `var.gcp_project_id`.
    - `github_actions_secret.app_id`: Sets `GH_APP_ID` to `var.github_app_id`
      when `var.github_app_id != ""`.
 1. **Cloud Run Mode GitHub Repository Variables
    (`execution_mode == "cloud_run"`):**
-   - `github_actions_variable.gcs_transit_bucket`: Sets `GCS_TRANSIT_BUCKET` to
+   - `github_actions_variable.gcs_transit_bucket`: Sets `CODEMENDER_GCS_TRANSIT_BUCKET` to
      `var.gcs_transit_bucket_name` in each repository in
      `local.short_repo_names` when `var.execution_mode == "cloud_run"`.
-   - `github_actions_variable.cloud_run_job_name`: Sets `CLOUD_RUN_JOB_NAME` to
+   - `github_actions_variable.cloud_run_job_name`: Sets `CODEMENDER_CLOUD_RUN_JOB_NAME` to
      `var.cloud_run_job_name` in each repository in `local.short_repo_names`
      when `var.execution_mode == "cloud_run"` and `var.cloud_run_job_name != ""`.
-   - `github_actions_variable.gcp_region`: Sets `GCP_REGION` to `var.gcp_region`
+   - `github_actions_variable.gcp_region`: Sets `CODEMENDER_GCP_REGION` to `var.gcp_region`
      in each repository in `local.short_repo_names` when
      `var.execution_mode == "cloud_run"` and `var.gcp_region != ""` and
      `var.gcp_region != "global"`.

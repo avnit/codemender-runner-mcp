@@ -37,16 +37,23 @@ The resulting distribution repository serves a **dual purpose**:
    scan workflow at `.github/workflows/cm-merge-scan.yml` alongside
    `.github/workflows/build_runner_image.yml`, so the distribution repository
    functions out-of-the-box as a working reference implementation.
-1. **Customer Propagation Kit:** When the maintainer populates the distribution
-   repository with `--include-distribute`, `scripts/distribute.sh` is included
-   in the distribution repository alongside the root GCP Workload Identity
-   Federation (WIF) Terraform configuration (`terraform/` and
-   `terraform/modules/wif/`) and customer-focused documentation (`README.md`,
-   `docs/github_actions_setup.md`, `docs/calling_cm_runner.md`). Customers can
-   then run `./scripts/distribute.sh --target /path/to/repo` from the
-   distribution repository (where `--include-distribute` is off by default) to
-   set up additional repositories without copying `scripts/distribute.sh` into
-   those repositories.
+1. **Live Example Repository (`--include-top-level`):** When the maintainer
+   populates the standalone distribution repository with `--include-top-level`,
+   `LICENSE`, `.gitignore`, and `dist/README.md` (mapped to `README.md`) are
+   placed at the repository root alongside `.github/actions/codemender/`,
+   `.github/workflows/cm-merge-scan.yml`,
+   `.github/workflows/build_runner_image.yml`, `.github/codemender-runner/`, and
+   the root GCP Workload Identity Federation (WIF) Terraform configuration
+   (`.github/terraform/` and `.github/terraform/modules/wif/`), so the
+   distribution repository functions out-of-the-box as a self-contained working
+   reference implementation with zero extra top-level directories.
+1. **Default `.github/`-Only Sync:** When `--include-top-level` is omitted (the
+   default), `scripts/distribute.sh` stages only `.github/`, allowing a target
+   repository's existing root `README.md`, `LICENSE`, and `.gitignore` to remain
+   untouched while syncing `.github/`. `scripts/distribute.sh` itself is never
+   copied into `--target`; `README.md` in the distribution repository includes
+   step-by-step instructions for manually copying `.github/actions/codemender/`
+   and `.github/workflows/cm-merge-scan.yml` into additional repositories.
 
 This specification is governed by and references:
 
@@ -76,11 +83,11 @@ following command-line flags:
   repository.
 - `--source-ref REF`: Optional Git reference in the source repository to package
   from (default: `HEAD`).
-- `--include-distribute`: Optional flag (**off by default**) controlling whether
-  `scripts/distribute.sh` itself is copied into `--target` at
-  `scripts/distribute.sh` (`chmod +x`). When omitted (and not already tracked on
-  the target repository's `HEAD`), `scripts/distribute.sh` MUST NOT be copied
-  into `--target`.
+- `--include-top-level`: Optional flag (**off by default**) controlling whether
+  the top-level files (`LICENSE`, `.gitignore`, and `dist/README.md` mapped to
+  `README.md`) are staged at the root of `--target` in addition to `.github/`.
+  When omitted (and not already synced in the target repository's previous
+  `Codemender-Source-Commit`), only `.github/` is staged.
 - `--branch NAME`: Optional branch name that the script MUST create or switch to
   in the target repository before applying and committing the update.
 - `--dry-run`: Optional flag instructing the script that it MUST materialize the
@@ -166,118 +173,98 @@ database using `git archive "$SOURCE_REF"` into a temporary staging directory
 
 ______________________________________________________________________
 
-### REQ-0003: Dual-Purpose Target Layout & File Filtering {#req-0003}
+### REQ-0003: Target Layout & File Filtering {#req-0003}
 
 - **CUJ UUID:** cuj-dist-layout-mapping
 
 When building the staged distribution tree, `scripts/distribute.sh` MUST
-transform the archive into the target repository layout so that the target
-repository both operates as a live GitHub Actions example repository and
-provides all assets needed to set up the workflow in additional customer
-repositories:
+transform the archive into the target repository layout:
 
-1. **Root & Base Files:**
-   - Copy `LICENSE` and `.gitignore` to the target root.
-   - Map `dist/README.md` (when running from the internal monorepo) or
-     `README.md` (when running from an already-distributed repository) to
-     `README.md` at the target root.
-   - Exclude `scripts/distribute.sh` by default; include `scripts/distribute.sh`
-     (`chmod +x`) at `scripts/distribute.sh` only when `--include-distribute` is
-     set (or when `scripts/distribute.sh` is already tracked at `HEAD` in
-     `--target`).
-1. **Live GitHub Actions Configuration (`.github/`):**
-   - Map `github-actions/actions/codemender/` (or `.github/actions/codemender/`
-     when running from a distributed repository) to
-     `.github/actions/codemender/` (including `action.yml`, `requirements.txt`,
-     `src/`, and `tests/`).
-   - Map `github-actions/workflows/*.yml` (or `.github/workflows/*.yml` when
-     running from a distributed repository; currently `cm-merge-scan.yml`, plus
-     any additional workflows added under `github-actions/workflows/`) to
-     `.github/workflows/`.
+1. **Optional Top-Level Files (`--include-top-level`):**
+   - Only when `--include-top-level` is passed (or when the target repository's
+     previous `Codemender-Source-Commit` already synced top-level files):
+     - Copy `LICENSE` and `.gitignore` to the target root.
+     - Map `dist/README.md` to `README.md` at the target root.
+   - Never copy `scripts/distribute.sh` or any `docs/` directory into
+     `--target`.
+1. **Live GitHub Actions Configuration (`.github/actions/` & `.github/workflows/`):**
+   - Map `github-actions/actions/codemender/` to `.github/actions/codemender/`
+     (including `action.yml`, which normalizes `ghcr.io/` repository names to
+     lowercase and passes the resolved image via `steps.pull-image.outputs.image`
+     to `CODEMENDER_RUNNER_IMAGE`, `requirements.txt`, `src/`, and `tests/`).
+   - Map `github-actions/workflows/*.yml` (currently `cm-merge-scan.yml`, which
+     defaults `runner_image` to
+     `${{ vars.CODEMENDER_RUNNER_IMAGE || format('ghcr.io/{0}/codemender-runner:latest', github.repository_owner) }}`
+     and passes `vars.CODEMENDER_GCP_PROJECT_ID`,
+     `secrets.CODEMENDER_WORKLOAD_IDENTITY_PROVIDER`, and
+     `secrets.CODEMENDER_SERVICE_ACCOUNT`, plus any additional workflows added
+     under `github-actions/workflows/`) to `.github/workflows/`.
    - Copy `.github/workflows/build_runner_image.yml` to
-     `.github/workflows/build_runner_image.yml` (with the
-     `Verify Image Contract` step updated to assert `CMD ["version"]` rather
-     than `CMD ["legacy"]`).
+     `.github/workflows/build_runner_image.yml` (with the build context updated
+     to `.github/codemender-runner`, the `Verify Image Contract` step updated to
+     assert `CMD ["version"]` rather than `CMD ["legacy"]`, and the `Push Runner Image`
+     step honoring `vars.CODEMENDER_RUNNER_IMAGE` while publishing lowercase
+     `ghcr.io/${OWNER,,}/codemender-runner:latest` and `:${SHA}`).
    - Explicitly exclude `.github/workflows/codemender_parallel.yml`.
-1. **Stripped `codemender-runner/` Package (New `cm-runner` Pipeline Only):**
-   - Include the `codemender-runner/` package files required to build, run, and
+1. **Stripped `codemender-runner/` Package (`.github/codemender-runner/`):**
+   - Map the `codemender-runner/` package files required to build, run, and
      unit-test the `cm-runner` CLI (`cli/`, including `version`, `init`,
-     `find-diff`, and additional subcommands such as `fix` as they are added to
-     `cli/commands/`):
-     - `codemender-runner/Dockerfile` (with the legacy `main.py` symlink removed
-       and default `CMD ["version"]`), `codemender-runner/.dockerignore`, and
-       `codemender-runner/requirements.txt`
-     - `codemender-runner/__main__.py` (dispatching directly to `cli.__main__`)
-       and `codemender-runner/bin/cm-runner`
-     - `codemender-runner/cli/` (all modules and subcommands under `cli/` and
-       `cli/commands/`)
-     - `codemender-runner/codemender/__init__.py` and
-       `codemender-runner/codemender/cm.py`
-     - `codemender-runner/config.py`
-     - `codemender-runner/vcs/__init__.py` and `codemender-runner/vcs/git.py`
-       (with legacy `utils` imports deferred inside legacy-only functions)
-     - Unit tests for the included modules:
-       `codemender-runner/tests/__init__.py`, `tests/test_cli*.py`,
-       `tests/test_codemender_cm.py`, `tests/test_vcs_git.py`,
-       `tests/test_config.py`, and `tests/testdata/` (with legacy-only test
-       cases in `test_cli.py` and `test_vcs_git.py` guarded via
-       `@unittest.skipUnless` when `main.py` or `utils.py` is absent and using
-       inline `_write_fake_cm` stubs instead of `tests/cm`)
+     `find-diff`, and `fix`) into `.github/codemender-runner/`:
+     - `Dockerfile` (with the legacy `main.py` symlink removed and default
+       `CMD ["version"]`), `.dockerignore`, and `requirements.txt`
+     - `__main__.py` (dispatching directly to `cli.__main__`) and `bin/cm-runner`
+     - `cli/` (all modules and subcommands under `cli/` and `cli/commands/`)
+     - `codemender/__init__.py` and `codemender/cm.py`
+     - `config.py`
+     - `vcs/__init__.py` and `vcs/git.py` (with legacy `utils` imports deferred
+       inside legacy-only functions)
+     - Unit tests for the included modules under `.github/codemender-runner/tests/`:
+       `tests/__init__.py`, `tests/test_cli*.py`, `tests/test_codemender_cm.py`,
+       `tests/test_vcs_git.py`, `tests/test_config.py`, and `tests/testdata/`
    - **Explicitly exclude all legacy pipeline files:**
-     - `codemender-runner/main.py`, `codemender-runner/runners/`,
-       `codemender-runner/storage.py`, `codemender-runner/utils.py`,
-       `codemender-runner/codemender/db.py`, `codemender-runner/vcs/github.py`,
-       `codemender-runner/README.md`, and all legacy test files
+     - `main.py`, `runners/`, `storage.py`, `utils.py`, `codemender/db.py`,
+       `vcs/github.py`, `codemender-runner/README.md`, and all legacy test files
        (`test_runners_*.py`, `test_orchestrator.py`,
        `test_pr_review_suggestions.py`, `test_storage.py`, `test_utils.py`,
        `test_vcs_github.py`, `test_codemender_db.py`, `test_command_builder.py`,
        `e2e_test_local.py`, `dummy_cm.py`, `tests/cm`).
-1. **GCP Workload Identity Federation Terraform Configuration (`terraform/` &
-   `terraform/modules/wif/`):**
+1. **GCP Workload Identity Federation Terraform Configuration (`.github/terraform/` &
+   `.github/terraform/modules/wif/`):**
    - Copy the root `terraform/` files (`main.tf`, `variables.tf`, `outputs.tf`,
      `provider.tf`, `terraform.tfvars.example`, `.terraform.lock.hcl`, and
-     `tests/root_test.tftest.hcl`) and `terraform/modules/wif/` to `terraform/`.
+     `tests/root_test.tftest.hcl`) and `terraform/modules/wif/` to
+     `.github/terraform/` (and `.github/terraform/modules/wif/`).
    - Explicitly exclude/strip `terraform/modules/gcp/`, `terraform/gcp.tf`,
      `terraform/gcp_override.tf`, `terraform/tests/root_gcp_test.tftest.hcl`,
-     `workflows/gcp_parallel_workflow.yaml`, and `cloudbuild.yaml` until Cloud
-     Run support is ready to be added to `scripts/distribute.sh` in a future
-     commit, ensuring `terraform init`, `terraform validate`, and
-     `terraform test` succeed directly in `terraform/` inside the distributed
-     repository with zero dangling local, module, or output references.
-1. **Customer Documentation (`docs/`):**
-   - Map `docs/guides/calling_cm_runner.md` (or `docs/calling_cm_runner.md` when
-     running from a distributed repository) to `docs/calling_cm_runner.md` and
-     rewrite or strip internal relative links to `../adr/` so no broken relative
-     links remain.
-   - Map `github-actions/README.md` (or `docs/github_actions_setup.md` when
-     running from a distributed repository) to `docs/github_actions_setup.md`
-     and rewrite `docs/guides/calling_cm_runner.md` references to
-     `docs/calling_cm_runner.md`.
-   - Exclude all internal SDD specifications (`docs/openspec/`), ADRs
-     (`docs/adr/`), internal architecture docs (`docs/architecture/`), roadmap
-     notes (`docs/future_work.md`), and legacy guides
-     (`docs/guides/github_actions_guide.md`, `docs/guides/local_run.md`,
-     `docs/guides/production_run.md`,
-     `docs/guides/terraform_deployment_guide.md`,
-     `docs/guides/configuration_reference.md`).
+     `workflows/gcp_parallel_workflow.yaml`, `cloudbuild.yaml`, and all `docs/`
+     files (`docs/openspec/`, `docs/adr/`, `docs/architecture/`, `docs/guides/`)
+     until Cloud Run support is ready to be added to `scripts/distribute.sh` in
+     a future commit, ensuring `terraform init`, `terraform validate`, and
+     `terraform test` succeed directly in `.github/terraform/` inside the
+     distributed repository with zero dangling local, module, or output
+     references.
 
-#### Scenario: Distribution Produces a Self-Contained Repo With Zero Legacy Files
+#### Scenario: Distribution With `--include-top-level` Produces a Self-Contained Repo With Zero Legacy Files
 
 - **GIVEN** an initialized target Git repository `/tmp/cm-distro`
-- **WHEN** `./scripts/distribute.sh --target /tmp/cm-distro` completes
-- **THEN** `/tmp/cm-distro` contains `.github/actions/codemender/action.yml`,
+- **WHEN**
+  `./scripts/distribute.sh --target /tmp/cm-distro --include-top-level`
+  completes
+- **THEN** `/tmp/cm-distro` contains only `LICENSE`, `.gitignore`, `README.md`,
+  and `.github/` at the repository root (with `.github/actions/codemender/`,
   `.github/workflows/cm-merge-scan.yml`,
-  `.github/workflows/build_runner_image.yml`, `terraform/main.tf`,
-  `terraform/terraform.tfvars.example`, `terraform/tests/root_test.tftest.hcl`,
-  `terraform/modules/wif/`, `README.md`, `docs/calling_cm_runner.md`, and
-  `docs/github_actions_setup.md`
-- **AND** `/tmp/cm-distro` contains no files under `codemender-runner/runners/`,
-  `docs/openspec/`, `docs/adr/`, or `terraform/modules/gcp/`, nor
-  `terraform/gcp.tf`, `terraform/gcp_override.tf`,
-  `terraform/tests/root_gcp_test.tftest.hcl`, `codemender-runner/main.py`,
-  `codemender-runner/utils.py`, or `scripts/distribute.sh`
+  `.github/workflows/build_runner_image.yml`, `.github/codemender-runner/`,
+  `.github/terraform/main.tf`, `.github/terraform/terraform.tfvars.example`,
+  `.github/terraform/tests/root_test.tftest.hcl`, and
+  `.github/terraform/modules/wif/`)
+- **AND** `/tmp/cm-distro` contains no `docs/` directory, no `distribute.sh`
+  script, and no files under `.github/codemender-runner/runners/` or
+  `.github/terraform/modules/gcp/`, nor `.github/terraform/gcp.tf`,
+  `.github/terraform/gcp_override.tf`,
+  `.github/terraform/tests/root_gcp_test.tftest.hcl`,
+  `.github/codemender-runner/main.py`, or `.github/codemender-runner/utils.py`
 - **AND** running
-  `python3 -m unittest discover -s codemender-runner/tests -t codemender-runner`
+  `python3 -m unittest discover -s .github/codemender-runner/tests -t .github/codemender-runner`
   and `python3 -m unittest discover -s .github/actions/codemender/tests` inside
   `/tmp/cm-distro` both pass with exit code `0`.
 
@@ -374,8 +361,8 @@ commit history:
 - **WHEN** source commit `C2` updates
   `codemender-runner/cli/commands/find_diff.py` and
   `./scripts/distribute.sh --target /tmp/cm-distro --source-ref C2` is executed
-- **THEN** `codemender-runner/cli/commands/find_diff.py` is updated to the `C2`
-  version, `CODEOWNERS` and the customized `runner_image:` line in
+- **THEN** `.github/codemender-runner/cli/commands/find_diff.py` is updated to
+  the `C2` version, `CODEOWNERS` and the customized `runner_image:` line in
   `.github/workflows/cm-merge-scan.yml` remain intact, and the new commit on
   `/tmp/cm-distro` records `Codemender-Source-Commit: <C2>`.
 
@@ -403,93 +390,108 @@ commit history:
 
 ______________________________________________________________________
 
-### REQ-0005: Off-by-Default Distribution Script Self-Copy (`--include-distribute`) & Downstream Repo Setup {#req-0005}
+### REQ-0005: Off-by-Default Top-Level File Staging (`--include-top-level`) {#req-0005}
 
-- **CUJ UUID:** cuj-dist-include-distribute-flag
+- **CUJ UUID:** cuj-dist-include-top-level-flag
 
-`scripts/distribute.sh` MUST serve as the single tool for both maintainer
-distribution (from `cloud-gtm/codemender-runner` into the customer distribution
-repository) and downstream customer repository setup (from the distribution
-repository into additional customer repositories), governed by the
-`--include-distribute` flag:
+`scripts/distribute.sh` MUST control top-level repository file staging
+(`LICENSE`, `.gitignore`, `README.md`) via the off-by-default
+`--include-top-level` flag:
 
-1. **Off by Default:**
-   - When `--include-distribute` is NOT passed (and `scripts/distribute.sh` is
-     not already tracked on the target repository's `HEAD`),
-     `scripts/distribute.sh` MUST NOT copy `scripts/distribute.sh` into
-     `--target`.
-1. **Explicit Self-Copy (`--include-distribute`):**
-   - When `--include-distribute` IS passed (or `scripts/distribute.sh` is
-     already tracked on the target repository's `HEAD` from a prior
-     `--include-distribute` sync), `scripts/distribute.sh` MUST include
-     `scripts/distribute.sh` (`chmod +x`) in both `$base_tree` and `$new_tree`
-     so the distribution repository receives and maintains an up-to-date copy of
-     `scripts/distribute.sh`.
-1. **Downstream Execution from Distributed Repository:**
-   - When `scripts/distribute.sh` is executed from inside a distributed
-     repository (where files already reside at `.github/actions/codemender/`,
-     `.github/workflows/`, `README.md`, and `docs/`) without
-     `--include-distribute`, it MUST stage and commit those assets into
-     `--target` and MUST NOT copy `scripts/distribute.sh` into `--target`.
+1. **Off by Default (`.github/` Only):**
+   - When `--include-top-level` is NOT passed (and the target repository's
+     previous `Codemender-Source-Commit` did not sync top-level `README.md` from
+     `dist/README.md`), `scripts/distribute.sh` MUST stage ONLY `.github/` and
+     MUST NOT create, modify, or overwrite `LICENSE`, `.gitignore`, or
+     `README.md` at the root of `--target`.
+1. **Explicit Top-Level Staging (`--include-top-level`):**
+   - When `--include-top-level` IS passed (or the target repository's previous
+     `Codemender-Source-Commit` already synced top-level `README.md` from
+     `dist/README.md`), `scripts/distribute.sh` MUST include `LICENSE`,
+     `.gitignore`, and `dist/README.md` (mapped to `README.md`) in both
+     `$base_tree` and `$new_tree`.
+1. **No Self-Copy of `scripts/distribute.sh`:**
+   - `scripts/distribute.sh` MUST NOT copy itself into `--target` regardless of
+     whether `--include-top-level` is passed.
 
-#### Scenario: Maintainer Syncs With `--include-distribute` and Customer Sets Up Downstream Repo Without Copying `distribute.sh`
+#### Scenario: Default Sync Stages Only `.github/` While `--include-top-level` Stages Top-Level Files
 
-- **GIVEN** the maintainer runs
-  `./scripts/distribute.sh --target /tmp/cm-distro --include-distribute` to
-  populate the customer distribution repository `/tmp/cm-distro`
-- **WHEN** a customer inside `/tmp/cm-distro` runs
-  `./scripts/distribute.sh --target /tmp/customer-app` (without
-  `--include-distribute`)
-- **THEN** `/tmp/cm-distro/scripts/distribute.sh` exists and is executable
-- **AND** `/tmp/customer-app` receives `.github/actions/codemender/action.yml`,
-  `.github/workflows/cm-merge-scan.yml`, and the distributed assets
-- **AND** `/tmp/customer-app/scripts/distribute.sh` does NOT exist.
+- **GIVEN** `/tmp/existing-app` has its own `README.md` (`# My Existing App`),
+  and `/tmp/cm-distro` is an empty Git repository for the standalone
+  distribution
+- **WHEN** `./scripts/distribute.sh --target /tmp/existing-app` runs without
+  `--include-top-level` and
+  `./scripts/distribute.sh --target /tmp/cm-distro --include-top-level` runs
+  with `--include-top-level`
+- **THEN** `/tmp/existing-app/README.md` remains `# My Existing App` and
+  `/tmp/existing-app/.github/` is populated with `actions/codemender/`,
+  `workflows/`, `codemender-runner/`, and `terraform/` (including
+  `terraform/modules/wif/`)
+- **AND** `/tmp/cm-distro` receives `LICENSE`, `.gitignore`, `README.md` (from
+  `dist/README.md`), and `.github/`
+- **AND** neither repository contains `distribute.sh`.
 
-#### Scenario: Repeat Maintainer Sync on a Repo Tracking `scripts/distribute.sh` Preserves and Updates It
+#### Scenario: Repeat Sync on a Repo Initialized With `--include-top-level` Preserves and Updates Top-Level Files
 
-- **GIVEN** `/tmp/cm-distro` was initialized with `--include-distribute` at
-  commit `C1` so `scripts/distribute.sh` is tracked in `/tmp/cm-distro`
+- **GIVEN** `/tmp/cm-distro` was initialized with `--include-top-level` at
+  commit `C1`
 - **WHEN** the maintainer runs
   `./scripts/distribute.sh --target /tmp/cm-distro --source-ref C2`
-- **THEN** `scripts/distribute.sh` in `/tmp/cm-distro` is preserved and updated
-  to the `C2` version rather than deleted.
+- **THEN** `README.md`, `LICENSE`, and `.gitignore` in `/tmp/cm-distro` are
+  preserved and updated to the `C2` version rather than deleted.
 
 ______________________________________________________________________
 
-### REQ-0006: Customer-Facing Documentation Suite (`dist/README.md` & `docs/`) {#req-0006}
+### REQ-0006: Customer-Facing Root Documentation (`dist/README.md`) {#req-0006}
 
 - **CUJ UUID:** cuj-dist-customer-docs
 
-The source repository MUST maintain a customer-facing root documentation
-template at `dist/README.md` (mapped to `README.md` in the distribution
-repository) that documents:
+The source repository MUST maintain a comprehensive customer-facing root
+documentation file at `dist/README.md` (mapped to `README.md` in the
+distribution repository when `--include-top-level` is passed) that documents:
 
-1. **Repository Overview & Dual Role:** How the distribution repository works
-   immediately as a live example repository (`.github/actions/codemender/` and
-   `.github/workflows/cm-merge-scan.yml`) and as a source for setting up
-   additional repositories.
-1. **Step 1 — Building & Publishing the `cm-runner` Image:** How
-   `.github/workflows/build_runner_image.yml` (or
-   `docker build codemender-runner`) builds and publishes the `cm-runner`
-   container image.
-1. **Step 2 — Setting Up GCP Workload Identity Federation (WIF):** How to use
-   `terraform/` (`cd terraform && cp terraform.tfvars.example terraform.tfvars && terraform init && terraform apply`)
-   so `cm-runner` can authenticate to Google Cloud.
-1. **Step 3 — Setting Up Additional Repositories:** How to run
-   `./scripts/distribute.sh --target /path/to/repo` from the distribution
-   repository to set up another repository without copying the distribution
-   script itself.
-1. **Documentation Links:** Relative links to `docs/github_actions_setup.md` and
-   `docs/calling_cm_runner.md` that resolve validly inside the distribution
-   repository.
+1. **Repository Overview & Layout:** A summary of what the repository is and a
+   directory tree illustrating `LICENSE`, `.gitignore`, `README.md`, and
+   `.github/{actions/codemender,workflows,codemender-runner,terraform}`
+   (including `.github/terraform/modules/wif`).
+1. **Step-by-Step Setup & Usage Instructions:**
+   - **Step 1 — Provisioning GCP Workload Identity Federation (Terraform):** How
+     to use `.github/terraform/` (`cd .github/terraform && cp terraform.tfvars.example terraform.tfvars && terraform init && terraform apply`)
+     so GitHub Actions can authenticate to Google Cloud.
+   - **Step 2 — Configuring GitHub Actions Secrets & Variables:** Required and
+     optional repository secrets and variables
+     (`CODEMENDER_WORKLOAD_IDENTITY_PROVIDER`, `CODEMENDER_SERVICE_ACCOUNT`,
+     `GH_APP_ID`, `CODEMENDER_GCP_PROJECT_ID`, `CODEMENDER_GCP_REGION`, and
+     optional `CODEMENDER_RUNNER_IMAGE` to override the default
+     `ghcr.io/<owner>/codemender-runner:latest` image or pin a `<commit-sha>`
+     tag).
+   - **Step 3 — Building & Publishing the `cm-runner` Image:** How
+     `.github/workflows/build_runner_image.yml` (or
+     `docker build .github/codemender-runner`) builds and publishes the
+     `cm-runner` container image (`ghcr.io/<owner>/codemender-runner:latest` and
+     `:<commit-sha>`), which `.github/workflows/cm-merge-scan.yml` uses
+     automatically out of the box without editing the workflow file.
+   - **Step 4 — Running CodeMender on Pull Requests & via CLI:** How
+     `.github/workflows/cm-merge-scan.yml` runs automatically on PRs and how to
+     invoke `cm-runner` (`find-diff`, `fix`) directly via CLI.
+1. **Setting Up CodeMender in a Separate Repository:** Step-by-step instructions
+   for manually onboarding another repository by copying
+   `.github/actions/codemender/` and `.github/workflows/cm-merge-scan.yml`,
+   optionally setting the `CODEMENDER_RUNNER_IMAGE` repository/organization
+   variable (if the image is hosted under a different owner/registry or pinned
+   to a commit SHA), adding the new repository to `github_repositories` in
+   `.github/terraform/terraform.tfvars`, and configuring its GitHub Actions
+   variables.
 
-#### Scenario: Relative Links in Distributed Documentation Resolve Validly
+#### Scenario: Relative Links in Distributed `README.md` Resolve Validly
 
 - **GIVEN** `/tmp/cm-distro` has been populated by
-  `./scripts/distribute.sh --target /tmp/cm-distro --include-distribute`
+  `./scripts/distribute.sh --target /tmp/cm-distro --include-top-level`
 - **WHEN** all relative Markdown links in `/tmp/cm-distro/README.md` are
   inspected
-- **THEN** every linked target (`docs/github_actions_setup.md`,
-  `docs/calling_cm_runner.md`, `.github/workflows/cm-merge-scan.yml`,
-  `.github/workflows/build_runner_image.yml`, `scripts/distribute.sh`,
-  `terraform/`) exists at its resolved path inside `/tmp/cm-distro`.
+- **THEN** every linked target (`LICENSE`, `.github/actions/codemender/`,
+  `.github/actions/codemender/action.yml`,
+  `.github/workflows/cm-merge-scan.yml`,
+  `.github/workflows/build_runner_image.yml`, `.github/codemender-runner/`,
+  `.github/terraform/`, `.github/terraform/terraform.tfvars.example`)
+  exists at its resolved path inside `/tmp/cm-distro`.

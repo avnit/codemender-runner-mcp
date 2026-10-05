@@ -78,7 +78,7 @@ variable "cloud_run_runtime_sa_emails" {
 variable "cloud_run_job_name" {
   type        = string
   default     = ""
-  description = "Optional Cloud Run Job name (e.g. runner_job_name from terraform/gcp) to configure as CLOUD_RUN_JOB_NAME repository variable when execution_mode is 'cloud_run'."
+  description = "Optional Cloud Run Job name (e.g. runner_job_name from terraform/gcp) to configure as CODEMENDER_CLOUD_RUN_JOB_NAME repository variable when execution_mode is 'cloud_run'."
 }
 
 # --- Workload Identity Federation (WIF) Scoping ---

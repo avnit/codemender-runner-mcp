@@ -15,12 +15,12 @@
 # Governing: docs/openspec/specs/wif/spec.md#req-0001, docs/openspec/specs/wif/spec.md#req-0005
 
 output "gcp_workload_identity_provider" {
-  description = "Full resource name of the Workload Identity Provider for GitHub Actions secret GCP_WORKLOAD_IDENTITY_PROVIDER."
+  description = "Full resource name of the Workload Identity Provider for GitHub Actions secret CODEMENDER_WORKLOAD_IDENTITY_PROVIDER."
   value       = module.wif.gcp_workload_identity_provider
 }
 
 output "gcp_service_account" {
-  description = "Service Account email for GitHub Actions secret GCP_SERVICE_ACCOUNT."
+  description = "Service Account email for GitHub Actions secret CODEMENDER_SERVICE_ACCOUNT."
   value       = module.wif.gcp_service_account
 }
 

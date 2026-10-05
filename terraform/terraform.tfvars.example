@@ -105,10 +105,6 @@ execution_mode = "local" # or "cloud_run"
 # Defines the GitHub identity perimeter allowed to authenticate through GCP WIF,
 # and specifies target repositories to configure.
 
-# GitHub organization name (e.g., "my-github-org") or personal account username.
-# Required if github_scope_type is "org" or "user".
-github_owner = "my-github-org"
-
 # Scoping model for WIF authentication:
 # - "org": WIF trusts the entire organization (assertion.repository_owner == github_owner).
 #          github_repositories lists repos to bootstrap (or empty [] to skip GitHub API calls).
@@ -118,6 +114,11 @@ github_owner = "my-github-org"
 #                   in github_repositories. At least one repository is required.
 github_scope_type = "org" # or "user", "repositories"
 
+
+# GitHub organization name (e.g., "my-github-org") or personal account username.
+# Required if github_scope_type is "org" or "user".
+github_owner = "my-github-org"
+
 # Target repositories list:
 # - Accepts either short names ("repo") or full repository names ("owner/repo").
 # - Both formats are automatically normalized by the module.
@@ -125,7 +126,8 @@ github_scope_type = "org" # or "user", "repositories"
 #   both the GCP WIF trust perimeter and target repos to bootstrap.
 # - When github_scope_type = "org" or "user", WIF trusts the entire org/user, and this list
 #   determines which repositories have GitHub secrets/variables/labels bootstrapped
-#   (or set to empty [] to skip all GitHub API operations).
+#   (if left empty, will need to manually configure secrets in the
+#   github UI).
 github_repositories = [
   # "my-repo",
   # "my-github-org/another-repo",
@@ -139,21 +141,14 @@ github_repositories = [
 # with required GitHub Actions Secrets (GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT),
 # Labels (codemender-scan), and Variables (GCS_TRANSIT_BUCKET, CLOUD_RUN_JOB_NAME in cloud_run mode).
 #
-# To manage these GitHub resources, Terraform supports 3 authentication methods:
+# To manage these GitHub resources, we support 2 authentication methods:
 #
 # 1. Ambient CLI / Environment (Default):
 #    Leave the variables below empty/null. The GitHub provider will automatically use:
 #    - `gh auth login` credentials from your local machine, or
 #    - GITHUB_TOKEN environment variable in CI pipelines.
 #
-# 2. GitHub App `app_auth` (Recommended for Organizations):
-#    Authenticates as a GitHub App installation with fine-grained repository permissions.
-#    Provide github_app_id, github_app_installation_id, and github_app_pem_file:
-github_app_id              = ""
-github_app_installation_id = ""
-github_app_pem_file        = "" # Path to .pem private key file or raw PEM file content
-
-# 3. Explicit Token:
+# 2. Explicit Token:
 #    Provide a GitHub Personal Access Token (classic with 'repo' scope or fine-grained PAT).
 #    Overrides ambient CLI credentials when specified.
-github_mgmt_token = null
+# github_mgmt_token = null

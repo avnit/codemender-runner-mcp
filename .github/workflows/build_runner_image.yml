@@ -77,8 +77,29 @@ jobs:
 
       - name: Push Runner Image
         if: github.event_name != 'pull_request'
+        env:
+          CUSTOM_IMAGE: ${{ vars.CODEMENDER_RUNNER_IMAGE }}
+          OWNER: ${{ github.repository_owner }}
+          SHA: ${{ github.sha }}
         run: |
-          docker tag codemender-runner:test ghcr.io/${{ github.repository_owner }}/codemender-runner:latest
-          docker tag codemender-runner:test ghcr.io/${{ github.repository_owner }}/codemender-runner:${{ github.sha }}
-          docker push ghcr.io/${{ github.repository_owner }}/codemender-runner:latest
-          docker push ghcr.io/${{ github.repository_owner }}/codemender-runner:${{ github.sha }}
+          DEFAULT_REPO="ghcr.io/${OWNER,,}/codemender-runner"
+          TARGET_IMAGE="${CUSTOM_IMAGE:-${DEFAULT_REPO}:latest}"
+          if [[ "${TARGET_IMAGE}" == ghcr.io/* ]]; then
+            repo_part="${TARGET_IMAGE%:*}"
+            tag_part="${TARGET_IMAGE##*:}"
+            if [[ "${repo_part}" == "${TARGET_IMAGE}" ]]; then
+              TARGET_IMAGE="${TARGET_IMAGE,,}:latest"
+            else
+              TARGET_IMAGE="${repo_part,,}:${tag_part}"
+            fi
+            docker tag codemender-runner:test "${TARGET_IMAGE}"
+            docker push "${TARGET_IMAGE}"
+          fi
+          if [[ "${TARGET_IMAGE}" != "${DEFAULT_REPO}:latest" ]]; then
+            docker tag codemender-runner:test "${DEFAULT_REPO}:latest"
+            docker push "${DEFAULT_REPO}:latest"
+          fi
+          if [[ "${TARGET_IMAGE}" != "${DEFAULT_REPO}:${SHA}" ]]; then
+            docker tag codemender-runner:test "${DEFAULT_REPO}:${SHA}"
+            docker push "${DEFAULT_REPO}:${SHA}"
+          fi

@@ -24,8 +24,6 @@ import shutil
 import subprocess
 from typing import Any, List, Optional, Sequence, Tuple
 
-from utils import retry_on_exception
-
 logger = logging.getLogger("codemender-orchestrator")
 
 
@@ -612,7 +610,6 @@ def parse_patch_to_suggestions(
   return hunks, blockers
 
 
-@retry_on_exception(max_tries=3, initial_delay=2, backoff_factor=2)
 def push_branch_to_remote(
     repo_dir: str,
     token: str,
@@ -620,12 +617,17 @@ def push_branch_to_remote(
     force: bool = False,
 ) -> None:
   """Pushes a local branch to origin with exponential backoff retries."""
-  push_cmd = ["git", "-c", get_git_auth_header(token), "push"]
-  if force:
-    push_cmd.append("-f")
-  push_cmd.extend(["origin", branch_name])
-  from utils import run_command
-  run_command(push_cmd, cwd=repo_dir, check=True)
+  from utils import retry_on_exception, run_command  # pylint: disable=g-import-not-at-top
+
+  @retry_on_exception(max_tries=3, initial_delay=2, backoff_factor=2)
+  def _push() -> None:
+    push_cmd = ["git", "-c", get_git_auth_header(token), "push"]
+    if force:
+      push_cmd.append("-f")
+    push_cmd.extend(["origin", branch_name])
+    run_command(push_cmd, cwd=repo_dir, check=True)
+
+  _push()
 
 
 # How long the working-tree helpers below wait for one Git call.

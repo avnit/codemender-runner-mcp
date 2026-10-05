@@ -46,14 +46,16 @@ jobs:
 
       - uses: ./.github/actions/codemender
         with:
-          # Required: a cm-runner image this repository can pull, pinned to a
-          # commit SHA tag. Replace with your own registry/image.
-          runner_image: <your-registry>/codemender-runner:<commit-sha>
+          # Defaults to the image published by build_runner_image.yml in this
+          # org/user's GHCR. Override by setting the CODEMENDER_RUNNER_IMAGE
+          # repository or organization variable (e.g. to pin a specific commit
+          # SHA tag or use Artifact Registry).
+          runner_image: ${{ vars.CODEMENDER_RUNNER_IMAGE || format('ghcr.io/{0}/codemender-runner:latest', github.repository_owner) }}
           # Required: Google Cloud Workload Identity Federation settings for the
-          # CodeMender API.
-          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
-          gcp_workload_identity_provider: ${{ vars.WIF_PROVIDER }}
-          gcp_service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          # CodeMender API (provisioned by .github/terraform/).
+          gcp_project_id: ${{ vars.CODEMENDER_GCP_PROJECT_ID }}
+          gcp_workload_identity_provider: ${{ secrets.CODEMENDER_WORKLOAD_IDENTITY_PROVIDER }}
+          gcp_service_account: ${{ secrets.CODEMENDER_SERVICE_ACCOUNT }}
           # log_level: debug
           # Defaults: run cm-runner under gVisor (needed for cm's sandbox),
           # pinned to a tested release. See README.md → "Inputs".

@@ -14,7 +14,8 @@ env/
 venv/
 ENV/
 build/
-dist/
+dist/*
+!dist/README.md
 *.egg-info/
 
 # CodeMender Local Workspace Output
@@ -46,3 +47,5 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+!terraform/gcp_override.tf
+!.github/terraform/gcp_override.tf

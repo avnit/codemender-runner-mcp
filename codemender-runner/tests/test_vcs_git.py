@@ -206,6 +206,15 @@ class TestVcsGit(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(artifacts_dir, ".cache")))
         self.assertFalse(os.path.exists(os.path.join(artifacts_dir, "node_modules")))
 
+  @unittest.skipUnless(
+      os.path.exists(
+          os.path.join(
+              os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+              "utils.py",
+          )
+      ),
+      "requires legacy utils.py",
+  )
   def test_filter_stageable_files(self):
     """Verify filter_stageable_files normalizes, deduplicates, and excludes metadata and ignored files."""
     with tempfile.TemporaryDirectory() as repo_dir:

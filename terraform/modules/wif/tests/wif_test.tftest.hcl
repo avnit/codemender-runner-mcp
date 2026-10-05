@@ -79,13 +79,18 @@ run "default_local_mode_wif_and_github_resources" {
   }
 
   assert {
-    condition     = length(github_actions_secret.wif_provider) == 2
-    error_message = "GCP_WORKLOAD_IDENTITY_PROVIDER secret must be created for both target repositories."
+    condition     = length(github_actions_secret.wif_provider) == 2 && github_actions_secret.wif_provider["repo-a"].secret_name == "CODEMENDER_WORKLOAD_IDENTITY_PROVIDER"
+    error_message = "CODEMENDER_WORKLOAD_IDENTITY_PROVIDER secret must be created for both target repositories."
   }
 
   assert {
-    condition     = length(github_actions_secret.runner_sa) == 2
-    error_message = "GCP_SERVICE_ACCOUNT secret must be created for both target repositories."
+    condition     = length(github_actions_secret.runner_sa) == 2 && github_actions_secret.runner_sa["repo-a"].secret_name == "CODEMENDER_SERVICE_ACCOUNT"
+    error_message = "CODEMENDER_SERVICE_ACCOUNT secret must be created for both target repositories."
+  }
+
+  assert {
+    condition     = length(github_actions_variable.gcp_project_id) == 2 && github_actions_variable.gcp_project_id["repo-a"].variable_name == "CODEMENDER_GCP_PROJECT_ID"
+    error_message = "CODEMENDER_GCP_PROJECT_ID variable must be created for both target repositories."
   }
 
   assert {
@@ -173,18 +178,18 @@ run "cloud_run_execution_mode_iam_and_github_variables" {
   }
 
   assert {
-    condition     = length(github_actions_variable.gcs_transit_bucket) == 2 && github_actions_variable.gcs_transit_bucket["repo-a"].value == "cm-transit-bucket"
-    error_message = "GCS_TRANSIT_BUCKET repository variable must be configured on both target repositories."
+    condition     = length(github_actions_variable.gcs_transit_bucket) == 2 && github_actions_variable.gcs_transit_bucket["repo-a"].variable_name == "CODEMENDER_GCS_TRANSIT_BUCKET" && github_actions_variable.gcs_transit_bucket["repo-a"].value == "cm-transit-bucket"
+    error_message = "CODEMENDER_GCS_TRANSIT_BUCKET repository variable must be configured on both target repositories."
   }
 
   assert {
-    condition     = length(github_actions_variable.cloud_run_job_name) == 2 && github_actions_variable.cloud_run_job_name["repo-a"].value == "codemender-runner"
-    error_message = "CLOUD_RUN_JOB_NAME repository variable must be configured on both target repositories."
+    condition     = length(github_actions_variable.cloud_run_job_name) == 2 && github_actions_variable.cloud_run_job_name["repo-a"].variable_name == "CODEMENDER_CLOUD_RUN_JOB_NAME" && github_actions_variable.cloud_run_job_name["repo-a"].value == "codemender-runner"
+    error_message = "CODEMENDER_CLOUD_RUN_JOB_NAME repository variable must be configured on both target repositories."
   }
 
   assert {
-    condition     = length(github_actions_variable.gcp_region) == 2 && github_actions_variable.gcp_region["repo-a"].value == "us-central1"
-    error_message = "GCP_REGION repository variable must be configured on both target repositories."
+    condition     = length(github_actions_variable.gcp_region) == 2 && github_actions_variable.gcp_region["repo-a"].variable_name == "CODEMENDER_GCP_REGION" && github_actions_variable.gcp_region["repo-a"].value == "us-central1"
+    error_message = "CODEMENDER_GCP_REGION repository variable must be configured on both target repositories."
   }
 }
 
