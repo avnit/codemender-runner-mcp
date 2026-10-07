@@ -38,6 +38,8 @@ to a caller-specified `--out` directory.
 
 This specification is governed by and references:
 
+- [CodeMender Find Modes (`cm find`, `--diff`, `--deep`)](https://docs.cloud.google.com/gemini-enterprise-agent-platform/agents/codemender/find-modes)
+  — Official Google Cloud documentation for `cm find` scanning modes and flags.
 - [Scaling CodeMender Scan Quality V2 (`go/codemender-rfc-30`)](https://docs.google.com/document/d/1_bB1A-dkDjaILxjohu7rKAndvOSWbR6dHcTghCS6NZ0/edit?tab=t.0#heading=h.rfwep4caowad)
   — Tier 0 heuristic non-production file pruning and Tier 1 impact-aware pull
   request delta scanning (`cm find --diff`).

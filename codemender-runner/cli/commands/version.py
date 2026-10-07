@@ -32,8 +32,8 @@ from codemender.cm import detect_cm
 # Recorded so that version drift is visible rather than mysterious. There is
 # precedent: cm 0.7.0 changed `cm report --format json` from PascalCase to
 # snake_case keys, which `codemender/cm.py` still carries a workaround for.
-# Observed working: cm 0.9.0 on 2026-09-24; cm 0.11.0 on 2026-09-30.
-CM_CONTRACT = "cm-0.11.x"
+# Observed working: cm 0.9.0 on 2026-09-24; cm 0.11.0 on 2026-09-30; cm 0.12.0 on 2026-10-07.
+CM_CONTRACT = "cm-0.12.x"
 
 
 def run(adapter: CmAdapter, emitter: EventEmitter) -> int:

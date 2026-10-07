@@ -112,7 +112,7 @@ IMAGE_URI="us-docker.pkg.dev/<GCP_PROJECT_ID>/<AR_REPO>/codemender-runner:${COMM
 
 # 1. Build the image from .github/codemender-runner
 docker build \
-    --build-arg CM_VERSION="0.11.0" \
+    --build-arg CM_VERSION="0.12.0" \
     -t "${IMAGE_URI}" \
     .github/codemender-runner
 

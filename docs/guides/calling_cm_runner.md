@@ -58,7 +58,7 @@ be added. There is no text mode; to read it by hand, pipe it through
 `python3 -m json.tool --json-lines` or `jq`.
 
 ```json
-{"ts": "2026-09-30T23:41:12Z", "event": "version", "orchestrator": "0.1.0", "cm": {"found": true, "version": "0.11.0", "path": "/usr/local/bin/cm"}, "contract": "cm-0.11.x"}
+{"ts": "2026-10-07T01:15:00Z", "event": "version", "orchestrator": "0.1.0", "cm": {"found": true, "version": "0.12.0", "path": "/usr/local/bin/cm"}, "contract": "cm-0.12.x"}
 ```
 
 `find-diff` and `fix` are the exceptions: stdout carries their result in its
@@ -159,9 +159,10 @@ terminal, `init` asks you for one; press Enter to skip. In CI it never asks.
 cm-runner find-diff [--repo PATH] [--base REF] [--out DIR]
 ```
 
-Scans the changes in a repository relative to a base Git reference and reports
-findings in OASIS SARIF v2.1.0 format. `cm-runner` automatically runs
-[`init`](#init) for `--repo` first (logging `init` checks to `stderr` only)
+Scans the changes in a repository relative to a base Git reference (see
+[CodeMender find modes](https://docs.cloud.google.com/gemini-enterprise-agent-platform/agents/codemender/find-modes#diff-scan))
+and reports findings in OASIS SARIF v2.1.0 format. `cm-runner` automatically
+runs [`init`](#init) for `--repo` first (logging `init` checks to `stderr` only)
 unless `--no-init` is passed.
 
 **Flags:**
