@@ -26,12 +26,12 @@ SARIF `stdout` output contract, and `--out` artifact contract for the
 
 `cm-runner find-diff` provides a streamlined CLI command built on CodeMender's
 native impact-aware differential scanner
-(`cm find <repo> -y --diff=<base> --diff-workers=16 --fail-on NONE`) followed by
-report extraction (`cm report --format sarif`, and `cm report --format md` when
-`--out` is specified). It relies on `cm`'s built-in defaults for diff filtering
-and impact resolution while configuring `--diff-workers=16` (the maximum
-supported by `cm`) for parallelization, leaves the `cm` sandbox intact, writes a
-single compact (non-pretty-printed)
+(`cm find <repo> -y --diff=<base> --diff-workers=<N> --fail-on NONE`) followed
+by report extraction (`cm report --format sarif`, and `cm report --format md`
+when `--out` is specified). It relies on `cm`'s built-in defaults for diff
+filtering and impact resolution while configuring `--diff-workers` (default
+`8`, configurable from `1` to `16`) for parallelization, leaves the `cm` sandbox
+intact, writes a single compact (non-pretty-printed)
 [OASIS SARIF v2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
 JSON document to `stdout`, and optionally writes `report.sarif` and `report.md`
 to a caller-specified `--out` directory.
@@ -67,6 +67,8 @@ repository settings written to `~/.codemender/config.yaml` by `cm-runner init`),
   `origin/main`) to diff against (default: `HEAD`).
 - `--out DIR`: Optional directory path where report artifacts (`report.sarif`
   and `report.md`) are written.
+- `--diff-workers N`: Optional number of concurrent workers for `cm find --diff`
+  (default: `8`, valid range: `1..16`).
 
 All user-supplied filesystem paths (`--repo` and `--out`) MUST be normalized via
 `Path(...).expanduser().resolve()` so user home directory prefixes (`~`),
@@ -77,7 +79,8 @@ relative segments (`..`), and symlinks are deterministically resolved.
 - **GIVEN** a valid Git repository in the current working directory
 - **WHEN** `cm-runner find-diff` is invoked with no optional flags
 - **THEN** the command resolves `--repo` to the current working directory,
-  targets `--base HEAD`, and leaves `--out` unset (`None`).
+  targets `--base HEAD`, leaves `--out` unset (`None`), and defaults
+  `--diff-workers` to `8`.
 
 #### Scenario: Tilde Expansion on Repository and Output Paths
 
@@ -108,6 +111,9 @@ target Git reference prior to invoking `cm find`:
    - If `--out` points to an existing regular file rather than a directory,
      `validate()` MUST log the reason to `stderr`, write nothing to `stdout`,
      and return exit code `2` (`exit_codes.USAGE`).
+   - If `--diff-workers` is not an integer between `1` and `16`, `validate()`
+     MUST log the reason to `stderr`, write nothing to `stdout`, and return exit
+     code `2` (`exit_codes.USAGE`).
 1. **Git Repository & Base Reference Pre-Flight Checks (Exit Code `3`):**
    - Before invoking `cm find --diff`, `find-diff` MUST verify that `--repo`
      resides inside a valid Git working tree (`vcs.git.is_git_repository`). If
@@ -137,6 +143,16 @@ target Git reference prior to invoking `cm find`:
 - **THEN** `FindDiffConfig.validate()` exits early before running Git or `cm`,
   writes a usage error to `stderr`, emits zero bytes on `stdout`, and exits with
   code `2`.
+
+#### Scenario: Rejecting Out-of-Range `--diff-workers`
+
+- **GIVEN** a caller supplies `--diff-workers 0` or `--diff-workers 17`
+- **WHEN** `cm-runner find-diff --diff-workers 17` is executed
+- **THEN** `FindDiffConfig.validate()` exits early before running Git or `cm`,
+  writes a usage error naming `--diff-workers` and the `1..16` range to
+  `stderr`, emits zero bytes on `stdout`, and exits with code `2`. A
+  non-integer value (e.g., `--diff-workers abc`) is rejected by the argument
+  parser, also with exit code `2` and nothing on `stdout`.
 
 #### Scenario: Non-Git Directory Target
 
@@ -174,11 +190,11 @@ findings to those relevant to the diff:
 
 1. **Step 1 — Differential Scan (`cm find --diff`):** Invoke `CmAdapter.run()`
    using `cm`'s built-in defaults for diff filtering, neighbor depth, and
-   sandbox isolation, with `--diff-workers=16`:
+   sandbox isolation, with `--diff-workers=<cfg.diff_workers>`:
    - Positional target `<repo_path>` and non-interactive confirmation flag `-y`.
    - `--diff=<base_ref>` (where `<base_ref>` defaults to `HEAD`).
-   - `--diff-workers=16` (`_DEFAULT_DIFF_WORKERS = 16`, the maximum worker
-     concurrency supported by `cm`).
+   - `--diff-workers=<cfg.diff_workers>` (`DEFAULT_DIFF_WORKERS = 8` unless the
+     caller passes `--diff-workers`; valid range `1..16`, as supported by `cm`).
    - `--fail-on NONE` so that `cm find --diff` does not exit with code `1` when
      vulnerabilities are discovered, allowing `cm-runner` to distinguish clean
      scan completion (exit `0`) from genuine execution errors (exit `3`).
@@ -200,10 +216,18 @@ findings to those relevant to the diff:
 - **GIVEN** `--repo /workspace` and `--base origin/main`
 - **WHEN** `cm-runner find-diff --repo /workspace --base origin/main` executes
 - **THEN** `CmAdapter.run()` is first called with
-  `["find", "/workspace", "-y", "--diff=origin/main", "--diff-workers=16", "--fail-on", "NONE"]`,
+  `["find", "/workspace", "-y", "--diff=origin/main", "--diff-workers=8", "--fail-on", "NONE"]`,
   `cwd="/workspace"`, and `timeout_sec=360.0`, and upon exit code `0` is next
   called with `["report", "--format", "sarif"]`, `cwd="/workspace"`, and
   `timeout_sec=60.0`.
+
+#### Scenario: Passing a Caller-Selected `--diff-workers` to `cm find --diff`
+
+- **GIVEN** `--repo /workspace`, `--base origin/main`, and `--diff-workers 16`
+- **WHEN** `cm-runner find-diff --repo /workspace --base origin/main --diff-workers 16`
+  executes
+- **THEN** `CmAdapter.run()` is first called with
+  `["find", "/workspace", "-y", "--diff=origin/main", "--diff-workers=16", "--fail-on", "NONE"]`.
 
 #### Scenario: Forwarding `cm` Progress Streams to `stderr` While Preserving `stdout` Purity
 
@@ -347,8 +371,8 @@ ______________________________________________________________________
   without execution errors, regardless of whether `0` or $N$ findings were
   discovered.
 - `2` (`exit_codes.USAGE`): Invalid CLI arguments (e.g., unknown flags,
-  non-directory `--repo`, empty `--base` reference, or `--out` pointing to an
-  existing regular file).
+  non-directory `--repo`, empty `--base` reference, `--diff-workers` outside
+  `1..16`, or `--out` pointing to an existing regular file).
 - `3` (`exit_codes.FAILED`): Any execution failure, including a missing or
   broken `cm` binary, non-Git `--repo` workspace, invalidly formatted or
   non-existent `--base` Git reference, non-zero exit from `cm find --diff` or

@@ -15,7 +15,7 @@
 """`cm-runner find-diff` -- impact-aware differential vulnerability scan.
 
 Runs CodeMender's differential scanner (`cm find <repo> -y --diff=<base>
---diff-workers=16 --fail-on NONE`) followed by report extraction (`cm report
+--diff-workers=<N> --fail-on NONE`) followed by report extraction (`cm report
 --format sarif`, and `cm report --format md` when `--out` is given) through
 `CmAdapter`.
 
@@ -46,8 +46,11 @@ logger = logging.getLogger(__name__)
 _FIND_DIFF_TIMEOUT_SEC = 360.0
 _CM_REPORT_TIMEOUT_SEC = 60.0
 
-# Default number of concurrent `cm find --diff` workers (1..16 supported by cm).
-_DEFAULT_DIFF_WORKERS = 16
+# Concurrent `cm find --diff` worker bounds and default (1..16 supported by cm;
+# cm's own built-in default is 4).
+MIN_DIFF_WORKERS = 1
+MAX_DIFF_WORKERS = 16
+DEFAULT_DIFF_WORKERS = 8
 
 
 @dataclasses.dataclass
@@ -59,11 +62,14 @@ class FindDiffConfig:
     base: Target Git reference to diff against (default: "HEAD").
     out: Optional directory path where `report.sarif` and `report.md` are
       written.
+    diff_workers: Number of concurrent `cm find --diff` workers (default: 8,
+      valid range: 1..16).
   """
 
   repo: Path
   base: str = "HEAD"
   out: Optional[Path] = None
+  diff_workers: int = DEFAULT_DIFF_WORKERS
 
   def __post_init__(self) -> None:
     if isinstance(self.base, str):
@@ -86,6 +92,18 @@ class FindDiffConfig:
       return exit_codes.USAGE
     if self.out is not None and self.out.exists() and not self.out.is_dir():
       logger.error("--out %s exists and is not a directory.", self.out)
+      return exit_codes.USAGE
+    if (
+        isinstance(self.diff_workers, bool)
+        or not isinstance(self.diff_workers, int)
+        or not (MIN_DIFF_WORKERS <= self.diff_workers <= MAX_DIFF_WORKERS)
+    ):
+      logger.error(
+          "--diff-workers must be an integer between %d and %d (got %r).",
+          MIN_DIFF_WORKERS,
+          MAX_DIFF_WORKERS,
+          self.diff_workers,
+      )
       return exit_codes.USAGE
 
     # Pre-flight checks: verify target directory is a Git working tree and base
@@ -110,6 +128,7 @@ def config_from_args(args: argparse.Namespace) -> FindDiffConfig:
   repo_arg = getattr(args, "repo", ".")
   base_arg = getattr(args, "base", "HEAD")
   out_arg = getattr(args, "out", None)
+  diff_workers_arg = getattr(args, "diff_workers", DEFAULT_DIFF_WORKERS)
   return FindDiffConfig(
       repo=Path(repo_arg).expanduser().resolve(),
       base=base_arg,
@@ -118,6 +137,7 @@ def config_from_args(args: argparse.Namespace) -> FindDiffConfig:
           if out_arg is not None
           else None
       ),
+      diff_workers=diff_workers_arg,
   )
 
 
@@ -149,7 +169,7 @@ def run(
           cfg.repo.as_posix(),
           "-y",
           f"--diff={cfg.base}",
-          f"--diff-workers={_DEFAULT_DIFF_WORKERS}",
+          f"--diff-workers={cfg.diff_workers}",
           "--fail-on",
           "NONE",
       ],

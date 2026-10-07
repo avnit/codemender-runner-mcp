@@ -54,14 +54,15 @@ exposes this native capability as a first-class subcommand of the generic
 ### Goals
 
 - Execute differential scanning via a two-step `CmAdapter` flow:
-  `cm find <repo> -y --diff=<base> --diff-workers=16 --fail-on NONE` followed by
-  `cm report --format sarif` (and `cm report --format md` when `--out DIR` is
-  specified).
-- Keep the CLI surface minimal (`--repo`, `--base`, `--out`), relying on `cm`'s
-  built-in defaults for diff relevance filtering, neighbor depth, and sandbox
-  isolation, configuring `--diff-workers=16` for maximum parallelization, and
-  relying on `~/.codemender/config.yaml` (populated by `cm-runner init`) for
-  model configuration.
+  `cm find <repo> -y --diff=<base> --diff-workers=<N> --fail-on NONE` followed
+  by `cm report --format sarif` (and `cm report --format md` when `--out DIR`
+  is specified).
+- Keep the CLI surface minimal (`--repo`, `--base`, `--out`, `--diff-workers`),
+  relying on `cm`'s built-in defaults for diff relevance filtering, neighbor
+  depth, and sandbox isolation, defaulting `--diff-workers` to `8` (callers may
+  choose `1` to `16`; see Decision 5), and relying on
+  `~/.codemender/config.yaml` (populated by `cm-runner init`) for model
+  configuration.
 - Emit a single, compact (non-pretty-printed)
   [OASIS SARIF v2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
   JSON document on `stdout`.
@@ -73,10 +74,10 @@ exposes this native capability as a first-class subcommand of the generic
 
 ### Non-Goals
 
-- Exposing `cm find --diff` tuning knobs (`--diff-depth`, `--diff-workers`,
+- Exposing the other `cm find --diff` tuning knobs (`--diff-depth`,
   `--diff-max-neighbors`, `--fail-on-truncation`, `--staged`, `--unrestricted`)
   until a concrete caller use case requires overriding `cm-runner`'s defaults
-  (YAGNI).
+  (YAGNI). `--diff-workers` is the exception (see Decision 5).
 - Executing vulnerability verification (`cm verify`) or patch synthesis
   (`cm fix`), which belong to the dedicated `cm-runner verify` and
   `cm-runner fix` subcommands.
@@ -88,10 +89,10 @@ exposes this native capability as a first-class subcommand of the generic
 ### Decision 1: Two-Step `cm find --diff` + `cm report --format sarif` Execution via `CmAdapter`
 
 - **Choice:** First invoke
-  `cm find <repo> -y --diff=<base> --diff-workers=16 --fail-on NONE` through
+  `cm find <repo> -y --diff=<base> --diff-workers=<N> --fail-on NONE` through
   `codemender.cm.CmAdapter` using `cm`'s built-in defaults (`1`-hop depth, `10`
-  max neighbors, sandbox intact) and `16` concurrent workers (the maximum
-  supported by `cm`) to scan the diff and persist findings into
+  max neighbors, sandbox intact) and `<N>` concurrent workers (default `8`, see
+  Decision 5) to scan the diff and persist findings into
   `~/.codemender/state.db`. After `cm find --diff` completes with exit code `0`,
   invoke `cm report --format sarif` via `CmAdapter` to retrieve the SARIF 2.1.0
   JSON document on `CmResult.stdout` (and when `--out DIR` is passed, invoke
@@ -154,6 +155,26 @@ exposes this native capability as a first-class subcommand of the generic
   to `360` seconds gives `cm` a 60-second grace window to cancel remote
   operations cleanly before `subprocess.run` terminates the child process.
 
+### Decision 5: Configurable `--diff-workers` (Default `8`, Range `1..16`)
+
+- **Choice:** Expose `--diff-workers N` on `cm-runner find-diff` with a default
+  of `8` (`DEFAULT_DIFF_WORKERS`), and reject values outside `1..16`
+  (`MIN_DIFF_WORKERS`..`MAX_DIFF_WORKERS`) in `FindDiffConfig.validate()` with
+  exit code `2` before running Git or `cm`. The GitHub Action exposes the same
+  setting as its `diff_workers` input.
+- **Alternatives Considered:**
+  - *Hardcode `16` (`cm`'s maximum):* Fastest on large diffs, but every scan
+    runs up to 16 concurrent sessions against the CodeMender backend, which
+    raises load and the chance of hitting project quotas, and callers cannot
+    lower it.
+  - *Omit the flag and use `cm`'s default (`4`):* Lowest load, but slower on
+    large diffs, and callers cannot raise it.
+- **Rationale:** Worker concurrency trades scan latency against backend load and
+  quota, which depend on the caller's project and repository, so callers
+  choose it. `8` sits between `cm`'s default and its maximum. Checking the
+  `1..16` range in `cm-runner` gives callers a clear usage error instead of
+  depending on how `cm` handles out-of-range values.
+
 ## Architecture
 
 ### Execution Flow
@@ -163,11 +184,11 @@ flowchart TD
     cli["cli/__main__.py
 (Verify cm binary, parse flags)"]
     validate["FindDiffConfig.validate()
-(Check --repo is dir, --base non-empty, --out not file)"]
+(Check --repo is dir, --base non-empty, --out not file, --diff-workers 1..16)"]
     gitCheck["vcs.git.is_git_repository(cfg.repo)
 & vcs.git.ref_exists(cfg.repo, cfg.base)"]
     cmFind["CmAdapter.run()
-cm find <repo> -y --diff=<base> --diff-workers=16 --fail-on NONE"]
+cm find <repo> -y --diff=<base> --diff-workers=<N> --fail-on NONE"]
     cmReportSarif["CmAdapter.run()
 cm report --format sarif
 & Parse SARIF 2.1.0 JSON"]
@@ -215,7 +236,7 @@ sequenceDiagram
     Cmd->>Cmd: cfg.validate()
     Cmd->>Git: is_git_repository(cfg.repo) & ref_exists(cfg.repo, cfg.base)
     Git-->>Cmd: True
-    Cmd->>Adapter: run(["find", repo, "-y", "--diff=origin/main", "--diff-workers=16", "--fail-on", "NONE"], cwd=repo, timeout_sec=360.0)
+    Cmd->>Adapter: run(["find", repo, "-y", "--diff=origin/main", "--diff-workers=8", "--fail-on", "NONE"], cwd=repo, timeout_sec=360.0)
     Adapter->>CM: spawn cm find --diff (env=None)
     CM-->>Adapter: exit 0 (persists findings to state.db)
     Adapter-->>Cmd: CmResult(exit_code=0, stdout=..., stderr=...)
@@ -239,7 +260,7 @@ sequenceDiagram
 
 | Module                                        | Responsibility                                                                                                                                                                            | Boundary Constraints (ADR-0002 & ADR-0003)                                                                                                                                          |
 | :-------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `codemender-runner/cli/__main__.py`           | Registers `find-diff` subparser (`--repo`, `--base`, `--out`), constructs `FindDiffConfig`, and dispatches `find_diff.run(cfg, adapter, emitter)`.                                        | Redirects unhandled `stdout` writes to `stderr` via `contextlib.redirect_stdout(sys.stderr)`.                                                                                       |
+| `codemender-runner/cli/__main__.py`           | Registers `find-diff` subparser (`--repo`, `--base`, `--out`, `--diff-workers`), constructs `FindDiffConfig`, and dispatches `find_diff.run(cfg, adapter, emitter)`.                      | Redirects unhandled `stdout` writes to `stderr` via `contextlib.redirect_stdout(sys.stderr)`.                                                                                       |
 | `codemender-runner/cli/commands/find_diff.py` | Implements `FindDiffConfig`, `run(cfg, adapter, emitter)`, `cm find --diff` + `cm report --format sarif`/`md` orchestration, `--out` artifact writers, and compact SARIF `stdout` output. | **MUST NOT** import `subprocess`, `utils`, `vcs.github`, `get_scrubbed_env`, or `SENSITIVE_ENV_VARS`. Calls `cm` exclusively via `CmAdapter` (`env=None`) and Git via `vcs/git.py`. |
 | `codemender-runner/vcs/git.py`                | Provides `is_git_repository(repo_dir: str) -> bool` and `ref_exists(repo_dir: str, ref: str) -> bool` to verify `--repo` and `--base` during pre-flight without writing to `stdout`.      | Isolates Git subprocess calls; routes any diagnostics to `stderr` / `logger`.                                                                                                       |
 
@@ -283,5 +304,6 @@ JSON line to `stdout`:
 
 ## Open Questions
 
-- None at this stage; all `cm find --diff` tuning parameters are deferred to
-  `cm`'s defaults until a concrete caller requirement emerges.
+- None at this stage; all `cm find --diff` tuning parameters other than
+  `--diff-workers` are deferred to `cm`'s defaults until a concrete caller
+  requirement emerges.

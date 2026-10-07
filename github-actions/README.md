@@ -170,6 +170,7 @@ update the same comment.
 | `log_level` | `info` | cm-runner log level. Logs appear in the job log. |
 | `container_runtime` | `runsc` | `runsc` runs cm-runner under gVisor, which `cm`'s sandbox needs (see [Security model](#security-model)). `runc` is an explicit opt-out: plain Docker, where `cm`'s sandbox can't start. |
 | `gvisor_release` | `20260921.0` | gVisor release installed when `container_runtime` is `runsc`: `yyyymmdd` or `yyyymmdd.N` ([versions](https://gvisor.dev/docs/user_guide/install/#versions)). Pinned so every run uses the same build. |
+| `diff_workers` | `'8'` | Number of concurrent workers for `cm-runner find-diff` (1..16). |
 | `artifact_retention_days` | `'3'` | Days to retain the uploaded `codemender-report-pr-<N>` artifact (`report.sarif` and `report.md`). |
 
 ### Required workflow permissions

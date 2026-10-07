@@ -20,8 +20,9 @@ Flow (M1, differential PR scan):
   2. Stage an isolated copy of `$GITHUB_WORKSPACE` (including `.git`) and
      shared `/root/.codemender` + `/out` directories under `$RUNNER_TEMP`.
   3. Run `cm-runner init --repo /workspace` followed by
-     `cm-runner find-diff --repo /workspace --base <base_sha> --out /out`
-     through the container launcher (under gVisor by default).
+     `cm-runner find-diff --repo /workspace --base <base_sha> --out /out
+     --diff-workers <N>` through the container launcher (under gVisor by
+     default).
   4. Parse the SARIF v2.1.0 output from `find-diff` and post or update one
      sticky Markdown comment on the PR summarizing the findings.
   5. Exit non-zero if `init`, `find-diff`, or comment posting failed.
@@ -30,6 +31,8 @@ Configuration comes from environment variables set by `action.yml`:
   CODEMENDER_RUNNER_IMAGE       cm-runner image (pinned SHA tag). Required.
   CODEMENDER_LOG_LEVEL          cm-runner --log-level. Default: info.
   CODEMENDER_CONTAINER_RUNTIME  `runsc` (gVisor, default) or `runc`.
+  CODEMENDER_DIFF_WORKERS       Number of concurrent diff workers (1..16).
+                                Default: 8.
   CODEMENDER_OUT_DIR            Host path where `report.sarif` and `report.md`
                                 are written for artifact upload. Optional.
   GOOGLE_CLOUD_PROJECT          GCP project ID for Vertex AI / CodeMender API.
@@ -65,6 +68,34 @@ _PR_EVENTS = ("pull_request",)
 
 # Credentials file name written by `google-github-actions/auth`.
 _GHA_CREDS_PATTERN = "gha-creds-*.json"
+
+# Default and bounds for `cm-runner find-diff --diff-workers`. These mirror
+# `cli/commands/find_diff.py` in cm-runner, which this action can't import
+# (it ships separately); cm-runner validates the value again.
+DEFAULT_DIFF_WORKERS = 8
+MIN_DIFF_WORKERS = 1
+MAX_DIFF_WORKERS = 16
+
+
+def _parse_diff_workers(env: Mapping[str, str]) -> int:
+  """Parses and validates `CODEMENDER_DIFF_WORKERS` (1..16, default 8)."""
+  raw = (env.get("CODEMENDER_DIFF_WORKERS") or "").strip()
+  if not raw:
+    return DEFAULT_DIFF_WORKERS
+  try:
+    workers = int(raw)
+  except ValueError as e:
+    raise ValueError(
+        f"Invalid CODEMENDER_DIFF_WORKERS {raw!r}; expected an integer between"
+        f" {MIN_DIFF_WORKERS} and {MAX_DIFF_WORKERS}."
+    ) from e
+  if not (MIN_DIFF_WORKERS <= workers <= MAX_DIFF_WORKERS):
+    raise ValueError(
+        f"Invalid CODEMENDER_DIFF_WORKERS {workers}; expected an integer"
+        f" between {MIN_DIFF_WORKERS} and {MAX_DIFF_WORKERS}."
+    )
+  return workers
+
 
 _SARIF_LEVEL_LABELS = {
     "error": "🔴 High / Critical",
@@ -367,23 +398,31 @@ def run_pr(
   init_result: Optional[RunResult] = None
   scan_result: Optional[RunResult] = None
   error: Optional[str] = None
-
   try:
-    init_result = launcher.run("init", ["--repo", CONTAINER_WORKSPACE_DIR])
-    if init_result.ok and _failed_init_check(init_result) is None:
-      scan_result = launcher.run(
-          "find-diff",
-          [
-              "--repo",
-              CONTAINER_WORKSPACE_DIR,
-              "--base",
-              base_sha,
-              "--out",
-              CONTAINER_OUT_DIR,
-          ],
-      )
-  except LauncherError as e:
+    diff_workers = _parse_diff_workers(env)
+  except ValueError as e:
     error = str(e)
+    diff_workers = DEFAULT_DIFF_WORKERS
+
+  if error is None:
+    try:
+      init_result = launcher.run("init", ["--repo", CONTAINER_WORKSPACE_DIR])
+      if init_result.ok and _failed_init_check(init_result) is None:
+        scan_result = launcher.run(
+            "find-diff",
+            [
+                "--repo",
+                CONTAINER_WORKSPACE_DIR,
+                "--base",
+                base_sha,
+                "--out",
+                CONTAINER_OUT_DIR,
+                "--diff-workers",
+                str(diff_workers),
+            ],
+        )
+    except LauncherError as e:
+      error = str(e)
 
   sarif_doc = (
       scan_result.events[0]
@@ -522,6 +561,7 @@ def main(env: Mapping[str, str] = os.environ) -> int:
   )
   try:
     try:
+      _parse_diff_workers(env)
       launcher = LocalDockerLauncher(
           image=env["CODEMENDER_RUNNER_IMAGE"],
           log_level=env.get("CODEMENDER_LOG_LEVEL", "info"),

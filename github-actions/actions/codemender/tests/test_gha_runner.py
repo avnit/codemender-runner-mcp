@@ -168,6 +168,8 @@ class TestRunPr(unittest.TestCase):
                     "1111222233334444",
                     "--out",
                     "/out",
+                    "--diff-workers",
+                    "8",
                 ],
             ),
         ],
@@ -177,6 +179,39 @@ class TestRunPr(unittest.TestCase):
     self.assertIn("✅ **No vulnerabilities found**", body)
     self.assertIn("`111122223333`", body)
     self.assertIn("https://github.com/o/r/actions/runs/123", body)
+
+  def test_custom_diff_workers_is_passed_to_find_diff(self, mock_post):
+    launcher = _launcher()
+    env = dict(_ENV, CODEMENDER_DIFF_WORKERS="12")
+
+    self.assertEqual(gha_runner.run_pr(_pr_event(), env, launcher), 0)
+
+    self.assertEqual(
+        launcher.run.call_args_list[1],
+        call(
+            "find-diff",
+            [
+                "--repo",
+                "/workspace",
+                "--base",
+                "1111222233334444",
+                "--out",
+                "/out",
+                "--diff-workers",
+                "12",
+            ],
+        ),
+    )
+
+  def test_invalid_diff_workers_in_run_pr_fails_and_posts_error(self, mock_post):
+    launcher = _launcher()
+    env = dict(_ENV, CODEMENDER_DIFF_WORKERS="0")
+
+    self.assertEqual(gha_runner.run_pr(_pr_event(), env, launcher), 1)
+    launcher.run.assert_not_called()
+    body = mock_post.call_args.args[3]
+    self.assertIn("❌ **CodeMender scan failed.**", body)
+    self.assertIn("Invalid CODEMENDER_DIFF_WORKERS", body)
 
   def test_findings_posts_summary_table_and_details(self, mock_post):
     launcher = _launcher(scan_result=RunResult(0, [_SARIF_WITH_FINDINGS]))
@@ -436,6 +471,13 @@ class TestMain(unittest.TestCase):
   def test_unknown_runtime_fails_before_running(self, mock_run_pr):
     self.assertEqual(
         gha_runner.main(self._env(CODEMENDER_CONTAINER_RUNTIME="kata")), 1
+    )
+    mock_run_pr.assert_not_called()
+
+  @patch.object(gha_runner, "run_pr")
+  def test_invalid_diff_workers_fails_before_running(self, mock_run_pr):
+    self.assertEqual(
+        gha_runner.main(self._env(CODEMENDER_DIFF_WORKERS="99")), 1
     )
     mock_run_pr.assert_not_called()
 

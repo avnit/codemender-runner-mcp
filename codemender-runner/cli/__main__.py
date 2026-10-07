@@ -177,6 +177,17 @@ def build_parser() -> argparse.ArgumentParser:
       metavar="DIR",
       help="directory to write report.sarif and report.md artifacts",
   )
+  find_diff_parser.add_argument(
+      "--diff-workers",
+      type=int,
+      default=find_diff.DEFAULT_DIFF_WORKERS,
+      metavar="N",
+      help=(
+          "number of concurrent cm diff workers, "
+          f"{find_diff.MIN_DIFF_WORKERS}..{find_diff.MAX_DIFF_WORKERS} "
+          f"(default: {find_diff.DEFAULT_DIFF_WORKERS})"
+      ),
+  )
   fix_parser = subparsers.add_parser(
       "fix",
       parents=[common],

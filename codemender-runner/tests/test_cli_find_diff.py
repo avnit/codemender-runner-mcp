@@ -268,6 +268,14 @@ class TestFindDiffConfigFromArgs(FindDiffTestBase):
     self.assertEqual(cfg.repo, Path(".").expanduser().resolve())
     self.assertEqual(cfg.base, "HEAD")
     self.assertIsNone(cfg.out)
+    self.assertEqual(cfg.diff_workers, 8)
+
+  def test_custom_diff_workers_is_preserved(self):
+    args = argparse.Namespace(
+        repo=self.repo, base="origin/main", out=None, diff_workers=16
+    )
+    cfg = find_diff.config_from_args(args)
+    self.assertEqual(cfg.diff_workers, 16)
 
   def test_strips_surrounding_whitespace_on_base(self):
     args = argparse.Namespace(repo=self.repo, base="  origin/main \n", out=None)
@@ -309,12 +317,32 @@ class TestFindDiffValidate(FindDiffTestBase):
   """Tests for `FindDiffConfig.validate()` (`REQ-0002`, Exit Code 2)."""
 
   def test_valid_config_returns_ok(self):
-    cfg = find_diff.FindDiffConfig(
-        repo=Path(self.repo),
-        base="origin/main",
-        out=Path(self.tmp) / "artifacts",
-    )
-    self.assertEqual(cfg.validate(), exit_codes.OK)
+    for workers in (1, 4, 8, 16):
+      with self.subTest(diff_workers=workers):
+        cfg = find_diff.FindDiffConfig(
+            repo=Path(self.repo),
+            base="origin/main",
+            out=Path(self.tmp) / "artifacts",
+            diff_workers=workers,
+        )
+        self.assertEqual(cfg.validate(), exit_codes.OK)
+
+  def test_invalid_diff_workers_exits_usage_with_empty_stdout(self):
+    for bad_workers in (0, -1, 17, 100, True, False, "8", None):
+      with self.subTest(diff_workers=bad_workers):
+        adapter = RecordingCmAdapter()
+        cfg = find_diff.FindDiffConfig(
+            repo=Path(self.repo),
+            base="HEAD",
+            diff_workers=bad_workers,  # type: ignore[arg-type]
+        )
+
+        rc, stdout, stderr = self.execute_find_diff(cfg, adapter)
+
+        self.assertEqual(rc, exit_codes.USAGE)
+        self.assertEqual(stdout, "")
+        self.assertIn("--diff-workers", stderr)
+        self.assertEqual(adapter.calls, [])
 
   def test_nonexistent_repo_exits_usage_with_empty_stdout(self):
     adapter = RecordingCmAdapter()
@@ -437,7 +465,7 @@ class TestFindDiffAdapterExecutionAndSarifOutput(FindDiffTestBase):
                     repo_path.as_posix(),
                     "-y",
                     "--diff=origin/main",
-                    "--diff-workers=16",
+                    "--diff-workers=8",
                     "--fail-on",
                     "NONE",
                 ],
@@ -475,6 +503,29 @@ class TestFindDiffAdapterExecutionAndSarifOutput(FindDiffTestBase):
     self.assertEqual(results[0]["ruleId"], "CWE-78")
     self.assertEqual(results[1]["ruleId"], "CWE-89")
 
+  def test_custom_diff_workers_passed_to_cm_find(self):
+    adapter = RecordingCmAdapter()
+    repo_path = Path(self.repo).resolve()
+    cfg = find_diff.FindDiffConfig(
+        repo=repo_path, base="origin/main", diff_workers=16
+    )
+
+    rc, _, stderr = self.execute_find_diff(cfg, adapter)
+
+    self.assertEqual(rc, exit_codes.OK, stderr)
+    self.assertEqual(
+        adapter.calls[0]["args"],
+        [
+            "find",
+            repo_path.as_posix(),
+            "-y",
+            "--diff=origin/main",
+            "--diff-workers=16",
+            "--fail-on",
+            "NONE",
+        ],
+    )
+
   def test_clean_diff_with_zero_findings_emits_compact_sarif_and_exits_zero(self):
     repo_path = Path(self.repo).resolve()
     adapter = RecordingCmAdapter(
@@ -510,7 +561,7 @@ case "$*" in
   --version)
     echo "cm version 0.9.0"
     ;;
-  "find {os.path.realpath(self.repo)} -y --diff=origin/main --diff-workers=16 --fail-on NONE")
+  "find {os.path.realpath(self.repo)} -y --diff=origin/main --diff-workers=8 --fail-on NONE")
     echo "Impact-Aware PR Delta Scan"
     echo "Scanning diff..." >&2
     exit 0
@@ -564,7 +615,7 @@ class TestFindDiffOutArtifacts(FindDiffTestBase):
                 str(repo_path),
                 "-y",
                 "--diff=origin/main",
-                "--diff-workers=16",
+                "--diff-workers=8",
                 "--fail-on",
                 "NONE",
             ],
@@ -611,7 +662,7 @@ class TestFindDiffFailureAtomicity(FindDiffTestBase):
         str(repo_path),
         "-y",
         "--diff=HEAD",
-        "--diff-workers=16",
+        "--diff-workers=8",
         "--fail-on",
         "NONE",
     )
@@ -643,7 +694,7 @@ class TestFindDiffFailureAtomicity(FindDiffTestBase):
         str(repo_path),
         "-y",
         "--diff=HEAD",
-        "--diff-workers=16",
+        "--diff-workers=8",
         "--fail-on",
         "NONE",
     )
@@ -1047,6 +1098,26 @@ esac
         md_path.read_text(encoding="utf-8"), _SAMPLE_MARKDOWN_REPORT
     )
 
+  def test_diff_workers_flag_passed_to_cm(self):
+    res = self.run_cli(
+        "find-diff",
+        "--repo",
+        self.repo,
+        "--base",
+        "HEAD",
+        "--diff-workers",
+        "16",
+        path=self._cli_path,
+    )
+
+    self.assertEqual(res.returncode, exit_codes.OK, res.stderr)
+    self.assert_stdout_is_one_json_object(res)
+    calls = self._cm_calls()
+    self.assertIn(
+        f"find {os.path.realpath(self.repo)} -y --diff=HEAD --diff-workers=16 --fail-on NONE",
+        calls,
+    )
+
   def test_usage_errors_exit_two_with_empty_stdout(self):
     cases = {
         "nonexistent repo": [
@@ -1055,6 +1126,27 @@ esac
             os.path.join(self.tmp, "nonexistent"),
         ],
         "empty base": ["find-diff", "--repo", self.repo, "--base", ""],
+        "diff-workers below min": [
+            "find-diff",
+            "--repo",
+            self.repo,
+            "--diff-workers",
+            "0",
+        ],
+        "diff-workers above max": [
+            "find-diff",
+            "--repo",
+            self.repo,
+            "--diff-workers",
+            "17",
+        ],
+        "diff-workers non-integer": [
+            "find-diff",
+            "--repo",
+            self.repo,
+            "--diff-workers",
+            "abc",
+        ],
         "unknown flag --staged": ["find-diff", "--staged"],
     }
     for label, argv in cases.items():

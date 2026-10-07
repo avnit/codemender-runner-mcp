@@ -74,6 +74,11 @@ inputs:
       artifacts.
     required: false
     default: '3'
+  diff_workers:
+    description: >-
+      Number of concurrent workers for `cm-runner find-diff` (1..16).
+    required: false
+    default: '8'
 
 runs:
   using: composite
@@ -184,6 +189,7 @@ runs:
         CODEMENDER_RUNNER_IMAGE: ${{ steps.pull-image.outputs.image }}
         CODEMENDER_LOG_LEVEL: ${{ inputs.log_level }}
         CODEMENDER_CONTAINER_RUNTIME: ${{ inputs.container_runtime }}
+        CODEMENDER_DIFF_WORKERS: ${{ inputs.diff_workers }}
         CODEMENDER_OUT_DIR: ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}
         GOOGLE_CLOUD_PROJECT: ${{ inputs.gcp_project_id }}
         GOOGLE_GHA_CREDS_PATH: ${{ steps.gcp_auth.outputs.credentials_file_path }}

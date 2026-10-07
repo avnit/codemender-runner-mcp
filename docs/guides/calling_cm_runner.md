@@ -156,7 +156,7 @@ terminal, `init` asks you for one; press Enter to skip. In CI it never asks.
 ## `find-diff`
 
 ```
-cm-runner find-diff [--repo PATH] [--base REF] [--out DIR]
+cm-runner find-diff [--repo PATH] [--base REF] [--out DIR] [--diff-workers N]
 ```
 
 Scans the changes in a repository relative to a base Git reference (see
@@ -167,11 +167,12 @@ unless `--no-init` is passed.
 
 **Flags:**
 
-| Flag          | Default | Meaning                                                                                         |
-| :------------ | :------ | :---------------------------------------------------------------------------------------------- |
-| `--repo PATH` | `.`     | Path to the Git working tree to scan.                                                           |
-| `--base REF`  | `HEAD`  | Base Git reference to diff against (e.g. `origin/main` or a commit SHA).                        |
-| `--out DIR`   | None    | Optional folder where `report.sarif` and `report.md` are written. Created if it does not exist. |
+| Flag               | Default | Meaning                                                                                         |
+| :----------------- | :------ | :---------------------------------------------------------------------------------------------- |
+| `--repo PATH`      | `.`     | Path to the Git working tree to scan.                                                           |
+| `--base REF`       | `HEAD`  | Base Git reference to diff against (e.g. `origin/main` or a commit SHA).                        |
+| `--out DIR`        | None    | Optional folder where `report.sarif` and `report.md` are written. Created if it does not exist. |
+| `--diff-workers N` | `8`     | Number of concurrent workers for `cm find --diff` (1..16 supported by `cm`).                    |
 
 **Pre-flight & shallow clones.** Before starting `cm`, `find-diff` checks that
 `--repo` is a valid Git working tree and that `--base` resolves to a commit
@@ -185,7 +186,7 @@ object in that repository (`git rev-parse --verify <base>^{commit}`).
 
 **What it runs.** `find-diff` runs:
 
-1. `cm find <repo> -y --diff=<base> --fail-on NONE`
+1. `cm find <repo> -y --diff=<base> --diff-workers=<N> --fail-on NONE`
 1. `cm report --format sarif` (written to a temporary file and validated as
    JSON)
 1. `cm report --format md` (only when `--out` is passed)
@@ -207,11 +208,11 @@ report) before printing the compact SARIF line to `stdout`.
 
 **Exit code:**
 
-| Code | Meaning                                                                                                                                                                     |
-| :--- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | Scan and report succeeded (`0` or more findings; `--fail-on NONE` ensures findings do not cause a non-zero exit).                                                           |
-| `2`  | Invalid flags (`--repo` is not a directory, `--base` is empty/whitespace, or `--out` points to an existing file). Nothing is written to `stdout`.                           |
-| `3`  | Execution failed (`--repo` is not a Git working tree, `--base` cannot be resolved, `cm` failed or timed out, or writing to `--out` failed). Nothing is written to `stdout`. |
+| Code | Meaning                                                                                                                                                                           |
+| :--- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Scan and report succeeded (`0` or more findings; `--fail-on NONE` ensures findings do not cause a non-zero exit).                                                                 |
+| `2`  | Invalid flags (`--repo` is not a directory, `--base` is empty/whitespace, `--diff-workers` outside 1..16, or `--out` points to an existing file). Nothing is written to `stdout`. |
+| `3`  | Execution failed (`--repo` is not a Git working tree, `--base` cannot be resolved, `cm` failed or timed out, or writing to `--out` failed). Nothing is written to `stdout`.       |
 
 ## `fix`
 

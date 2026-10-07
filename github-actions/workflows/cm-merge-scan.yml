@@ -57,6 +57,7 @@ jobs:
           gcp_workload_identity_provider: ${{ secrets.CODEMENDER_WORKLOAD_IDENTITY_PROVIDER }}
           gcp_service_account: ${{ secrets.CODEMENDER_SERVICE_ACCOUNT }}
           # log_level: debug
+          # diff_workers: '8'
           # Defaults: run cm-runner under gVisor (needed for cm's sandbox),
           # pinned to a tested release. See README.md → "Inputs".
           # container_runtime: runsc
