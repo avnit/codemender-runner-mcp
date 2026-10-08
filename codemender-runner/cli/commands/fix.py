@@ -185,7 +185,7 @@ def run(
   return exit_codes.OK
 
 
-def _read_finding(cfg: FixConfig) -> Optional[str]:
+def _read_finding(cfg: FixConfig, command: str = "fix") -> Optional[str]:
   """Reads the finding and checks that it is SARIF holding exactly one result.
 
   A file with several results is rejected rather than fixed in part, so one
@@ -218,17 +218,18 @@ def _read_finding(cfg: FixConfig) -> Optional[str]:
   count = doc.result_count
   if count != 1:
     logger.error(
-        "The finding from %s holds %d results; fix takes exactly one. Split a"
+        "The finding from %s holds %d results; %s takes exactly one. Split a"
         " find-diff report into one file per finding first (see 'From"
         " find-diff to fix' in docs/guides/calling_cm_runner.md).",
         source,
         count,
+        command,
     )
     return None
   return text
 
 
-def _check_repository(repo: Path) -> bool:
+def _check_repository(repo: Path, command: str = "fix") -> bool:
   """Checks that `repo` is a Git working tree with no uncommitted work."""
   if not git.is_git_repository(repo.as_posix()):
     logger.error("--repo %s is not inside a Git working tree.", repo)
@@ -239,10 +240,11 @@ def _check_repository(repo: Path) -> bool:
     return False
   if uncommitted:
     logger.error(
-        "--repo %s has uncommitted work. 'cm fix' would discard it, because it"
+        "--repo %s has uncommitted work. 'cm %s' would discard it, because it"
         " starts with 'git checkout HEAD -- . && git clean -fd'. Commit or"
         " stash these files first:\n  %s",
         repo,
+        command,
         "\n  ".join(uncommitted),
     )
     return False

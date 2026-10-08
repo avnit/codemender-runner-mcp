@@ -103,6 +103,7 @@ class Finding:
     title: Short title reported by `cm`, if present.
     severity: Severity reported by `cm`, if present.
     file_path: Repository-relative file path reported by `cm`, if present.
+    dismiss_reason: Reason `cm` gave when dismissing a finding, if present.
   """
 
   finding_id: str
@@ -110,6 +111,7 @@ class Finding:
   title: str = ""
   severity: str = ""
   file_path: str = ""
+  dismiss_reason: str = ""
 
   @classmethod
   def from_report_item(cls, item: Dict[str, Any]) -> Optional["Finding"]:
@@ -123,12 +125,23 @@ class Finding:
         title=str(item.get("title") or ""),
         severity=str(item.get("severity") or ""),
         file_path=str(item.get("file_path") or ""),
+        dismiss_reason=str(item.get("dismiss_reason") or ""),
     )
 
   @property
   def is_fixed(self) -> bool:
     """True when `cm fix` has marked this finding FIXED."""
     return self.status == "FIXED"
+
+  @property
+  def is_verified(self) -> bool:
+    """True when `cm verify` has marked this finding VERIFIED."""
+    return self.status == "VERIFIED"
+
+  @property
+  def is_dismissed(self) -> bool:
+    """True when `cm verify` has refuted/dismissed this finding."""
+    return self.status in ("DISMISSED", "FALSE_POSITIVE")
 
 
 def _parse_token_count(text: str) -> int:

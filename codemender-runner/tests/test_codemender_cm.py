@@ -601,7 +601,29 @@ class TestGetFinding(unittest.TestCase):
     finding = adapter.get_finding("b")
     self.assertEqual(finding, Finding(finding_id="b", status="FIXED"))
     self.assertTrue(finding.is_fixed)
+    self.assertFalse(finding.is_verified)
     self.assertFalse(Finding(finding_id="a", status="OPEN").is_fixed)
+
+  def test_reads_verified_and_dismissed_findings(self):
+    raw = _result(
+        json.dumps([
+            {"finding_id": "v1", "status": "VERIFIED"},
+            {
+                "finding_id": "d1",
+                "status": "DISMISSED",
+                "dismiss_reason": "Sanitized upstream",
+            },
+        ])
+    )
+    adapter = _ScriptedCm(raw, raw)
+    verified = adapter.get_finding("v1", "/repo")
+    self.assertTrue(verified.is_verified)
+    self.assertFalse(verified.is_dismissed)
+    self.assertFalse(verified.is_fixed)
+    dismissed = adapter.get_finding("d1", "/repo")
+    self.assertFalse(dismissed.is_verified)
+    self.assertTrue(dismissed.is_dismissed)
+    self.assertEqual(dismissed.dismiss_reason, "Sanitized upstream")
 
   def test_unknown_id(self):
     with self.assertLogs("codemender-orchestrator", level="ERROR"):

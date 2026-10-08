@@ -759,3 +759,32 @@ def diff_working_tree(
           *pathspecs,
       ],
   )
+
+
+def reset_working_tree(
+    repo_dir: str, exclude: Sequence[str] = ()
+) -> bool:
+  """Resets tracked file modifications and removes untracked files outside `exclude`.
+
+  Runs `git checkout HEAD -- .` (excluding `exclude`) and `git clean -fd`
+  (excluding `exclude`).
+
+  Args:
+    repo_dir: A folder inside a Git working tree.
+    exclude: Paths to leave untouched, such as metadata directories.
+
+  Returns:
+    True on success, False if Git failed.
+  """
+  pathspecs = _pathspecs_excluding(exclude)
+  if _run_git_for_bytes(repo_dir, ["checkout", "HEAD", *pathspecs]) is None:
+    return False
+
+  clean_cmd = ["clean", "-fd"]
+  for ex in exclude:
+    clean_cmd.extend(["-e", ex])
+  if _run_git_for_bytes(repo_dir, clean_cmd) is None:
+    return False
+
+  return True
+

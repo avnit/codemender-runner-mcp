@@ -35,6 +35,7 @@ from vcs.git import (
     normalize_repo_relative_path,
     parse_repo_owner_and_name,
     ref_exists,
+    reset_working_tree,
     sanitize_git_url,
     setup_local_git_excludes,
 )
@@ -473,6 +474,21 @@ class TestWorkingTreeHelpers(unittest.TestCase):
     self.assertTrue(patch.startswith(b"diff --git a/app.py b/app.py\n"), patch)
     self.assertNotIn(b"\x1b[", patch)
 
+  def test_reset_working_tree_restores_tracked_and_cleans_untracked_except_exclude(self):
+    self.write("app.py", b"x = 999\n")
+    self.write("untracked.txt", b"junk\n")
+    self.write(".cm_project", b"{}")
+    self.write(".exploit/poc.sh", b"#!/bin/sh\n")
+
+    self.assertTrue(reset_working_tree(self.repo, self._EXCLUDE))
+
+    with open(os.path.join(self.repo, "app.py"), "rb") as handle:
+      self.assertEqual(handle.read(), b"x = 1\n")
+    self.assertFalse(os.path.exists(os.path.join(self.repo, "untracked.txt")))
+    self.assertTrue(os.path.exists(os.path.join(self.repo, ".cm_project")))
+    self.assertTrue(os.path.exists(os.path.join(self.repo, ".exploit/poc.sh")))
+
 
 if __name__ == "__main__":
   unittest.main()
+

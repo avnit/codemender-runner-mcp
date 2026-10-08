@@ -217,6 +217,37 @@ def build_parser() -> argparse.ArgumentParser:
       metavar="DIR",
       help="directory to also write the patch to, as <finding name>.diff",
   )
+  verify_parser = subparsers.add_parser(
+      "verify",
+      parents=[common],
+      help="verify one finding and emit updated SARIF 2.1.0",
+      description=(
+          "Run 'cm verify' on one finding and emit the resulting SARIF 2.1.0"
+          " document on stdout. Refuses to run on a repository with"
+          " uncommitted work, which 'cm verify' would discard."
+      ),
+  )
+  verify_parser.add_argument(
+      "--finding",
+      required=True,
+      metavar="FILE",
+      help="SARIF file holding exactly one finding, or '-' to read it from stdin",
+  )
+  verify_parser.add_argument(
+      "--repo",
+      default=".",
+      metavar="PATH",
+      help="the repository to verify against (default: the current directory)",
+  )
+  verify_parser.add_argument(
+      "--out",
+      default=None,
+      metavar="DIR",
+      help=(
+          "directory to also write the resulting SARIF document to, as"
+          " <finding name>.sarif"
+      ),
+  )
   return parser
 
 
@@ -267,6 +298,10 @@ def main(argv: Optional[List[str]] = None) -> int:
       return find_diff.run(find_diff.config_from_args(args), adapter, emitter)
     if args.command == "fix":
       return fix.run(fix.config_from_args(args), adapter, emitter)
+    if args.command == "verify":
+      from cli.commands import verify
+
+      return verify.run(verify.config_from_args(args), adapter, emitter)
 
   parser.print_help(sys.stderr)
   return exit_codes.USAGE

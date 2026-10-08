@@ -5,8 +5,7 @@ what it gives back. The design reasoning is in
 [ADR-0001](../adr/ADR-0001-machine-readable-output-contract.md) (output) and
 [ADR-0002](../adr/ADR-0002-runner-layout-and-build.md) (layout and build).
 
-> **Status:** `version`, `init`, `find-diff`, and `fix` work today. `verify` is
-> in progress and will be added to this guide when it lands.
+> **Status:** `version`, `init`, `find-diff`, `fix`, and `verify` work today.
 
 ## The command
 
@@ -20,7 +19,7 @@ cm-runner [--cm-binary PATH] [--log-level LEVEL] [--no-init] <command> [flags]
 | `init`      | Sets up `cm` for a repository and checks the result. See [`init`](#init).                    | Available |
 | `find-diff` | Scans a pull request's changes and outputs SARIF v2.1.0 JSON. See [`find-diff`](#find-diff). | Available |
 | `fix`       | Produces a patch for one finding, as a unified diff. See [`fix`](#fix).                      | Available |
-| `verify`    | Checks whether a finding is real, or whether a patch fixes it.                               | Planned   |
+| `verify`    | Verifies a finding with `cm verify` and emits updated SARIF 2.1.0. See [`verify`](#verify).   | Available |
 
 ## Where to run it
 
@@ -292,31 +291,98 @@ stdin). Without `--out` it writes no files of its own.
 | `2`  | Bad flags (`--repo` is not a folder, `--finding` is not a readable file, `--out` is a file) or a bad finding (not SARIF, or not exactly one result). Nothing is written to `stdout`.                 |
 | `3`  | Anything else: not a Git working tree, uncommitted work, `cm` not set up, import failed, `cm fix` failed or timed out, status not `FIXED`, empty patch, or writing `--out` failed. Nothing on `stdout`. |
 
-### From `find-diff` to `fix`
+## `verify`
 
-`find-diff` prints one SARIF document for all findings; `fix` takes one finding
-at a time. This script splits the report and fixes each finding in turn:
+```
+cm-runner verify --finding FILE [--repo PATH] [--out DIR]
+```
+
+Verifies one SARIF 2.1.0 finding using `cm verify` and emits an updated SARIF
+2.1.0 document. `cm-runner` automatically runs [`init`](#init) for `--repo`
+first (logging `init` checks to `stderr` only) unless `--no-init` is passed.
+
+**Flags:**
+
+| Flag             | Default  | Meaning                                                                                               |
+| :--------------- | :------- | :---------------------------------------------------------------------------------------------------- |
+| `--finding FILE` | Required | A SARIF file holding exactly one finding. `-` reads it from stdin.                                    |
+| `--repo PATH`    | `.`      | The Git working tree to verify.                                                                       |
+| `--out DIR`      | None     | Folder to also write the updated SARIF document to, as `<finding file name>.sarif`. Created if needed.|
+
+**Before it starts.** `verify` checks two things and changes nothing if either
+fails:
+
+1. The finding is a SARIF document holding **exactly one** result. A
+   `find-diff` report with several findings is rejected; split it first. Exit `2`.
+2. `--repo` is a Git working tree with **no uncommitted work**: no modified,
+   staged, or untracked files, apart from `.cm_project` and `.exploit/`, which
+   `cm` writes itself. Exit `3`.
+
+**What it runs.**
+
+1. `cm report --format json`, to inspect findings already in `cm`'s database.
+2. `cm report import -f <finding> -p <repo>`, discovering the newly assigned
+   finding ID.
+3. `cm verify -y --bypass-warning <id>`, with a 30-minute limit.
+4. Resets the Git working tree (tracked modifications and untracked files
+   outside `.cm_project` and `.exploit/`) via `vcs/git.py`.
+5. `cm report --format json`, reading the post-verify status and `dismiss_reason`.
+
+**Output: updated SARIF 2.1.0 on stdout.**
+stdout holds the updated SARIF document as a single compact JSON line.
+- When `cm verify` refutes the finding (`DISMISSED` or `FALSE_POSITIVE`):
+  `properties.status` is set to `"DISMISSED"`, `properties.dismiss_reason` is
+  populated, `properties.updated_at` is set to the current ISO-8601 UTC
+  timestamp, and a SARIF 2.1.0 external suppression entry is added to
+  `suppressions`.
+- When confirmed exploitable (`VERIFIED`): `properties.status` is set to
+  `"VERIFIED"` and `properties.updated_at` is updated.
+- When inconclusive (`OPEN`): `properties.status` remains `"OPEN"` and
+  `properties.updated_at` is updated.
+
+The input `--finding` file is **never modified in place**.
+
+**Files (`--out`).** When `--out DIR` is passed, `verify` writes the updated
+SARIF document to `DIR/<name>.sarif` before writing to `stdout`.
+
+**Exit code:**
+
+| Code | Meaning                                                                                                                                            |
+| :--- | :------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Verification completed (`DISMISSED`, `VERIFIED`, or `OPEN`) and the updated SARIF document was written.                                             |
+| `2`  | Bad flags or invalid SARIF finding (not SARIF or not exactly one result). Nothing on `stdout`.                                                     |
+| `3`  | Execution failed: not a Git repo, uncommitted work, `cm` not initialized, import failed, `cm verify` failed or timed out, or `--out` write failed. |
+
+### From `find-diff` through `verify` to `fix`
+
+`find-diff` prints one SARIF document for all findings; `verify` and `fix` take
+one finding at a time. This script splits the report, verifies each finding, and
+only attempts `fix` when verification does not refute the finding:
 
 ```bash
 set -euo pipefail
 shopt -s nullglob
-work="$(mktemp -d)"   # Outside the repository, so fix doesn't see these files.
+work="$(mktemp -d)"   # Outside the repository, so runner doesn't see these files.
 
+# 1. Scan the diff and split into one local SARIF file per finding
 cm-runner find-diff --repo . --base origin/main > "$work/report.sarif"
+mkdir -p "$work/findings" "$work/verified" "$work/patches"
 jq -c '.runs[0].results[] as $r | .runs[0].results = [$r]' "$work/report.sarif" \
-  | split -l 1 -d --additional-suffix=.sarif - "$work/finding-"
+  | split -l 1 -d --additional-suffix=.sarif - "$work/findings/finding-"
 
-# Each fix leaves its patch applied, and fix refuses to run on uncommitted work,
-# so the tree is reset after every fix. Check first that there is nothing of
-# yours to lose.
-if [ -n "$(git status --porcelain -- . ':!.cm_project' ':!.exploit')" ]; then
-  echo "Commit or stash your changes first." >&2
-  exit 1
-fi
-for f in "$work"/finding-*.sarif; do
-  cm-runner fix --repo . --finding "$f" --out "$work/patches" >/dev/null \
-    || echo "No fix for $f" >&2
-  git reset -q --hard && git clean -fdq
+# 2. Verify each finding and write a new SARIF to verified/<name>.sarif.
+#    Only skip fix when verify successfully demonstrated the finding is not
+#    exploitable (status == "DISMISSED"). If verify confirmed it (VERIFIED),
+#    was inconclusive (OPEN), or failed (exit 3), continue to fix.
+for f in "$work"/findings/finding-*.sarif; do
+  name=$(basename "$f")
+  cm-runner verify --repo . --finding "$f" --out "$work/verified" || true
+
+  status=$(jq -r '.runs[0].results[0].properties.status // "OPEN"' "$work/verified/${name}" 2>/dev/null || echo "OPEN")
+  if [ "$status" != "DISMISSED" ]; then
+    cm-runner fix --repo . --finding "$f" --out "$work/patches" >/dev/null || echo "No fix for $f" >&2
+    git reset -q --hard && git clean -fdq
+  fi
 done
 ls "$work/patches" 2>/dev/null || echo "No patches."
 ```
