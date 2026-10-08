@@ -35,6 +35,7 @@ Chosen option: **"Option 3: Scenario-decoupled monorepo with Python 3.11 core or
 cloud-gtm/codemender-runner
 ├── codemender-runner/      # Scenario-independent core orchestrator package (Python 3.11 + cm CLI)
 ├── github-actions/         # Deployment scenario: GitHub Actions orchestration (supports running entirely in GHA as well as GHA + Cloud Run)
+├── gitlab-ci/              # Deployment scenario: GitLab CI orchestration
 ├── gcp-cloudrun/           # Deployment scenario: Cloud Run microVM sandboxing (GCP infrastructure)
 ├── gcp-gke/                # (Future) Deployment scenario: GKE sandboxing
 ├── bitbucket-pipelines/    # (Future) Deployment scenario: Bitbucket pipelines
@@ -96,6 +97,7 @@ digraph TechStackArchitecture {
     style = "dashed";
     color = "#4285F4";
     GHA [label="github-actions/\n(GHA Native & GHA + Cloud Run)", fillcolor="#E8F0FE"];
+    GitLab [label="gitlab-ci/\n(GitLab CI Pipelines)", fillcolor="#E8F0FE"];
     GCPCloudRun [label="gcp-cloudrun/\n(Cloud Run microVMs)", fillcolor="#E8F0FE"];
     GCPGKE [label="gcp-gke/\n(Future GKE)", fillcolor="#F1F3F4"];
     Bitbucket [label="bitbucket-pipelines/\n(Future Bitbucket)", fillcolor="#F1F3F4"];
@@ -119,6 +121,7 @@ digraph TechStackArchitecture {
   }
 
   GHA -> CLI;
+  GitLab -> CLI;
   GCPCloudRun -> CLI;
   GCPGKE -> CLI;
   Bitbucket -> CLI;

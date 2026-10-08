@@ -154,6 +154,16 @@ a command runs. New code starts `cm` only through `codemender.cm.CmAdapter`, and
     neither Cloud Run job changes. `/usr/local/bin/cm-runner` delegates to
     `python3 /opt/codemender/codemender-runner "$@"` and starts Python with
     `exec` so signals and exit codes pass straight through.
+  - **GitLab CI Execution (`gitlab-ci/`):** Because GitLab CI jobs execute
+    directly inside the `codemender-runner` container image (with
+    `entrypoint: [""]`), `gitlab-ci/Dockerfile` layers the pinned gVisor OCI
+    runtime (`/usr/local/bin/runsc`) and `/usr/local/bin/cm-gitlab-runner` onto
+    the base image. `cm-gitlab-runner` invokes `cm-runner` through a mutually
+    exclusive `Launcher` boundary selected via `CODEMENDER_BACKEND` (`local`
+    using `GvisorLauncher` and `runsc run --bundle` on a dedicated, privileged
+    Docker-executor runner, or `cloudrun` using `CloudRunLauncher` on
+    Kubernetes / unprivileged container runners) per
+    [SPEC-GITLAB-CI](../openspec/specs/gitlab-ci/spec.md).
 
 ### Consequences
 

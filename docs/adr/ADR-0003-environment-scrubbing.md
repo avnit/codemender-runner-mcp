@@ -47,9 +47,10 @@ from the new CLI and retire `get_scrubbed_env()` along with the legacy pipeline?
   1. **Cloud Run Jobs:** Off-runner microVM fed via GCS, with zero repo-host
      credentials in the container environment.
   1. **gVisor (`runsc`) Container on the Repo Runner (Current On-Runner Plan):**
-     Invoked on the CI runner VM via `docker run --runtime=runsc`, which
-     isolates both the kernel syscall surface and the container environment
-     (only variables explicitly passed with `-e` enter the container).
+     Invoked on the CI runner via `docker run --runtime=runsc` (GitHub Actions)
+     or standalone `runsc run --bundle` (GitLab CI), which isolates both the
+     kernel syscall surface and the container environment (only explicitly
+     allowlisted variables enter the container).
   1. **Direct Execution on the Repo Runner:** Invoked directly as a bare CI
      runner step (or a standard GitHub Actions `container:` job) without a
      separate `docker run` / gVisor boundary.
@@ -120,15 +121,20 @@ either redundant, ineffective, or actively counterproductive for `cm-runner`:
      a Cloud Run Job. The Cloud Run container has zero repo-host tokens or CI
      runner tokens in its environment.
    - **Mode B — gVisor (`runsc`) Container on the Repo Runner (Current On-Runner
-     Plan):** When running on the CI runner VM inside a gVisor container
-     (`docker run --runtime=runsc`), `docker run` does **not** forward the host
-     runner's environment into the container—only variables explicitly passed
-     via `-e` (such as `GOOGLE_CLOUD_PROJECT`, `GOOGLE_APPLICATION_CREDENTIALS`,
-     and `CODEMENDER_*`) enter the container. Ambient runner tokens
-     (`ACTIONS_RUNTIME_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, `GITHUB_ENV`)
-     are blocked at the `docker run` boundary, and gVisor's user-space kernel
-     prevents an escaped agent from accessing the host runner's filesystem or
-     `/proc`.
+     Plan):**
+     - In **GitHub Actions**, `docker run --runtime=runsc` starts a separate
+       container from the host VM and natively drops the host's environment—only
+       variables explicitly passed via `-e` (such as `GOOGLE_CLOUD_PROJECT`,
+       `GOOGLE_APPLICATION_CREDENTIALS`, and `CODEMENDER_*`) enter the
+       container, blocking ambient runner tokens (`ACTIONS_RUNTIME_TOKEN`,
+       `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, `GITHUB_ENV`) at the `docker run`
+       boundary.
+     - In **GitLab CI**, because GitLab Runner starts the job *inside* the
+       container with `CI_JOB_TOKEN` and `CODEMENDER_GITLAB_TOKEN` already in
+       `os.environ` (and no `dockerd`), `runsc` does not automatically filter
+       the environment—the outer `gitlab-ci/` adapter must scrub `os.environ` in
+       Python and write an explicit `process.env` allowlist into the `runsc` OCI
+       `config.json` before launching the gVisor sandbox.
    - **Mode C — Direct Execution on the Repo Runner (Bare Step or GHA
      `container:` Job):** What if a customer runs `cm-runner` directly on the
      repo runner without a `docker run --runtime=runsc` boundary?
@@ -200,26 +206,22 @@ either redundant, ineffective, or actively counterproductive for `cm-runner`:
 - `CmAdapter` **MUST** pass the process environment through to `cm` (`env=None`
   by default), allowing `cm` to authenticate to the CodeMender backend and
   manage its own `exebox` worker environment and `TMPDIR`.
-- When executing `cm-runner` on a repository CI runner (rather than Cloud Run
-  Jobs), workflows **SHOULD** invoke `cm-runner` inside a gVisor (`runsc`)
-  container (`docker run --runtime=runsc`) passing only explicit `-e` flags
-  required by `cm-runner` and `cm`, so ambient CI runner environment variables
-  (`ACTIONS_RUNTIME_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, `GITHUB_ENV`) do
-  not enter the container and any `exebox` escape is contained by gVisor.
-- CI workflows and container definitions that invoke `cm-runner` (`init`,
-  `find-diff`, `fix`, `verify`) **MUST NOT** inject repository-host write tokens
-  (`GITHUB_TOKEN`, `GH_TOKEN`, `GITLAB_TOKEN`) into the `cm-runner` step's
-  environment or define them at the workflow/job `env:` level where they cascade
-  into `cm-runner`. Repository-host credentials **MUST** be scoped exclusively
-  to the separate CI steps that publish PR comments or branches.
-- CI checkout steps (`actions/checkout`) preceding `cm-runner` **SHOULD** set
-  `persist-credentials: false` so the repository's `.git/config` inside the
-  workspace does not retain an embedded repo-host token.
 - In accordance with [ADR-0002](ADR-0002-runner-layout-and-build.md) ("Kept
   working, not extended"), `SENSITIVE_ENV_VARS` and `get_scrubbed_env()` in
   `config.py` **SHOULD** remain untouched while the legacy `runners/` pipeline
   is still active, and **MUST** be deleted alongside `config.py` and `runners/`
   once the legacy pipeline is retired.
+- Outer CI adapters **MUST** enforce workspace, environment, and sandbox
+  isolation before invoking `cm-runner` (see
+  [SPEC-GHA](../openspec/specs/github-actions/spec.md) and
+  [SPEC-GITLAB-CI](../openspec/specs/gitlab-ci/spec.md)):
+
+| Boundary Responsibility | GitHub Actions (`github-actions/`) | GitLab CI (`gitlab-ci/`) |
+| :--- | :--- | :--- |
+| **Runner Starting Point** | Host VM with step-scoped `env:` blocks and local `dockerd`. | Inside the `codemender-runner` job container (`entrypoint: [""]`) with no `dockerd` and globally injected CI variables. |
+| **Checkout & Workspace Staging** | Set `persist-credentials: false` on `actions/checkout` and stage `$GITHUB_WORKSPACE` to an isolated directory. | Stage `$CI_PROJECT_DIR` to an isolated directory and strip embedded `.git/config` credentials, `.git/hooks`, and `.codemender.yaml` overrides (fail-closed). |
+| **Repo-Host & Runner Tokens** | Scope `GITHUB_TOKEN` to outer steps; pass only an explicit `-e` allowlist into the launcher. | Scrub ambient `CI_JOB_TOKEN`, `CODEMENDER_GITLAB_TOKEN`, and OIDC secrets from `os.environ` and pass only an explicit allowlist into the launcher. |
+| **On-Runner Sandbox & WIF Mount** | `docker run --runtime=runsc` with WIF credentials mounted read-only at `/creds/`. | Standalone `runsc run --bundle` with WIF credentials mounted read-only at `/creds/`. |
 
 ### Consequences
 
@@ -231,8 +233,9 @@ either redundant, ineffective, or actively counterproductive for `cm-runner`:
   `.codemender_cache/` directory inside the target repository working tree or
   causes `cm`'s `sandboxDeniedPaths()` to block `TEMP` inside `exebox`.
 - **Good**, because security responsibilities are placed at the boundaries that
-  can actually enforce them: Cloud Run Jobs or `docker run --runtime=runsc`
-  (gVisor) for container/environment isolation on the runner
+  can actually enforce them: Cloud Run Jobs or `docker run --runtime=runsc` /
+  `runsc run --bundle` (gVisor) for container/environment isolation on the
+  runner
   ([go/scaling-codemender-cicd](http://goto.google.com/scaling-codemender-cicd)),
   and `cm`'s `exebox` sandbox for agent tool execution
   ([go/codemender-sandbox](http://goto.google.com/codemender-sandbox)).
@@ -244,8 +247,8 @@ either redundant, ineffective, or actively counterproductive for `cm-runner`:
   (`ACTIONS_RUNTIME_TOKEN`, or job-level `GITHUB_TOKEN`) are visible to
   `cm __worker` inside `exebox` and could be leaked via generated patches, build
   logs, or `permissive-open` network calls. We mitigate this by running
-  on-runner jobs inside a gVisor container with explicit `-e` pass-through,
-  scoping `GITHUB_TOKEN` to publishing steps only, and recommending that any
+  on-runner jobs inside a gVisor container with explicit allowlisted pass-through,
+  scoping repo-host tokens to publishing steps only, and recommending that any
   future worker environment filtering be added directly to `cm`'s
   `workerCmdConfig`.
 
@@ -258,11 +261,12 @@ either redundant, ineffective, or actively counterproductive for `cm-runner`:
 - **Working Tree Cleanliness:** Running `cm-runner init`, `find-diff`, `fix`, or
   `verify` against a target repository does not create a `.codemender_cache/`
   directory inside the target repository.
-- **Workflow Audit:** Official GitHub Actions workflows and Cloud Run Job
-  definitions run `cm-runner` without passing `GITHUB_TOKEN` / `GH_TOKEN`
-  (scoping repo-host tokens exclusively to publishing steps), use explicit `-e`
-  flags when invoking gVisor containers (`docker run --runtime=runsc`), and set
-  `persist-credentials: false` on `actions/checkout`.
+- **Workflow Audit:** Official GitHub Actions, GitLab CI, and Cloud Run Job
+  definitions run `cm-runner` without passing repo-host tokens
+  (`GITHUB_TOKEN` / `GH_TOKEN` / `CODEMENDER_GITLAB_TOKEN` / `CI_JOB_TOKEN`),
+  use an explicit allowlist when invoking gVisor (`docker run --runtime=runsc`
+  or `runsc run --bundle`), and strip checkout credentials from the staged
+  workspace.
 
 ## Pros and Cons of the Options
 
@@ -317,10 +321,10 @@ either redundant, ineffective, or actively counterproductive for `cm-runner`:
 
 ```mermaid
 flowchart TD
-    subgraph CI["Repo Action Runner (e.g. GitHub Actions)"]
-        step_checkout["1. Checkout Step\n(persist-credentials: false)"]
-        step_invoke["2. Invoke Execution Boundary\n- Cloud Run Job (off-runner microVM), OR\n- gVisor Container on Runner (docker run --runtime=runsc)\n(Only explicit -e GCP WIF / CODEMENDER_* passed;\nNo GITHUB_TOKEN or ambient ACTIONS_* tokens)"]
-        step_publish["3. Publish PR Comment Step\n(Step-scoped GITHUB_TOKEN)"]
+    subgraph CI["Repo CI Runner (GitHub Actions / GitLab CI)"]
+        step_checkout["1. Checkout & Stage Clean Workspace\n(GHA: persist-credentials: false;\nGitLab: strip .git/config & .codemender.yaml)"]
+        step_invoke["2. Invoke Execution Boundary\n- Cloud Run Job (off-runner microVM), OR\n- gVisor Sandbox on Runner (docker run --runtime=runsc / runsc run --bundle)\n(Explicit env allowlist + /creds/:ro;\nNo GITHUB_TOKEN / CI_JOB_TOKEN / CODEMENDER_GITLAB_TOKEN)"]
+        step_publish["3. Publish PR / MR Comment Step\n(Outer-scoped GITHUB_TOKEN / CODEMENDER_GITLAB_TOKEN)"]
     end
 
     subgraph Runner["codemender-runner (New CLI inside Container)"]
