@@ -129,6 +129,6 @@ digraph TransitStorageArchitecture {
 
 ## More Information
 
-*   [Implementation Guardrails & Design (docs/architecture/guardrails.md)](../architecture/guardrails.md)
-*   [GCP Parallelization Design Specification (docs/architecture/parallelization_design.md)](../architecture/parallelization_design.md)
+*   [Proposal: VCS to Cloud Run Communication Architecture (docs/openspec/proposals/vcs-cloudrun-comms/proposal.md)](../openspec/proposals/vcs-cloudrun-comms/proposal.md)
 *   [ADR-0004: Project Tech Stack & Scenario-Decoupled Monorepo Architecture](ADR-0004-project-tech-stack-and-repo-architecture.md)
+*   [ADR-0007: Cloud Run Job Invocation Interface (CLI Entrypoint vs. Python Library)](ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)

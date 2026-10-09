@@ -44,7 +44,7 @@ digraph ContainerLayout {
   Runtime [label="Lean Core Runtime\nPython 3.11, Git, Core Utils", fillcolor="#CEEAD6"];
   CMBinary [label="CodeMender Binary (cm on PATH)\nGo Binary", fillcolor="#FCE8E6"];
   Venv [label="Isolated Python Venv\n/opt/codemender/venv", fillcolor="#FEF7E0"];
-  Modules [label="Orchestrator Package\n/opt/codemender/codemender-runner/\n(codemender, runners, vcs, cli)", fillcolor="#FEF7E0"];
+  Modules [label="Orchestrator Package\n/opt/codemender/codemender-runner/\n(codemender, vcs, cli, storage.py)", fillcolor="#FEF7E0"];
   BYOI [label="Custom Toolchain Images (BYOI)\nFROM ghcr.io/<org>/codemender-runner:latest\n(Add Node, Java, Go as needed)", style="dashed", fillcolor="#F1F3F4"];
 
   Base -> Runtime;

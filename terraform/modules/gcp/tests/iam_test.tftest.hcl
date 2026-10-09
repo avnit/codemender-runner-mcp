@@ -16,14 +16,6 @@
 mock_provider "google" {}
 
 override_resource {
-  target          = random_id.role_suffix
-  override_during = plan
-  values = {
-    hex = "12345678"
-  }
-}
-
-override_resource {
   target          = google_service_account.runner_sa
   override_during = plan
   values = {
@@ -69,20 +61,5 @@ run "iam_resources_created_correctly" {
   assert {
     condition     = output.worker_service_account_email == "test-iam-worker-sa@test-project-123.iam.gserviceaccount.com"
     error_message = "worker_service_account_email output does not match expected worker SA email."
-  }
-
-  assert {
-    condition     = google_service_account.workflow_sa.account_id == "test-iam-workflows-sa"
-    error_message = "Workflow Service Account ID does not match expected prefix."
-  }
-
-  assert {
-    condition     = google_service_account.scheduler_sa.account_id == "test-iam-scheduler-sa"
-    error_message = "Scheduler Service Account ID does not match expected prefix."
-  }
-
-  assert {
-    condition     = google_project_iam_custom_role.workflow_job_runner.role_id == "testiamWorkflowJobRunner_12345678"
-    error_message = "Workflow custom role ID does not match expected prefix (should have dashes removed)."
   }
 }

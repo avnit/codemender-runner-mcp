@@ -30,7 +30,6 @@ module "gcp" {
   vpc_connector_min_instances = var.vpc_connector_min_instances
   vpc_connector_max_instances = var.vpc_connector_max_instances
   vpc_connector_machine_type  = var.vpc_connector_machine_type
-  scheduler_cron              = var.scheduler_cron
 }
 
 output "cloud_run_reports_bucket_name" {

@@ -298,7 +298,7 @@ flowchart TD
 | `terraform/modules/wif/github.tf`                 | Normalizes `var.github_repositories` into `local.short_repo_names` and provisions `codemender-scan` label, `CODEMENDER_WORKLOAD_IDENTITY_PROVIDER` and `CODEMENDER_SERVICE_ACCOUNT` secrets, `CODEMENDER_GCP_PROJECT_ID` variable, and (in `cloud_run` mode) `CODEMENDER_GCS_TRANSIT_BUCKET`, `CODEMENDER_CLOUD_RUN_JOB_NAME`, and `CODEMENDER_GCP_REGION` variables. |
 | `terraform/modules/wif/outputs.tf`                | Exports `gcp_workload_identity_provider`, `gcp_service_account`, `execution_mode`, and `next_step_private_key_injection`.                                                                                                        |
 | `terraform/modules/wif/tests/wif_test.tftest.hcl` | Hermetic `terraform test` suite for `terraform/modules/wif`.                                                                                                                                                                     |
-| `terraform/modules/gcp/`                          | Child module (`apis.tf`, `compute.tf`, `iam.tf`, `outputs.tf`, `provider.tf`, `scheduler.tf`, `secret.tf`, `storage.tf`, `variables.tf`, `vpc.tf`, `tests/*.tftest.hcl`) exporting `runner_service_account_email` and `worker_service_account_email`. |
+| `terraform/modules/gcp/`                          | Child module (`apis.tf`, `compute.tf`, `iam.tf`, `outputs.tf`, `provider.tf`, `secret.tf`, `storage.tf`, `variables.tf`, `vpc.tf`, `tests/*.tftest.hcl`) exporting `runner_service_account_email` and `worker_service_account_email`. |
 
 ## Risks / Trade-offs
 
@@ -309,10 +309,9 @@ flowchart TD
   - *Mitigation:* Operators who want to invoke `terraform/modules/wif` or
     `terraform/modules/gcp` directly as standalone modules can still do so, or
     use `moved` blocks / `terraform state mv` when migrating to the unified
-    root `terraform/`. All documentation (`codemender-runner/README.md`,
-    `docs/adr/ADR-0004-project-tech-stack-and-repo-architecture.md`,
-    `docs/guides/github_actions_guide.md`, and
-    `docs/guides/terraform_deployment_guide.md`) is updated in tandem.
+    root `terraform/`. Architecture documentation
+    (`docs/adr/ADR-0004-project-tech-stack-and-repo-architecture.md`) is
+    updated in tandem.
 
 ## Deployment & Rollback
 

@@ -49,29 +49,9 @@ output "worker_service_account_email" {
   value       = google_service_account.worker_sa.email
 }
 
-output "workflow_name" {
-  description = "Cloud Workflows workflow name."
-  value       = google_workflows_workflow.coordinator.name
-}
-
-output "scheduler_job_name" {
-  description = "Cloud Scheduler job name."
-  value       = google_cloud_scheduler_job.nightly_scan.name
-}
-
 output "artifact_registry_repository" {
   description = "Artifact Registry Docker repository path."
   value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.docker_repo.repository_id}"
-}
-
-output "workflow_id" {
-  description = "Cloud Workflows workflow ID."
-  value       = google_workflows_workflow.coordinator.id
-}
-
-output "workflow_execution_url" {
-  description = "API URL to trigger execution of the coordinator workflow."
-  value       = "https://workflowexecutions.googleapis.com/v1/${google_workflows_workflow.coordinator.id}/executions"
 }
 
 output "secret_manager_notice" {

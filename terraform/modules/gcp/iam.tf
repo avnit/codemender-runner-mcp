@@ -26,59 +26,12 @@ resource "google_service_account" "worker_sa" {
   depends_on   = [google_project_service.enabled_services["iam.googleapis.com"]]
 }
 
-resource "google_service_account" "workflow_sa" {
-  account_id   = "${var.resource_prefix}-workflows-sa"
-  display_name = "CodeMender Workflows Service Account (${var.resource_prefix})"
-  project      = var.project_id
-  depends_on   = [google_project_service.enabled_services["iam.googleapis.com"]]
-}
-
-resource "google_service_account" "scheduler_sa" {
-  account_id   = "${var.resource_prefix}-scheduler-sa"
-  display_name = "CodeMender Scheduler Service Account (${var.resource_prefix})"
-  project      = var.project_id
-  depends_on   = [google_project_service.enabled_services["iam.googleapis.com"]]
-}
-
-# Random ID suffix to prevent 409 Conflict errors when re-creating custom IAM roles.
-# GCP IAM custom roles enter a 7-day soft-delete tombstone state upon deletion.
-# Appending a random hex suffix ensures role recreations generate a fresh role ID.
-resource "random_id" "role_suffix" {
-  byte_length = 4
-  keepers = {
-    resource_prefix = var.resource_prefix
-  }
-}
-
-resource "google_project_iam_custom_role" "workflow_job_runner" {
-  role_id     = "${replace(var.resource_prefix, "-", "")}WorkflowJobRunner_${random_id.role_suffix.hex}"
-  title       = "CodeMender Workflow Job Runner (${var.resource_prefix})"
-  description = "Allows Cloud Workflows to run and monitor Cloud Run Jobs for CodeMender (${var.resource_prefix})"
-  project     = var.project_id
-  depends_on  = [google_project_service.enabled_services["iam.googleapis.com"]]
-  permissions = [
-    "run.jobs.run",
-    "run.jobs.runWithOverrides",
-    "run.jobs.get",
-    "run.operations.get",
-    "run.executions.get",
-    "run.executions.list",
-  ]
-}
-
-# Bucket-level IAM for Runner SA & Workflow SA
+# Bucket-level IAM for Runner SA
 resource "google_storage_bucket_iam_member" "runner_reports_admin" {
   bucket = google_storage_bucket.reports.name
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.runner_sa.email}"
 }
-
-resource "google_storage_bucket_iam_member" "workflow_reports_viewer" {
-  bucket = google_storage_bucket.reports.name
-  role   = "roles/storage.objectViewer"
-  member = "serviceAccount:${google_service_account.workflow_sa.email}"
-}
-
 
 # Secret Manager IAM for Runner SA
 resource "google_secret_manager_secret_iam_member" "runner_secret_accessor" {
@@ -96,14 +49,12 @@ resource "google_service_account_iam_member" "runner_token_creator" {
 
 locals {
   log_writer_service_accounts = {
-    "runner"    = "serviceAccount:${google_service_account.runner_sa.email}"
-    "worker"    = "serviceAccount:${google_service_account.worker_sa.email}"
-    "workflows" = "serviceAccount:${google_service_account.workflow_sa.email}"
-    "scheduler" = "serviceAccount:${google_service_account.scheduler_sa.email}"
+    "runner" = "serviceAccount:${google_service_account.runner_sa.email}"
+    "worker" = "serviceAccount:${google_service_account.worker_sa.email}"
   }
 }
 
-# Logging Writer IAM for Runner, Workflow, and Scheduler Service Accounts
+# Logging Writer IAM for Runner and Worker Service Accounts
 resource "google_project_iam_member" "service_accounts_log_writer" {
   for_each = local.log_writer_service_accounts
   project  = var.project_id
@@ -118,33 +69,6 @@ resource "google_project_iam_member" "runner_aiplatform_user" {
   member  = "serviceAccount:${google_service_account.runner_sa.email}"
 }
 
-# Project-level IAM binding for Workflow SA to run jobs, poll operations, and monitor executions
-resource "google_project_iam_member" "workflow_job_runner_binding" {
-  project = var.project_id
-  role    = google_project_iam_custom_role.workflow_job_runner.id
-  member  = "serviceAccount:${google_service_account.workflow_sa.email}"
-}
-
-# Service Account User IAM for Workflow SA on Runner SA
-resource "google_service_account_iam_member" "workflow_runner_sa_user" {
-  service_account_id = google_service_account.runner_sa.name
-  role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:${google_service_account.workflow_sa.email}"
-}
-
-# Service Account User IAM for Workflow SA on Worker SA
-resource "google_service_account_iam_member" "workflow_worker_sa_user" {
-  service_account_id = google_service_account.worker_sa.name
-  role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:${google_service_account.workflow_sa.email}"
-}
-
-# Workflow Invoker IAM for Scheduler SA at Project Level
-resource "google_project_iam_member" "scheduler_workflow_invoker" {
-  project = var.project_id
-  role    = "roles/workflows.invoker"
-  member  = "serviceAccount:${google_service_account.scheduler_sa.email}"
-}
 
 # Secret Manager IAM for Worker SA (for Github token)
 resource "google_secret_manager_secret_iam_member" "worker_secret_accessor" {

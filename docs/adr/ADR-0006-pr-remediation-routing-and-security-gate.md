@@ -131,6 +131,6 @@ digraph PRRemediationRouting {
 
 ## More Information
 
-*   [GitHub Actions Orchestration Architecture (docs/architecture/github_actions_orchestration_design.md)](../architecture/github_actions_orchestration_design.md)
+*   [GitHub Actions Orchestration & Execution Backends Design (docs/openspec/specs/github-actions/design.md)](../openspec/specs/github-actions/design.md)
 *   [ADR-0001: Machine-Readable Output Contract for cm-runner CLI](ADR-0001-machine-readable-output-contract.md)
 *   [ADR-0004: Project Tech Stack & Scenario-Decoupled Monorepo Architecture](ADR-0004-project-tech-stack-and-repo-architecture.md)

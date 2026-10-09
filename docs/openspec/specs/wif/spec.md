@@ -85,10 +85,10 @@ entrypoint at `terraform/` and reusable child modules under
    - Child modules MUST reside at `terraform/modules/wif/` (`apis.tf`,
      `github.tf`, `iam.tf`, `outputs.tf`, `provider.tf`, `variables.tf`,
      `tests/wif_test.tftest.hcl`) and `terraform/modules/gcp/` (`apis.tf`,
-     `compute.tf`, `iam.tf`, `outputs.tf`, `provider.tf`, `scheduler.tf`,
-     `secret.tf`, `storage.tf`, `variables.tf`, `vpc.tf`,
-     `tests/*.tftest.hcl`). Legacy top-level `terraform/gha_wif/`,
-     `terraform/wif/`, and `terraform/gcp/` directories MUST NOT exist.
+     `compute.tf`, `iam.tf`, `outputs.tf`, `provider.tf`, `secret.tf`,
+     `storage.tf`, `variables.tf`, `vpc.tf`, `tests/*.tftest.hcl`). Legacy
+     top-level `terraform/gha_wif/`, `terraform/wif/`, and `terraform/gcp/`
+     directories MUST NOT exist.
    - Child modules (`terraform/modules/wif/` and `terraform/modules/gcp/`) MUST
      NOT contain concrete `provider "..." {}` blocks; they MUST only declare
      `terraform { required_version = ">= 1.5.0" required_providers { ... } }`
@@ -555,12 +555,10 @@ and reflected across all repository documentation:
    - MUST pass `terraform test` offline in `terraform/modules/gcp`.
 1. **Documentation & Reference Migration:**
    - All references to `terraform/gha_wif`, standalone `terraform/wif`, or
-     standalone `terraform/gcp` across `codemender-runner/README.md`,
-     `docs/adr/ADR-0004-project-tech-stack-and-repo-architecture.md`,
-     `docs/guides/github_actions_guide.md`, and
-     `docs/guides/terraform_deployment_guide.md` MUST be updated to reflect the
-     root `terraform/` entrypoint and `terraform/modules/{wif,gcp}` child
-     hierarchy.
+     standalone `terraform/gcp` in
+     `docs/adr/ADR-0004-project-tech-stack-and-repo-architecture.md` MUST be
+     updated to reflect the root `terraform/` entrypoint and
+     `terraform/modules/{wif,gcp}` child hierarchy.
 
 #### Scenario: Running `terraform test` Across Root and Child Modules
 

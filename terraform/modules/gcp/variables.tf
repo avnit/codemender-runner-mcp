@@ -88,11 +88,3 @@ variable "vpc_connector_machine_type" {
   description = "Machine type for the Serverless VPC Access Connector."
   default     = "e2-micro"
 }
-
-variable "scheduler_cron" {
-  type        = string
-  description = "Cron expression for the nightly trigger."
-  default     = "0 2 * * *"
-}
-
-

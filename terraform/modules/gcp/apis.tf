@@ -16,9 +16,7 @@ locals {
   required_apis = [
     "cloudresourcemanager.googleapis.com",
     "run.googleapis.com",
-    "workflows.googleapis.com",
     "secretmanager.googleapis.com",
-    "cloudscheduler.googleapis.com",
     "artifactregistry.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
@@ -47,11 +45,4 @@ resource "google_project_service" "compute_api" {
   project            = var.project_id
   service            = "compute.googleapis.com"
   disable_on_destroy = false
-}
-
-resource "google_project_service_identity" "workflows_sa" {
-  provider = google-beta
-  project  = var.project_id
-  service  = "workflows.googleapis.com"
-  depends_on = [google_project_service.enabled_services["workflows.googleapis.com"]]
 }

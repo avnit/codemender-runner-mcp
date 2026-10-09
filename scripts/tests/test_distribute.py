@@ -581,11 +581,6 @@ class TestDistributeScript(unittest.TestCase):
           f"Expected link to .github/terraform/terraform.tfvars.example in {rel_doc}",
       )
       self.assertIn(
-          "CODEMENDER_RUNNER_IMAGE",
-          content,
-          f"Expected CODEMENDER_RUNNER_IMAGE variable in {rel_doc}",
-      )
-      self.assertIn(
           "CODEMENDER_WORKLOAD_IDENTITY_PROVIDER",
           content,
           f"Expected CODEMENDER_WORKLOAD_IDENTITY_PROVIDER secret in {rel_doc}",
@@ -601,9 +596,9 @@ class TestDistributeScript(unittest.TestCase):
           f"Expected CODEMENDER_GCP_PROJECT_ID variable in {rel_doc}",
       )
       self.assertIn(
-          "ghcr.io/<owner>/codemender-runner:latest",
+          "ghcr.io/<owner>/codemender-runner:<commit-sha>",
           content,
-          f"Expected default ghcr.io/<owner>/codemender-runner:latest in {rel_doc}",
+          f"Expected ghcr.io/<owner>/codemender-runner:<commit-sha> in {rel_doc}",
       )
 
       doc_dir = os.path.dirname(abs_doc)

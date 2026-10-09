@@ -22,62 +22,12 @@ import unittest.mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import get_cleanup_ports
-from config import get_github_credentials
-from config import get_scrubbed_env
 from config import inject_codemender_config
 from config import OrchestratorConfig
 import yaml
 
 
-
-
 class TestConfig(unittest.TestCase):
-
-  def test_credential_scrubbing(self):
-    """Verify sensitive credentials are scrubbed from environment variables."""
-    test_env = {
-        "PATH": "/usr/bin",
-        "GITHUB_APP_TOKEN": "secret_app_token",
-        "GITHUB_PAT": "secret_pat",
-        "GITHUB_TOKEN": "secret_token",
-        "GH_TOKEN": "secret_gh_token",
-        "GITHUB_SECRET": "secret_github",
-        "CUSTOM_VAR": "keep_me",
-    }
-    with unittest.mock.patch.dict(os.environ, test_env, clear=True):
-      scrubbed = get_scrubbed_env()
-      self.assertIn("PATH", scrubbed)
-      self.assertIn("CUSTOM_VAR", scrubbed)
-      self.assertNotIn("GITHUB_APP_TOKEN", scrubbed)
-      self.assertNotIn("GITHUB_PAT", scrubbed)
-      self.assertNotIn("GITHUB_TOKEN", scrubbed)
-      self.assertNotIn("GH_TOKEN", scrubbed)
-      self.assertNotIn("GITHUB_SECRET", scrubbed)
-
-  def test_get_scrubbed_env_with_repo_dir(self):
-    """Verify get_scrubbed_env creates and configures local .codemender_cache paths."""
-    with tempfile.TemporaryDirectory() as repo_dir:
-      scrubbed = get_scrubbed_env(repo_dir=repo_dir)
-      expected_cache = os.path.join(repo_dir, ".codemender_cache")
-      self.assertEqual(scrubbed.get("XDG_CACHE_HOME"), expected_cache)
-      self.assertEqual(scrubbed.get("npm_config_cache"), os.path.join(expected_cache, "npm"))
-      self.assertEqual(scrubbed.get("TMPDIR"), os.path.join(expected_cache, "tmp"))
-      self.assertEqual(scrubbed.get("PIP_CACHE_DIR"), os.path.join(expected_cache, "pip"))
-      self.assertTrue(os.path.isdir(os.path.join(expected_cache, "tmp")))
-      self.assertTrue(os.path.isdir(os.path.join(expected_cache, "npm")))
-      self.assertTrue(os.path.isdir(os.path.join(expected_cache, "pip")))
-
-  def test_get_github_credentials_success(self):
-    """Verify credentials extraction from environment."""
-    test_env = {
-        "GITHUB_REPO_URL": "https://github.com/my-org/my-repo.git",
-        "GITHUB_TOKEN": "valid_token",
-    }
-    with unittest.mock.patch.dict(os.environ, test_env, clear=True):
-      repo_url, token = get_github_credentials()
-      self.assertEqual(repo_url, "https://github.com/my-org/my-repo.git")
-      self.assertEqual(token, "valid_token")
 
   def test_inject_codemender_config_repo_level(self):
     """Verify repository-level .codemender.yaml overrides build command."""
@@ -101,30 +51,6 @@ class TestConfig(unittest.TestCase):
 
           self.assertEqual(data["build"]["command"], "npm run test:security")
           self.assertFalse(data["tools"]["confirm_commands"])
-
-  def test_get_cleanup_ports_default(self):
-    """Verify get_cleanup_ports returns default list when env is unset."""
-    with unittest.mock.patch.dict(os.environ, {}, clear=True):
-      ports = get_cleanup_ports()
-      self.assertEqual(ports, [3000, 3001, 5000, 8000, 8080, 8081, 9000])
-
-  def test_get_cleanup_ports_override(self):
-    """Verify get_cleanup_ports parses comma-separated override list."""
-    test_env = {"CODEMENDER_CLEANUP_PORTS": "3000, 8080, 9999"}
-    with unittest.mock.patch.dict(os.environ, test_env, clear=True):
-      ports = get_cleanup_ports()
-      self.assertEqual(ports, [3000, 8080, 9999])
-
-  def test_get_cleanup_ports_invalid_fallback(self):
-    """Verify get_cleanup_ports falls back to default on parse errors."""
-    test_env = {"CODEMENDER_CLEANUP_PORTS": "3000, abc, 9999"}
-    with unittest.mock.patch.dict(os.environ, test_env, clear=True):
-      ports = get_cleanup_ports()
-      self.assertEqual(ports, [3000, 3001, 5000, 8000, 8080, 8081, 9000])
-
-
-
-
 
   def test_sandbox_network_profile_defaults_to_closed(self):
     """With no override, cm's sandbox gets no network (`permissive-closed`)."""
@@ -151,7 +77,6 @@ class TestConfig(unittest.TestCase):
     env = {"GITHUB_ACTIONS": "true"}
     with unittest.mock.patch.dict(os.environ, env, clear=True):
       cfg = OrchestratorConfig.from_env()
-    self.assertEqual(cfg.storage_mode, "github_actions")
     self.assertTrue(cfg.sandbox_enabled)
 
   def test_inject_codemender_config_sandbox(self):
@@ -257,39 +182,6 @@ class TestConfig(unittest.TestCase):
             with open(out_config, "r") as f:
               data = yaml.safe_load(f)
             self.assertEqual(data["build"]["command"], "npm install && npm test")
-
-  def test_orchestrator_config_skip_verify_default(self):
-    """Verify skip_verify defaults to True when CODEMENDER_SKIP_VERIFY is unset."""
-    from config import OrchestratorConfig
-    with unittest.mock.patch.dict(os.environ, {}, clear=True):
-      cfg = OrchestratorConfig.from_env()
-      self.assertTrue(cfg.skip_verify)
-
-  def test_orchestrator_config_skip_verify_false(self):
-    """Verify skip_verify is False when CODEMENDER_SKIP_VERIFY is false/0/no."""
-    from config import OrchestratorConfig
-    for false_val in ("false", "0", "no"):
-      with unittest.mock.patch.dict(
-          os.environ, {"CODEMENDER_SKIP_VERIFY": false_val}, clear=True
-      ):
-        cfg = OrchestratorConfig.from_env()
-        self.assertFalse(
-            cfg.skip_verify,
-            f"Expected False for CODEMENDER_SKIP_VERIFY={false_val}",
-        )
-
-  def test_orchestrator_config_skip_verify_true(self):
-    """Verify skip_verify is True when CODEMENDER_SKIP_VERIFY is true/1/yes."""
-    from config import OrchestratorConfig
-    for true_val in ("true", "1", "yes"):
-      with unittest.mock.patch.dict(
-          os.environ, {"CODEMENDER_SKIP_VERIFY": true_val}, clear=True
-      ):
-        cfg = OrchestratorConfig.from_env()
-        self.assertTrue(
-            cfg.skip_verify,
-            f"Expected True for CODEMENDER_SKIP_VERIFY={true_val}",
-        )
 
 
 if __name__ == "__main__":

@@ -14,15 +14,64 @@
 
 """GitHub REST API integration for CodeMender Agent."""
 
+from functools import wraps
 import logging
 import re
+import subprocess
+import time
 from typing import Dict, List, Optional, Set
 
 import requests
-from utils import retry_on_exception, run_command
 from vcs.git import get_git_auth_header, parse_repo_owner_and_name, sanitize_git_url
 
 logger = logging.getLogger("codemender-orchestrator")
+
+
+def retry_on_exception(max_tries=3, initial_delay=1, backoff_factor=2):
+  """Decorator to retry transient network/command errors with exponential backoff."""
+
+  def decorator(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+      delay = initial_delay
+      for attempt in range(1, max_tries + 1):
+        try:
+          return func(*args, **kwargs)
+        except (requests.RequestException, subprocess.CalledProcessError) as e:
+          if attempt == max_tries:
+            raise
+          logger.warning(
+              "Attempt %d failed for %s: %s. Retrying in %d seconds...",
+              attempt,
+              getattr(func, "__name__", str(func)),
+              e,
+              delay,
+          )
+          time.sleep(delay)
+          delay *= backoff_factor
+      return None
+
+    return wrapper
+
+  return decorator
+
+
+def run_command(
+    cmd: List[str],
+    cwd: Optional[str] = None,
+    env: Optional[Dict[str, str]] = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess:
+  """Executes a subprocess command and returns the completed process."""
+  return subprocess.run(
+      cmd,
+      cwd=cwd,
+      env=env,
+      stdin=subprocess.DEVNULL,
+      capture_output=True,
+      text=True,
+      check=check,
+  )
 
 
 @retry_on_exception(max_tries=3)

@@ -63,9 +63,8 @@ RUN python3.11 -m venv /opt/codemender/venv && \
 # 5. Copy package and establish entrypoint symlinks
 COPY . ./codemender-runner/
 RUN chmod +x /opt/codemender/codemender-runner/bin/cm-runner && \
-    ln -s /opt/codemender/codemender-runner/bin/cm-runner /usr/local/bin/cm-runner && \
-    ln -s /opt/codemender/codemender-runner/main.py /opt/codemender/orchestrator.py
+    ln -s /opt/codemender/codemender-runner/bin/cm-runner /usr/local/bin/cm-runner
 
 # 6. Container contract
 ENTRYPOINT ["cm-runner"]
-CMD ["legacy"]
+CMD ["version"]

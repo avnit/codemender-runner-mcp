@@ -62,7 +62,7 @@ The container MUST isolate orchestrator Python dependencies inside a dedicated v
 
 *   **CUJ UUID:** cuj-container-modules
 
-The container build MUST copy the full orchestrator package into `/opt/codemender/codemender-runner/`, including `codemender/`, `runners/`, `vcs/`, `cli/`, `main.py`, and `storage.py`. The container entrypoint MUST execute the isolated Python runtime.
+The container build MUST copy the full orchestrator package into `/opt/codemender/codemender-runner/`, including `codemender/`, `vcs/`, `cli/`, and `storage.py`. The container entrypoint MUST execute the isolated Python runtime.
 
 #### Scenario: CLI Subcommand Execution in Container
 -   **WHEN** the container is launched with command `python3 -m cli version`

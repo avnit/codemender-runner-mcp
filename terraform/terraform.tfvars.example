@@ -94,10 +94,6 @@ execution_mode = "local" # or "cloud_run"
 # Default: "10.0.0.0/26"
 # vpc_connector_cidr = "10.0.0.0/26"
 
-# Cron schedule expression for Cloud Scheduler nightly triggers.
-# Default: "0 2 * * *" (2:00 AM UTC daily)
-# scheduler_cron = "0 2 * * *"
-
 
 # ==============================================================================
 # SECTION 3: GCP WIF OIDC Trust Perimeter & Target Repositories

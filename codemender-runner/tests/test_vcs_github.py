@@ -15,13 +15,65 @@
 """Unit tests for vcs.github module."""
 
 import os
+import re
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from vcs.github import check_remote_branch_exists, create_pull_request, get_default_branch
+from vcs.github import (
+    FINDING_MARKER_PREFIX,
+    MAX_COMMENT_BODY_CHARS,
+    STICKY_SUMMARY_MARKER,
+    build_review_comment,
+    check_remote_branch_exists,
+    create_pr_review_with_suggestions,
+    create_pull_request,
+    finding_marker,
+    format_suggestion_body,
+    get_default_branch,
+    get_pr_diff_line_ranges,
+    list_reviewed_finding_ids,
+    post_or_update_sticky_comment,
+    truncate_comment_body,
+)
+
+
+def _suggestion_is_top_level(markdown: str) -> bool:
+  """Reports whether a ```suggestion fence opens at the document's top level.
+
+  Mirrors CommonMark fence pairing: a fence nested inside an already-open code
+  block is inert, so GitHub would render it as text instead of a suggestion.
+  """
+  open_len = 0
+  for line in markdown.split("\n"):
+    match = re.match(r"^(`{3,})(.*)$", line)
+    if not match:
+      continue
+    run, info = len(match.group(1)), match.group(2).strip()
+    if open_len == 0:
+      if info == "suggestion":
+        return True
+      open_len = run
+    elif run >= open_len and not info:
+      open_len = 0
+  return False
+
+
+def _fence_left_open(markdown: str) -> bool:
+  """Reports whether `markdown` ends with an unterminated code fence."""
+  open_len = 0
+  for line in markdown.split("\n"):
+    match = re.match(r"^(`{3,})(.*)$", line)
+    if not match:
+      continue
+    run, info = len(match.group(1)), match.group(2).strip()
+    if open_len == 0:
+      open_len = run
+    elif run >= open_len and not info:
+      open_len = 0
+  return open_len != 0
 
 
 class TestVcsGithub(unittest.TestCase):
@@ -256,6 +308,273 @@ class TestVcsGithub(unittest.TestCase):
     cmd = mock_run_command.call_args[0][0]
     self.assertIn("--delete", cmd)
     self.assertIn("codemender/fix-sqli-abc12345", cmd)
+
+
+class TestSuggestionBodyFormatting(unittest.TestCase):
+  """Validates fence sizing and anchor payload construction."""
+
+  def test_wraps_replacement_in_suggestion_fence(self):
+    body = format_suggestion_body(["  return escape(value)"])
+    self.assertEqual(body, "```suggestion\n  return escape(value)\n```")
+
+  def test_widens_fence_past_embedded_backticks(self):
+    body = format_suggestion_body(['q = "```"'])
+    self.assertTrue(body.startswith("````suggestion\n"))
+    self.assertTrue(body.endswith("\n````"))
+
+  def test_empty_replacement_renders_deletion_block(self):
+    self.assertEqual(format_suggestion_body([]), "```suggestion\n```")
+
+  def test_preamble_precedes_block(self):
+    body = format_suggestion_body(["x = 1"], preamble="Heads up")
+    self.assertEqual(body, "Heads up\n\n```suggestion\nx = 1\n```")
+
+  def test_unterminated_preamble_fence_is_closed(self):
+    """An open fence in the analysis would otherwise swallow the suggestion."""
+    body = format_suggestion_body(
+        ["safe(x)"], preamble="Vulnerable:\n```python\neval(user_input)"
+    )
+    self.assertTrue(_suggestion_is_top_level(body), body)
+
+  def test_balanced_preamble_fence_is_left_alone(self):
+    preamble = "Vulnerable:\n```python\neval(x)\n```\nUse literal_eval."
+    body = format_suggestion_body(["safe(x)"], preamble=preamble)
+    self.assertTrue(body.startswith(preamble + "\n\n"))
+    self.assertTrue(_suggestion_is_top_level(body), body)
+
+  def test_single_line_anchor_omits_start_line(self):
+    comment = build_review_comment("a.py", 7, 7, "body")
+    self.assertEqual(comment["line"], 7)
+    self.assertEqual(comment["side"], "RIGHT")
+    self.assertNotIn("start_line", comment)
+
+  def test_multi_line_anchor_includes_start_line(self):
+    comment = build_review_comment("a.py", 7, 9, "body")
+    self.assertEqual(comment["start_line"], 7)
+    self.assertEqual(comment["start_side"], "RIGHT")
+    self.assertEqual(comment["line"], 9)
+
+
+class TestPrDiffLineRanges(unittest.TestCase):
+  """Validates discovery of the lines GitHub will accept as review anchors."""
+
+  @patch("vcs.github._fetch_pr_files")
+  def test_expands_hunk_headers_into_line_numbers(self, mock_fetch):
+    mock_fetch.return_value = [{
+        "filename": "app/views.py",
+        "patch": "@@ -1,3 +1,4 @@\n ctx\n+new\n@@ -20,0 +30,2 @@\n+a\n+b",
+    }]
+    ranges = get_pr_diff_line_ranges("t", "org", "repo", 7)
+    self.assertEqual(ranges["app/views.py"], {1, 2, 3, 4, 30, 31})
+
+  @patch("vcs.github._fetch_pr_files")
+  def test_file_without_patch_is_not_addressable(self, mock_fetch):
+    """Binary or oversized files have no patch, so nothing can anchor to them."""
+    mock_fetch.return_value = [{"filename": "logo.png", "status": "added"}]
+    self.assertEqual(get_pr_diff_line_ranges("t", "org", "repo", 7), {})
+
+  @patch("vcs.github._fetch_pr_files")
+  def test_fetch_failure_yields_empty_map(self, mock_fetch):
+    mock_fetch.side_effect = RuntimeError("boom")
+    self.assertEqual(get_pr_diff_line_ranges("t", "org", "repo", 7), {})
+
+
+class TestCreateReviewWithSuggestions(unittest.TestCase):
+  """Validates review submission and its fallback signalling."""
+
+  @patch("requests.post")
+  def test_posts_review_and_returns_url(self, mock_post):
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {
+        "html_url": "https://github.com/org/repo/pull/7#pullrequestreview-99"
+    }
+    mock_post.return_value = resp
+
+    url = create_pr_review_with_suggestions(
+        token="t",
+        owner="org",
+        repo="repo",
+        pr_number=7,
+        commit_id="deadbeef",
+        body="summary",
+        comments=[build_review_comment("a.py", 3, 3, "body")],
+    )
+    self.assertEqual(
+        url, "https://github.com/org/repo/pull/7#pullrequestreview-99"
+    )
+    payload = mock_post.call_args.kwargs["json"]
+    self.assertEqual(payload["event"], "COMMENT")
+    self.assertEqual(payload["commit_id"], "deadbeef")
+
+  @patch("requests.post")
+  def test_omits_commit_id_when_absent(self, mock_post):
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"html_url": "https://example.com"}
+    mock_post.return_value = resp
+
+    create_pr_review_with_suggestions(
+        token="t",
+        owner="org",
+        repo="repo",
+        pr_number=7,
+        commit_id=None,
+        body="summary",
+        comments=[build_review_comment("a.py", 3, 3, "body")],
+    )
+    self.assertNotIn("commit_id", mock_post.call_args.kwargs["json"])
+
+  @patch("requests.post")
+  def test_out_of_diff_rejection_returns_none_for_fallback(self, mock_post):
+    resp = MagicMock()
+    resp.status_code = 422
+    resp.text = '{"message":"line must be part of the diff"}'
+    mock_post.return_value = resp
+
+    url = create_pr_review_with_suggestions(
+        token="t",
+        owner="org",
+        repo="repo",
+        pr_number=7,
+        commit_id="deadbeef",
+        body="summary",
+        comments=[build_review_comment("a.py", 3, 3, "body")],
+    )
+    self.assertIsNone(url)
+    # A 422 is permanent for this payload and must not be retried.
+    self.assertEqual(mock_post.call_count, 1)
+
+  def test_no_comments_short_circuits(self):
+    self.assertIsNone(
+        create_pr_review_with_suggestions(
+            token="t",
+            owner="org",
+            repo="repo",
+            pr_number=7,
+            commit_id="sha",
+            body="b",
+            comments=[],
+        )
+    )
+
+
+class TestCommentTruncation(unittest.TestCase):
+  """Validates the GitHub 65,536 character comment body cap."""
+
+  def test_short_body_passes_through_untouched(self):
+    self.assertEqual(truncate_comment_body("all good"), "all good")
+
+  def test_oversized_body_fits_within_the_cap(self):
+    body = "\n".join(f"| finding-{i} | HIGH | XSS |" for i in range(6000))
+    self.assertGreater(len(body), MAX_COMMENT_BODY_CHARS)
+
+    result = truncate_comment_body(body)
+
+    self.assertLessEqual(len(result), MAX_COMMENT_BODY_CHARS)
+    self.assertIn("truncated", result)
+    # The cut must land on a line boundary, never mid-row.
+    self.assertTrue(result.split("\n\n---\n")[0].endswith("|"))
+
+  def test_reserved_prefix_counts_against_the_budget(self):
+    body = "x" * (MAX_COMMENT_BODY_CHARS + 10)
+    result = truncate_comment_body(body, reserved=500)
+    self.assertLessEqual(len(result) + 500, MAX_COMMENT_BODY_CHARS)
+
+  def test_cut_inside_a_code_block_closes_the_fence(self):
+    body = "intro\n```python\n" + "payload = 1\n" * 12000
+    result = truncate_comment_body(body)
+    self.assertLessEqual(len(result), MAX_COMMENT_BODY_CHARS)
+    # An unclosed fence would swallow the truncation notice.
+    self.assertFalse(_fence_left_open(result), result[-200:])
+
+  @patch("requests.post")
+  @patch("requests.Session")
+  def test_sticky_comment_truncates_and_keeps_marker(
+      self, mock_session, mock_post
+  ):
+    listing = MagicMock()
+    listing.json.return_value = []
+    listing.links = {}
+    mock_session.return_value.__enter__.return_value.get.return_value = listing
+
+    created = MagicMock()
+    created.status_code = 201
+    created.json.return_value = {"html_url": "https://example.com/c/1"}
+    mock_post.return_value = created
+
+    post_or_update_sticky_comment(
+        "t", "org", "repo", 7, "y" * (MAX_COMMENT_BODY_CHARS + 1000)
+    )
+
+    posted = mock_post.call_args.kwargs["json"]["body"]
+    self.assertLessEqual(len(posted), MAX_COMMENT_BODY_CHARS)
+    # Losing the marker would orphan the comment on the next run.
+    self.assertTrue(posted.startswith(STICKY_SUMMARY_MARKER))
+
+
+class TestStickyCommentAndDedup(unittest.TestCase):
+  """Validates the single summary comment and cross-run finding dedup."""
+
+  @patch("requests.post")
+  @patch("requests.patch")
+  @patch("requests.Session")
+  def test_updates_existing_marked_comment(
+      self, mock_session, mock_patch, mock_post
+  ):
+    listing = MagicMock()
+    listing.json.return_value = [
+        {"id": 1, "body": "unrelated"},
+        {"id": 2, "body": f"{STICKY_SUMMARY_MARKER}\nold summary"},
+    ]
+    listing.links = {}
+    mock_session.return_value.__enter__.return_value.get.return_value = listing
+
+    updated = MagicMock()
+    updated.status_code = 200
+    updated.json.return_value = {"html_url": "https://example.com/c/2"}
+    mock_patch.return_value = updated
+
+    url = post_or_update_sticky_comment("t", "org", "repo", 7, "new summary")
+    self.assertEqual(url, "https://example.com/c/2")
+    mock_post.assert_not_called()
+    self.assertIn("/issues/comments/2", mock_patch.call_args.args[0])
+
+  @patch("requests.post")
+  @patch("requests.Session")
+  def test_creates_comment_when_marker_absent(self, mock_session, mock_post):
+    listing = MagicMock()
+    listing.json.return_value = [{"id": 1, "body": "unrelated"}]
+    listing.links = {}
+    mock_session.return_value.__enter__.return_value.get.return_value = listing
+
+    created = MagicMock()
+    created.status_code = 201
+    created.json.return_value = {"html_url": "https://example.com/c/9"}
+    mock_post.return_value = created
+
+    url = post_or_update_sticky_comment("t", "org", "repo", 7, "summary")
+    self.assertEqual(url, "https://example.com/c/9")
+    self.assertTrue(
+        mock_post.call_args.kwargs["json"]["body"].startswith(
+            STICKY_SUMMARY_MARKER
+        )
+    )
+
+  @patch("requests.Session")
+  def test_extracts_finding_ids_from_markers(self, mock_session):
+    listing = MagicMock()
+    listing.json.return_value = [
+        {"body": f"{FINDING_MARKER_PREFIX}CM-1 -->\nsuggestion"},
+        {"body": "a human review comment"},
+        {"body": finding_marker("CM-2")},
+    ]
+    listing.links = {}
+    mock_session.return_value.__enter__.return_value.get.return_value = listing
+
+    self.assertEqual(
+        list_reviewed_finding_ids("t", "org", "repo", 7), {"CM-1", "CM-2"}
+    )
 
 
 if __name__ == "__main__":

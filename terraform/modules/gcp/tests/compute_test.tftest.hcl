@@ -16,9 +16,9 @@
 mock_provider "google" {}
 
 variables {
-  project_id           = "test-project-123"
-  region               = "us-central1"
-  resource_prefix      = "test-compute"
+  project_id      = "test-project-123"
+  region          = "us-central1"
+  resource_prefix = "test-compute"
 }
 
 run "compute_resources_created_correctly" {
@@ -32,11 +32,6 @@ run "compute_resources_created_correctly" {
   assert {
     condition     = google_cloud_run_v2_job.runner.location == "us-central1"
     error_message = "Cloud Run job should be deployed to the specified region."
-  }
-
-  assert {
-    condition     = google_workflows_workflow.coordinator.name == "test-compute-coordinator"
-    error_message = "Workflow name does not match the expected resource_prefix pattern."
   }
 
   assert {

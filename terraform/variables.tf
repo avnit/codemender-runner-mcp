@@ -143,12 +143,6 @@ variable "vpc_connector_machine_type" {
   description = "Machine type for the Serverless VPC Access Connector."
 }
 
-variable "scheduler_cron" {
-  type        = string
-  default     = "0 2 * * *"
-  description = "Cron expression for the Cloud Scheduler nightly trigger."
-}
-
 # --- WIF Scoping & Target Repositories ---
 
 variable "github_owner" {

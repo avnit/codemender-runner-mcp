@@ -69,7 +69,7 @@ jobs:
           echo "Entrypoint: $ENTRYPOINT"
           echo "Cmd: $CMD"
           test "$ENTRYPOINT" = '["cm-runner"]'
-          test "$CMD" = '["legacy"]'
+          test "$CMD" = '["version"]'
 
       - name: Verify Version Command
         run: |

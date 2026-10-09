@@ -440,23 +440,6 @@ class TestCmRunnerScript(unittest.TestCase):
     payload = json.loads(result.stdout.strip())
     self.assertEqual(payload["event"], "version")
 
-  @unittest.skipUnless(
-      os.path.exists(os.path.join(_PKG_DIR, "main.py")),
-      "requires legacy main.py",
-  )
-  def test_script_runs_legacy(self):
-    # Running legacy invokes main.py. Without env vars it exits with code 1.
-    result = subprocess.run(
-        [self._script, "legacy"],
-        cwd=_PKG_DIR,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    self.assertEqual(result.returncode, 1)
-    self.assertIn("GITHUB_REPO_URL is required", result.stderr)
-
   def test_script_exit_code_propagation(self):
     result = subprocess.run(
         [self._script, "--nonexistent-option"],
@@ -498,21 +481,6 @@ class TestPackageDirectoryExecution(unittest.TestCase):
     self.assertEqual(result.returncode, exit_codes.OK, result.stderr)
     payload = json.loads(result.stdout.strip())
     self.assertEqual(payload["event"], "version")
-
-  @unittest.skipUnless(
-      os.path.exists(os.path.join(_PKG_DIR, "main.py")),
-      "requires legacy main.py",
-  )
-  def test_package_directory_runs_legacy(self):
-    result = subprocess.run(
-        [sys.executable, _PKG_DIR, "legacy"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    self.assertEqual(result.returncode, 1)
-    self.assertIn("GITHUB_REPO_URL is required", result.stderr)
 
   def test_package_directory_usage_on_missing_command(self):
     result = subprocess.run(
@@ -692,37 +660,23 @@ class TestCliArchitectureRules(unittest.TestCase):
 class TestStdoutRedirectDuringCommand(unittest.TestCase):
   """ADR-0002 Confirmation: while a command runs, stray stdout writes land on stderr."""
 
-  @unittest.skipUnless(
-      os.path.exists(os.path.join(_PKG_DIR, "utils.py")),
-      "requires legacy utils.py",
-  )
   def test_git_helper_inside_command_leaves_stdout_clean(self):
-    """A vcs/git.py helper and a bare print() inside a command reach stderr only.
+    """A bare print() inside a command reaches stderr only.
 
     The probe goes through the real `cli.__main__.main`, with the `version`
-    command's `detect_cm` swapped for one that calls a git helper against a
-    noisy fake `git` (the legacy `utils.run_command` echoes child output to
-    `sys.stdout`) and then prints. This fails if `main` ever stops sending
-    stray stdout writes to stderr, or leaves them redirected after it returns.
+    command's `detect_cm` swapped for a helper that prints to `sys.stdout`.
+    This fails if `main` ever stops sending stray stdout writes to stderr,
+    or leaves them redirected after it returns.
     """
-    temp_dir = tempfile.mkdtemp(prefix="fake_git_")
+    temp_dir = tempfile.mkdtemp(prefix="fake_cm_")
     self.addCleanup(shutil.rmtree, temp_dir, True)
-
-    fake_git = os.path.join(temp_dir, "git")
-    with open(fake_git, "w", encoding="utf-8") as f:
-      f.write('#!/bin/sh\necho "fatal: not a git repo"\nexit 128\n')
-    os.chmod(fake_git, 0o755)
-    # `main` checks cm before the command runs, so a working stub sits next
-    # to the fake git.
     _write_stub_cm(temp_dir)
 
     probe = (
         "import sys\n"
         "import cli.commands.version as version_cmd\n"
         "from cli.__main__ import main\n"
-        "from vcs.git import clean_workspace\n"
         "def noisy_detect_cm(adapter):\n"
-        f"  clean_workspace({temp_dir!r})\n"
         "  print('stray print from a helper')\n"
         "  return {'found': True, 'version': '0.9.0', 'path': adapter.binary}\n"
         "version_cmd.detect_cm = noisy_detect_cm\n"
@@ -732,8 +686,6 @@ class TestStdoutRedirectDuringCommand(unittest.TestCase):
     )
 
     env = dict(os.environ)
-    # Only the fake git and the stub cm are reachable: no real cm or git can
-    # leak in.
     env["PATH"] = temp_dir
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env.pop("PYTHONPATH", None)
@@ -754,10 +706,6 @@ class TestStdoutRedirectDuringCommand(unittest.TestCase):
         len(lines), 1, f"stdout must hold only the version event, got:\n{res.stdout}"
     )
     self.assertEqual(json.loads(lines[0])["event"], "version")
-    # The noisy git output, subprocess delimiters and the print went to stderr.
-    self.assertIn(">>> [SUBPROCESS START]", res.stderr)
-    self.assertIn("fatal: not a git repo", res.stderr)
-    self.assertIn("<<< [SUBPROCESS END]", res.stderr)
     self.assertIn("stray print from a helper", res.stderr)
     self.assertIn("restored=True", res.stderr)
 
