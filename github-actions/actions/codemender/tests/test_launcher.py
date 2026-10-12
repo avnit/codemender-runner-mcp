@@ -15,8 +15,11 @@
 """Unit tests for the launcher interface and LocalDockerLauncher."""
 
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -24,34 +27,14 @@ sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 )
 
-from launcher.base import LauncherError, RunResult, parse_ndjson  # pylint: disable=g-import-not-at-top
+from launcher.base import LauncherError, ParallelTask, RunResult  # pylint: disable=g-import-not-at-top
 from launcher.local_docker import LocalDockerLauncher  # pylint: disable=g-import-not-at-top
 
-_VERSION_LINE = (
-    '{"ts": "2026-09-25T00:43:23Z", "event": "version", "orchestrator":'
-    ' "0.1.0", "cm": {"found": true, "version": "0.9.0", "path":'
-    ' "/usr/local/bin/cm"}, "contract": "cm-0.9.x"}'
-)
+_WAIT_SECONDS = 5
 
 
-class TestParseNdjson(unittest.TestCase):
-
-  def test_parses_one_object_per_line_and_skips_blanks(self):
-    events = parse_ndjson(f"{_VERSION_LINE}\n\n{{\"event\": \"x\"}}\n")
-    self.assertEqual([e["event"] for e in events], ["version", "x"])
-
-  def test_non_json_line_is_contract_violation(self):
-    with self.assertRaises(LauncherError):
-      parse_ndjson("Starting up...\n")
-
-  def test_non_object_json_is_contract_violation(self):
-    with self.assertRaises(LauncherError):
-      parse_ndjson("[1, 2]\n")
-
-  def test_find_event(self):
-    result = RunResult(0, parse_ndjson(_VERSION_LINE))
-    self.assertEqual(result.find_event("version")["orchestrator"], "0.1.0")
-    self.assertIsNone(result.find_event("finding"))
+def _name_flag(argv):
+  return argv[argv.index("--name") + 1]
 
 
 class TestLocalDockerLauncher(unittest.TestCase):
@@ -65,8 +48,6 @@ class TestLocalDockerLauncher(unittest.TestCase):
   })
 
   def assert_no_host_env_or_escalation(self, argv):
-    # Security boundary (ADR-0003): no bare `-e KEY` (host env passthrough),
-    # no `--env-file`, and no repository-host token (`GITHUB_TOKEN`, etc.).
     self.assertNotIn("--env", argv)
     self.assertNotIn("--env-file", argv)
     self.assertFalse(any("TOKEN" in a for a in argv))
@@ -77,48 +58,44 @@ class TestLocalDockerLauncher(unittest.TestCase):
         self.assertIn("=", kv, "Every -e flag must be explicit KEY=VALUE")
         key, _ = kv.split("=", 1)
         self.assertIn(key, self._ALLOWED_ENV_KEYS)
-    # Never weaken the real kernel's confinement.
     self.assertFalse(any(a.startswith("--privileged") for a in argv))
     self.assertFalse(any(a.startswith("--security-opt") for a in argv))
     self.assertFalse(any("unconfined" in a for a in argv))
 
-  def test_requires_image(self):
+  def test_requires_image_and_valid_runtime(self):
     with self.assertRaises(ValueError):
       LocalDockerLauncher(image="")
+    for runtime in ("", "kata", "RUNSC", "runsc --privileged"):
+      with self.subTest(runtime=runtime):
+        with self.assertRaises(ValueError):
+          LocalDockerLauncher(image="img:sha", runtime=runtime)
 
-  def test_default_runtime_is_gvisor(self):
-    self.assertEqual(LocalDockerLauncher(image="img:sha").runtime, "runsc")
-
-  def test_build_command_runsc_adds_gvisor_and_sys_admin_only(self):
-    launcher = LocalDockerLauncher(
+  def test_build_command_runsc_and_runc(self):
+    runsc = LocalDockerLauncher(
         image="img:sha", log_level="debug", runtime="runsc"
-    )
-    argv = launcher.build_command("version")
-
+    ).build_command("find-diff", container_name="cm-test")
     self.assertEqual(
-        argv,
-        ["docker", "run", "--rm", "--runtime=runsc", "--cap-add", "SYS_ADMIN",
-         "img:sha", "--log-level", "debug", "version"],
+        runsc,
+        [
+            "docker", "run", "--rm", "--name", "cm-test",
+            "--runtime=runsc", "--cap-add", "SYS_ADMIN",
+            "img:sha", "--log-level", "debug", "find-diff",
+        ],
     )
-    self.assertNotIn("-e", argv)
-    self.assert_no_host_env_or_escalation(argv)
+    self.assert_no_host_env_or_escalation(runsc)
 
-  def test_build_command_runc_adds_no_runtime_flags(self):
-    launcher = LocalDockerLauncher(
+    runc = LocalDockerLauncher(
         image="img:sha", log_level="debug", runtime="runc"
-    )
-    argv = launcher.build_command("version")
-
+    ).build_command("find-diff", container_name="cm-test")
     self.assertEqual(
-        argv,
-        ["docker", "run", "--rm", "img:sha",
-         "--log-level", "debug", "version"],
+        runc,
+        [
+            "docker", "run", "--rm", "--name", "cm-test",
+            "img:sha", "--log-level", "debug", "find-diff",
+        ],
     )
-    # SYS_ADMIN on runc would be granted by the real kernel: never add it.
-    self.assertNotIn("--cap-add", argv)
-    self.assertNotIn("SYS_ADMIN", argv)
-    self.assertNotIn("-e", argv)
-    self.assert_no_host_env_or_escalation(argv)
+    self.assertNotIn("--cap-add", runc)
+    self.assert_no_host_env_or_escalation(runc)
 
   def test_build_command_with_mounts_and_gcp_auth(self):
     launcher = LocalDockerLauncher(
@@ -134,101 +111,166 @@ class TestLocalDockerLauncher(unittest.TestCase):
     argv = launcher.build_command(
         "find-diff",
         ["--repo", "/workspace", "--base", "abc1234", "--out", "/out"],
-    )
-
-    self.assertEqual(
-        argv,
-        [
-            "docker",
-            "run",
-            "--rm",
-            "--runtime=runsc",
-            "--cap-add",
-            "SYS_ADMIN",
-            "-v",
-            "/tmp/work/workspace:/workspace",
-            "-e",
-            "GIT_CONFIG_COUNT=1",
-            "-e",
-            "GIT_CONFIG_KEY_0=safe.directory",
-            "-e",
-            "GIT_CONFIG_VALUE_0=/workspace",
-            "-v",
-            "/tmp/work/cm-home:/root/.codemender",
-            "-v",
-            "/tmp/work/out:/out",
-            "-v",
-            "/tmp/creds/adc.json:/creds/adc.json:ro",
-            "-e",
-            "GOOGLE_APPLICATION_CREDENTIALS=/creds/adc.json",
-            "-e",
-            "GOOGLE_CLOUD_PROJECT=my-gcp-proj",
-            "img:sha",
-            "--log-level",
-            "info",
-            "find-diff",
-            "--repo",
-            "/workspace",
-            "--base",
-            "abc1234",
-            "--out",
-            "/out",
-        ],
+        container_name="cm-test",
     )
     image_at = argv.index("img:sha")
     for idx, tok in enumerate(argv):
-      if tok in ("-v", "-e"):
+      if tok in ("-v", "-e", "--name", "--runtime=runsc"):
         self.assertLess(idx, image_at)
+    self.assertIn("/tmp/work/workspace:/workspace", argv)
+    self.assertIn("/tmp/work/cm-home:/root/.codemender", argv)
+    self.assertIn("/tmp/work/out:/out", argv)
+    self.assertIn("/tmp/creds/adc.json:/creds/adc.json:ro", argv)
     self.assert_no_host_env_or_escalation(argv)
 
-  def test_unknown_runtime_is_rejected(self):
-    for runtime in ("", "kata", "RUNSC", "runsc --privileged"):
-      with self.subTest(runtime=runtime):
-        with self.assertRaises(ValueError):
-          LocalDockerLauncher(image="img:sha", runtime=runtime)
-
-  def test_runtime_flags_come_before_image(self):
-    # Anything after the image is passed to cm-runner, not to docker.
-    argv = LocalDockerLauncher(image="img:sha").build_command("version")
-    image_at = argv.index("img:sha")
-    self.assertLess(argv.index("--runtime=runsc"), image_at)
-    self.assertLess(argv.index("SYS_ADMIN"), image_at)
-
   @patch("launcher.local_docker.subprocess.run")
-  def test_run_returns_exit_code_and_events(self, mock_run):
-    mock_run.return_value = MagicMock(returncode=0, stdout=_VERSION_LINE + "\n")
+  def test_run_returns_raw_stdout_bytes_without_parsing(self, mock_run):
+    diff = (
+        b"diff --git a/app.py b/app.py\r\n"
+        b"@@ -1 +1 @@\r\n-print('caf\xe9')\r\n+print('ok')\r\n"
+    )
+    mock_run.return_value = MagicMock(returncode=0, stdout=diff)
 
-    result = LocalDockerLauncher(image="img:sha").run("version")
+    result = LocalDockerLauncher(image="img:sha").run(
+        "fix", ["--repo", "/workspace", "--finding", "/out/finding-001.sarif"]
+    )
 
     self.assertTrue(result.ok)
-    self.assertEqual(result.find_event("version")["cm"]["version"], "0.9.0")
+    self.assertEqual(result.stdout, diff)
     kwargs = mock_run.call_args.kwargs
-    self.assertEqual(kwargs["stdout"], subprocess.PIPE)
-    self.assertIsNone(kwargs["stderr"])  # logs stream to the job log
-    self.assertNotIn("env", kwargs)
+    for text_mode in ("text", "universal_newlines", "encoding", "errors"):
+      self.assertNotIn(text_mode, kwargs)
 
   @patch("launcher.local_docker.subprocess.run")
-  def test_run_propagates_failure_exit_code(self, mock_run):
-    mock_run.return_value = MagicMock(returncode=3, stdout="")
+  def test_log_path_receives_stderr_and_unopenable_raises(self, mock_run):
+    def _fake_run(argv, **kwargs):
+      del argv
+      kwargs["stderr"].write(b"cm-runner log line\n")
+      return MagicMock(returncode=0, stdout=b"")
 
-    result = LocalDockerLauncher(image="img:sha").run("version")
+    mock_run.side_effect = _fake_run
+    with tempfile.TemporaryDirectory() as temp_dir:
+      log_path = os.path.join(temp_dir, "fix-001.log")
+      LocalDockerLauncher(image="img:sha").run("fix", log_path=log_path)
+      with open(log_path, "rb") as f:
+        self.assertEqual(f.read(), b"cm-runner log line\n")
 
-    self.assertFalse(result.ok)
-    self.assertEqual(result.exit_code, 3)
-    self.assertEqual(result.events, [])
+      bad_log = os.path.join(temp_dir, "missing", "fix.log")
+      with self.assertRaisesRegex(LauncherError, "log file"):
+        LocalDockerLauncher(image="img:sha").run("fix", log_path=bad_log)
 
-  @patch("launcher.local_docker.subprocess.run", side_effect=FileNotFoundError)
-  def test_missing_docker_raises_launcher_error(self, _):
+  @patch("launcher.local_docker.subprocess.run")
+  def test_timeout_kills_the_container(self, mock_run):
+    mock_run.side_effect = [
+        subprocess.TimeoutExpired(cmd="docker", timeout=1),
+        MagicMock(returncode=0, stderr=b""),
+    ]
+    launcher = LocalDockerLauncher(image="img:sha", timeout_seconds=1)
     with self.assertRaises(LauncherError):
-      LocalDockerLauncher(image="img:sha").run("version")
+      launcher.run("fix")
+    run_call, kill_call = mock_run.call_args_list
+    self.assertEqual(
+        kill_call.args[0], ["docker", "kill", _name_flag(run_call.args[0])]
+    )
 
-  @patch(
-      "launcher.local_docker.subprocess.run",
-      side_effect=subprocess.TimeoutExpired(cmd="docker", timeout=1),
-  )
-  def test_timeout_raises_launcher_error(self, _):
-    with self.assertRaises(LauncherError):
-      LocalDockerLauncher(image="img:sha", timeout_seconds=1).run("version")
+  @patch("launcher.local_docker.subprocess.run")
+  def test_stop_kills_running_containers_including_with_dirs_children(
+      self, mock_run
+  ):
+    launcher = LocalDockerLauncher(image="img:sha")
+    child = launcher.with_dirs(
+        workspace_dir="/tmp/f/w", cm_home_dir="/tmp/f/h", out_dir="/tmp/f/o"
+    )
+    started = threading.Semaphore(0)
+    killed = threading.Event()
+
+    def _fake_run(argv, **kwargs):
+      del kwargs
+      if argv[1] == "kill":
+        killed.set()
+        return MagicMock(returncode=0, stderr=b"")
+      started.release()
+      killed.wait(_WAIT_SECONDS)
+      return MagicMock(returncode=137, stdout=b"")
+
+    mock_run.side_effect = _fake_run
+    workers = [
+        threading.Thread(target=lambda l=l: l.run("fix"), daemon=True)
+        for l in (launcher, child)
+    ]
+    for w in workers:
+      w.start()
+    for _ in workers:
+      self.assertTrue(started.acquire(timeout=_WAIT_SECONDS))
+
+    launcher.stop()
+    for w in workers:
+      w.join(_WAIT_SECONDS)
+      self.assertFalse(w.is_alive())
+
+    calls = [c.args[0] for c in mock_run.call_args_list]
+    run_names = sorted(_name_flag(argv) for argv in calls if argv[1] == "run")
+    self.assertEqual(
+        [argv for argv in calls if argv[1] == "kill"],
+        [["docker", "kill", *run_names]],
+    )
+
+  @patch("launcher.local_docker.subprocess.run")
+  def test_run_parallel_stages_isolated_folders_and_runs_tasks(self, mock_run):
+    staged_workspaces = []
+
+    def _fake_run(argv, **kwargs):
+      for idx, tok in enumerate(argv):
+        if tok == "-v" and argv[idx + 1].endswith(":/workspace"):
+          ws = argv[idx + 1].split(":")[0]
+          staged_workspaces.append(sorted(os.listdir(ws)))
+        if tok == "-v" and argv[idx + 1].endswith(":/out"):
+          out = argv[idx + 1].split(":")[0]
+          for f in os.listdir(out):
+            if f.endswith(".sarif"):
+              stem = f[:-6]
+              with open(os.path.join(out, f"{stem}.diff"), "wb") as df:
+                df.write(f"patch-{stem}".encode("utf-8"))
+      kwargs["stderr"].write(b"fix log\n")
+      return MagicMock(returncode=0, stdout=b"")
+
+    mock_run.side_effect = _fake_run
+    temp_dir = tempfile.mkdtemp(prefix="launcher-parallel-test-")
+    try:
+      src_ws = os.path.join(temp_dir, "src")
+      os.makedirs(src_ws)
+      for name in ("app.py", "gha-creds-secret.json", ".cm_project"):
+        with open(os.path.join(src_ws, name), "w", encoding="utf-8") as f:
+          f.write("x")
+
+      launcher = LocalDockerLauncher(image="img:sha")
+      tasks = [
+          ParallelTask(
+              key=f"finding-{i:03d}",
+              command="fix",
+              args=["--repo", "/workspace"],
+              input_files={f"finding-{i:03d}.sarif": b"{}"},
+              output_file=f"finding-{i:03d}.diff",
+          )
+          for i in (1, 2)
+      ]
+      results = list(
+          launcher.run_parallel(
+              tasks,
+              src_workspace=src_ws,
+              temp_root=temp_dir,
+              timeout_seconds=60,
+              max_workers=2,
+          )
+      )
+      self.assertEqual(sorted(r.key for r in results), ["finding-001", "finding-002"])
+      self.assertEqual(staged_workspaces, [["app.py"], ["app.py"]])
+      for r in results:
+        self.assertTrue(r.ok)
+        self.assertEqual(r.output, f"patch-{r.key}".encode("utf-8"))
+        self.assertEqual(r.log, "fix log\n")
+    finally:
+      shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

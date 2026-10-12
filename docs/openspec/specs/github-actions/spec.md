@@ -279,8 +279,8 @@ To minimize differences between actions that execute via Cloud Run and those tha
    - Both `local` and `cloudrun` launchers MUST accept identical command-line invocations, subcommands, positional arguments, and CLI flags (e.g. `version`, `find-diff`, `fix`, `verify`, `--output json`, `--log-level`).
    - Neither backend may introduce backend-specific command flags, positional arguments, or alter parameter semantics.
 
-2. **Stream & NDJSON Contract Parity**:
-   - Both backends MUST strictly satisfy [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md) by streaming live operational logs on `stderr` and emitting schema-valid NDJSON events on `stdout`.
+2. **Stream & Output Contract Parity**:
+   - Both backends MUST strictly satisfy [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md) by streaming live operational logs on `stderr` and emitting each command's result in its standard format on `stdout` (NDJSON events for `version`/`init`, SARIF for `find-diff`, and raw unified diff bytes for `fix`, which the launcher keeps as raw bytes per [SPEC-GHA-FIX REQ-0003](../github-actions-fix/spec.md#req-0003)).
 
 3. **Workspace Filesystem & Artifact Symmetry**:
    - File exchange across the runner boundary is the standardized communication medium. All interactions MUST be constrained to interfaces that are supportable by both local containers and remote microVMs.

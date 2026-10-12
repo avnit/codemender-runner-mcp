@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Vanilla launcher: runs cm-runner with `docker run` on the GitHub Actions VM.
+"""Local Docker launcher: runs cm-runner with `docker run` on the GitHub Actions VM.
 
 Why `docker run` and not a job-level `container:`: with `container:`, every
 step of the job (including the ones holding GITHUB_TOKEN) runs inside the same
@@ -29,28 +29,43 @@ Container runtime (`runtime`):
                    sandbox can't start under it (`operation not permitted`),
                    so this is only an explicit opt-out.
 
-Never added, whatever the runtime: `--privileged`, any
-`--security-opt ...=unconfined`, `--env-file`, bare `-e VAR` (host-env
-passthrough), or any repository-host token (`GITHUB_TOKEN`, `GH_TOKEN`,
-`ACTIONS_*`). Only explicit `KEY=VALUE` flags from the allowlist below are
-passed into the container (ADR-0003).
+Never added, whatever the runtime: `--privileged`, `--security-opt ...=unconfined`,
+`--env-file`, bare `-e VAR` (host-env passthrough), or any repository-host token
+(`GITHUB_TOKEN`, `GH_TOKEN`, `ACTIONS_*`). Only explicit `KEY=VALUE` flags from
+the allowlist below are passed into the container (ADR-0003).
 """
 
+import contextlib
 import logging
+import os
+import re
+import shutil
+import stat
 import subprocess
-from typing import List, Optional, Sequence
+import tempfile
+import threading
+from typing import BinaryIO, ContextManager, List, Optional, Sequence, Set
+import uuid
 
-from launcher.base import Launcher, LauncherError, RunResult, parse_ndjson
+from launcher.base import (
+    EXIT_OK,
+    Launcher,
+    LauncherError,
+    ParallelResult,
+    ParallelTask,
+    RunResult,
+)
 
 logger = logging.getLogger("codemender-github-actions")
 
 _DEFAULT_TIMEOUT_SECONDS = 60 * 60
+_KILL_TIMEOUT_SECONDS = 10
 
 RUNTIME_GVISOR = "runsc"
 RUNTIME_RUNC = "runc"
 SUPPORTED_RUNTIMES = (RUNTIME_GVISOR, RUNTIME_RUNC)
 
-# Canonical in-container paths used by `init` and `find-diff`.
+# Canonical in-container paths used by `find-diff` and `fix`.
 CONTAINER_WORKSPACE_DIR = "/workspace"
 CONTAINER_CM_HOME_DIR = "/root/.codemender"
 CONTAINER_OUT_DIR = "/out"
@@ -63,9 +78,14 @@ _RUNTIME_FLAGS = {
     RUNTIME_RUNC: (),
 }
 
+_CONTAINER_NAME_UNSAFE_CHARS = re.compile(r"[^a-zA-Z0-9_.-]")
+
+# Excluded when staging isolated workspace copies for container runs.
+_COPY_IGNORE = ("gha-creds-*.json", ".cm_project", ".exploit")
+
 
 class LocalDockerLauncher(Launcher):
-  """Runs cm-runner in a throwaway container on the local Docker daemon."""
+  """Runs cm-runner in throwaway container(s) on the local Docker daemon."""
 
   def __init__(
       self,
@@ -89,15 +109,14 @@ class LocalDockerLauncher(Launcher):
       docker_binary: Docker CLI to invoke (overridable for tests).
       runtime: Container runtime, `runsc` (gVisor, default) or `runc`.
       workspace_dir: Optional host directory mounted at `/workspace`.
-      cm_home_dir: Optional host directory mounted at `/root/.codemender` so
-        `find-diff` sees the config written by `init`.
-      out_dir: Optional host directory mounted at `/out` for report artifacts.
+      cm_home_dir: Optional host directory mounted at `/root/.codemender`.
+      out_dir: Optional host directory mounted at `/out` for report/patch files.
       gcp_credentials_file: Optional host WIF/ADC JSON file mounted read-only
         at `/creds/adc.json`.
       gcp_project: Optional GCP project ID passed as `GOOGLE_CLOUD_PROJECT`.
 
     Raises:
-      ValueError: if `image` is empty or `runtime` is not supported.
+      ValueError: If `image` is empty or `runtime` is not supported.
     """
     if not image:
       raise ValueError("A cm-runner image is required.")
@@ -116,6 +135,244 @@ class LocalDockerLauncher(Launcher):
     self.out_dir = out_dir
     self.gcp_credentials_file = gcp_credentials_file
     self.gcp_project = gcp_project
+    self._running_lock = threading.RLock()
+    self._running: Set[str] = set()
+    self._stopped = False
+
+  def with_dirs(
+      self,
+      *,
+      workspace_dir: Optional[str],
+      cm_home_dir: Optional[str],
+      out_dir: Optional[str],
+      timeout_seconds: Optional[int] = None,
+  ) -> "LocalDockerLauncher":
+    """Returns a launcher with the same image and settings but different directories.
+
+    The returned launcher shares this launcher's active-container set and lock
+    so `stop()` on the parent terminates containers started by child launchers.
+
+    Args:
+      workspace_dir: Host directory mounted at `/workspace`.
+      cm_home_dir: Host directory mounted at `/root/.codemender`.
+      out_dir: Host directory mounted at `/out`.
+      timeout_seconds: Optional timeout override in seconds.
+
+    Returns:
+      A new `LocalDockerLauncher` sharing active-container tracking.
+    """
+    child = LocalDockerLauncher(
+        image=self.image,
+        log_level=self.log_level,
+        timeout_seconds=(
+            self.timeout_seconds if timeout_seconds is None else timeout_seconds
+        ),
+        docker_binary=self.docker_binary,
+        runtime=self.runtime,
+        workspace_dir=workspace_dir,
+        cm_home_dir=cm_home_dir,
+        out_dir=out_dir,
+        gcp_credentials_file=self.gcp_credentials_file,
+        gcp_project=self.gcp_project,
+    )
+    child._running_lock = self._running_lock  # pylint: disable=protected-access
+    child._running = self._running  # pylint: disable=protected-access
+    return child
+
+  def build_command(
+      self,
+      command: str,
+      args: Sequence[str] = (),
+      container_name: Optional[str] = None,
+  ) -> List[str]:
+    """Builds the `docker run` argv for one cm-runner command.
+
+    The image's ENTRYPOINT is `cm-runner`, so everything after the image name
+    is passed to cm-runner. Host environment variables (and in particular
+    `GITHUB_TOKEN`) are never inherited; only explicit allowlisted `-e
+    KEY=VALUE` flags from `_mount_and_env_flags` are added.
+
+    Args:
+      command: cm-runner subcommand name.
+      args: Extra arguments for the subcommand.
+      container_name: Optional `--name` for the container.
+
+    Returns:
+      Complete `docker run` command list.
+    """
+    return [
+        self.docker_binary,
+        "run",
+        "--rm",
+        "--name",
+        container_name or _container_name(command),
+        *_RUNTIME_FLAGS[self.runtime],
+        *self._mount_and_env_flags(),
+        self.image,
+        "--log-level",
+        self.log_level,
+        command,
+        *args,
+    ]
+
+  def run(
+      self,
+      command: str,
+      args: Sequence[str] = (),
+      log_path: Optional[str] = None,
+  ) -> RunResult:
+    """Runs `cm-runner <command> [args]` in a throwaway container.
+
+    Args:
+      command: cm-runner subcommand, e.g. `"find-diff"` or `"fix"`.
+      args: Extra arguments for the subcommand.
+      log_path: Optional file path to redirect container `stderr` logs to
+        instead of inheriting the host's `stderr`.
+
+    Returns:
+      `RunResult` with the process exit code and raw `stdout` bytes.
+
+    Raises:
+      LauncherError: If the Docker CLI is missing, `log_path` cannot be opened,
+        or the container times out (after killing the timed-out container).
+    """
+    name = _container_name(command)
+    argv = self.build_command(command, args, container_name=name)
+    logger.info("Starting cm-runner: %s", " ".join(argv))
+    with _stderr_target(log_path) as stderr:
+      with self._running_lock:
+        self._running.add(name)
+      try:
+        proc = subprocess.run(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=stderr,
+            timeout=self.timeout_seconds,
+            check=False,
+        )
+      except FileNotFoundError as e:
+        raise LauncherError(
+            f"Docker CLI {self.docker_binary!r} not found on this runner."
+        ) from e
+      except subprocess.TimeoutExpired as e:
+        self._kill([name])
+        raise LauncherError(
+            f"cm-runner {command!r} timed out after {self.timeout_seconds}s."
+        ) from e
+      finally:
+        with self._running_lock:
+          self._running.discard(name)
+
+    return RunResult(exit_code=proc.returncode, stdout=proc.stdout or b"")
+
+  def run_isolated(
+      self,
+      task: ParallelTask,
+      src_workspace: str,
+      temp_root: Optional[str] = None,
+      timeout_seconds: Optional[int] = None,
+  ) -> ParallelResult:
+    """Runs `task` in its own isolated temp folder and container.
+
+    Args:
+      task: Task descriptor with subcommand, arguments, and `/out` files.
+      src_workspace: Host directory of the clean repository checkout to copy.
+      temp_root: Optional parent directory for the task's temporary folder.
+      timeout_seconds: Optional timeout override for this task's container run.
+
+    Returns:
+      `ParallelResult` with exit code, output bytes, and captured container log.
+    """
+    try:
+      folder = tempfile.mkdtemp(prefix="codemender-task-", dir=temp_root or None)
+    except OSError as e:
+      return ParallelResult(
+          key=task.key, error=f"Could not create task folder: {e}"
+      )
+
+    try:
+      workspace_dir = os.path.join(folder, "workspace")
+      cm_home_dir = os.path.join(folder, "cm-home")
+      out_dir = os.path.join(folder, "out")
+      log_path = os.path.join(folder, "task.log")
+      try:
+        shutil.copytree(
+            src_workspace,
+            workspace_dir,
+            symlinks=True,
+            ignore=shutil.ignore_patterns(*_COPY_IGNORE),
+        )
+        make_world_writable(workspace_dir)
+        os.makedirs(cm_home_dir, exist_ok=True)
+        os.makedirs(out_dir, exist_ok=True)
+        for rel_name, content in task.input_files.items():
+          target = os.path.join(out_dir, rel_name)
+          os.makedirs(os.path.dirname(target), exist_ok=True)
+          with open(target, "wb") as f:
+            f.write(content)
+      except OSError as e:
+        return ParallelResult(
+            key=task.key, error=f"Could not stage task folder: {e}"
+        )
+
+      with self._running_lock:
+        if self._stopped:
+          return ParallelResult(
+              key=task.key, error="Stopped before the task started."
+          )
+        child = self.with_dirs(
+            workspace_dir=workspace_dir,
+            cm_home_dir=cm_home_dir,
+            out_dir=out_dir,
+            timeout_seconds=timeout_seconds,
+        )
+
+      try:
+        run_res = child.run(task.command, task.args, log_path=log_path)
+      except LauncherError as e:
+        return ParallelResult(
+            key=task.key, error=str(e), log=_read_text(log_path)
+        )
+
+      log_text = _read_text(log_path)
+      output = b""
+      if task.output_file:
+        out_path = os.path.join(out_dir, task.output_file)
+        if os.path.isfile(out_path) and not os.path.islink(out_path):
+          try:
+            with open(out_path, "rb") as f:
+              output = f.read()
+          except OSError as e:
+            return ParallelResult(
+                key=task.key,
+                exit_code=run_res.exit_code,
+                log=log_text,
+                error=f"Could not read output file: {e}",
+            )
+
+      error = ""
+      if run_res.exit_code != EXIT_OK:
+        error = f"cm-runner exited with code {run_res.exit_code}."
+      elif task.output_file and not output.strip():
+        error = "cm-runner exited with code 0 but wrote no output."
+
+      return ParallelResult(
+          key=task.key,
+          exit_code=run_res.exit_code,
+          output=output,
+          log=log_text,
+          error=error,
+      )
+    finally:
+      shutil.rmtree(folder, ignore_errors=True)
+
+  def stop(self) -> None:
+    """Kills all containers started by this launcher that are still running."""
+    with self._running_lock:
+      self._stopped = True
+      names = sorted(self._running)
+    if names:
+      self._kill(names)
 
   def _mount_and_env_flags(self) -> List[str]:
     """Builds volume (`-v`) and allowlisted `-e KEY=VALUE` flags."""
@@ -150,49 +407,71 @@ class LocalDockerLauncher(Launcher):
       flags += ["-e", f"GOOGLE_CLOUD_PROJECT={self.gcp_project}"]
     return flags
 
-  def build_command(self, command: str, args: Sequence[str] = ()) -> List[str]:
-    """Builds the `docker run` argv for one cm-runner command.
-
-    The image's ENTRYPOINT is `cm-runner`, so everything after the image name
-    is passed to cm-runner. Host environment variables (and in particular
-    `GITHUB_TOKEN`) are never inherited; only explicit allowlisted `-e
-    KEY=VALUE` flags from `_mount_and_env_flags` are added.
-    """
-    return [
-        self.docker_binary,
-        "run",
-        "--rm",
-        *_RUNTIME_FLAGS[self.runtime],
-        *self._mount_and_env_flags(),
-        self.image,
-        "--log-level",
-        self.log_level,
-        command,
-        *args,
-    ]
-
-  def run(self, command: str, args: Sequence[str] = ()) -> RunResult:
-    argv = self.build_command(command, args)
-    logger.info("Starting cm-runner: %s", " ".join(argv))
+  def _kill(self, names: Sequence[str]) -> None:
+    argv = [self.docker_binary, "kill", *names]
+    logger.info("Killing cm-runner container(s): %s", " ".join(names))
     try:
-      # stdout is captured (NDJSON contract). stderr is inherited so cm-runner
-      # logs stream live into the GitHub Actions log (ADR-0001).
       proc = subprocess.run(
           argv,
-          stdout=subprocess.PIPE,
-          stderr=None,
-          text=True,
-          timeout=self.timeout_seconds,
+          stdout=subprocess.DEVNULL,
+          stderr=subprocess.PIPE,
+          timeout=_KILL_TIMEOUT_SECONDS,
           check=False,
       )
-    except FileNotFoundError as e:
-      raise LauncherError(
-          f"Docker CLI {self.docker_binary!r} not found on this runner."
-      ) from e
-    except subprocess.TimeoutExpired as e:
-      raise LauncherError(
-          f"cm-runner {command!r} timed out after {self.timeout_seconds}s."
-      ) from e
+    except (OSError, subprocess.SubprocessError) as e:
+      logger.warning("Could not run %s: %s", " ".join(argv), e)
+      return
+    if proc.returncode != 0:
+      logger.warning(
+          "%s exited with code %s: %s",
+          " ".join(argv),
+          proc.returncode,
+          (proc.stderr or b"").decode("utf-8", errors="replace").strip(),
+      )
 
-    events = parse_ndjson(proc.stdout or "")
-    return RunResult(exit_code=proc.returncode, events=events)
+
+def _container_name(command: str) -> str:
+  safe_command = _CONTAINER_NAME_UNSAFE_CHARS.sub("-", command)
+  return f"codemender-{safe_command}-{uuid.uuid4().hex[:12]}"
+
+
+def _stderr_target(
+    log_path: Optional[str],
+) -> ContextManager[Optional[BinaryIO]]:
+  if not log_path:
+    return contextlib.nullcontext()
+  try:
+    return open(log_path, "wb")
+  except OSError as e:
+    raise LauncherError(
+        f"Could not open cm-runner log file {log_path!r}: {e}"
+    ) from e
+
+
+def _read_text(path: str) -> str:
+  if not path or not os.path.isfile(path):
+    return ""
+  try:
+    with open(path, "rb") as f:
+      return f.read().decode("utf-8", errors="replace")
+  except OSError:
+    return ""
+
+
+def make_world_writable(root: str) -> None:
+  """Makes directories and regular files under `root` writable inside gVisor."""
+  for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+    if not os.path.islink(dirpath):
+      try:
+        os.chmod(dirpath, stat.S_IMODE(os.stat(dirpath).st_mode) | 0o777)
+      except OSError:
+        pass
+    for name in (*dirnames, *filenames):
+      full = os.path.join(dirpath, name)
+      if os.path.islink(full):
+        continue
+      try:
+        mode = stat.S_IMODE(os.stat(full).st_mode)
+        os.chmod(full, mode | (0o777 if os.path.isdir(full) else 0o666))
+      except OSError:
+        pass

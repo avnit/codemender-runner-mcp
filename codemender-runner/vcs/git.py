@@ -15,6 +15,7 @@
 """Git URL and repository manipulation utilities for CodeMender Agent."""
 
 import base64
+from dataclasses import dataclass
 import logging
 import os
 import re
@@ -22,6 +23,35 @@ import subprocess
 from typing import List, Optional, Sequence, Tuple
 
 logger = logging.getLogger("codemender-orchestrator")
+
+
+def normalize_repo_relative_path(path: str, repo_dir: Optional[str] = None) -> str:
+  """Normalizes a file path to be strictly repository-relative with forward slashes and no leading './'."""
+  if not path:
+    return ""
+  p = path.strip().replace("\\", "/")
+  if repo_dir:
+    clean_repo_dir = os.path.abspath(repo_dir).replace("\\", "/")
+    if p == clean_repo_dir:
+      return ""
+    if p.startswith(clean_repo_dir + "/"):
+      p = p[len(clean_repo_dir) + 1 :]
+    elif os.path.isabs(p):
+      try:
+        rel = os.path.relpath(p, clean_repo_dir).replace("\\", "/")
+        if not rel.startswith("../") and rel != "..":
+          p = rel
+      except ValueError:
+        pass
+
+  # Strip leading CI runner mount patterns if present (e.g. /__w/<owner>/<repo>/... or /github/workspace/...)
+  p = re.sub(r"^/?__w/[^/]+/[^/]+(?:/[^/]+)?/", "", p)
+  p = re.sub(r"^/?github/workspace/", "", p)
+
+  # Strip any leading slashes, dots, or relative traversal markers
+  p = re.sub(r"^(\.\./)+", "", p)
+  p = re.sub(r"^\.?/+", "", p)
+  return p
 
 
 def enforce_https_url(url: str) -> str:
@@ -116,6 +146,208 @@ def ref_exists(repo_dir: str, ref: str) -> bool:
   except (OSError, subprocess.SubprocessError):
     return False
 
+
+@dataclass(frozen=True)
+class SuggestionHunk:
+  """A contiguous RIGHT-side line range replaceable by a GitHub suggestion block."""
+
+  path: str
+  start_line: int
+  end_line: int
+  replacement_lines: List[str]
+
+
+_HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+_DIFF_GIT_RE = re.compile(r"^diff --git (?:[abciwo]/)?(.+?) (?:[abciwo]/)?(.+)$")
+
+
+def _read_head_file_lines(repo_dir: str, path: str) -> Optional[List[str]]:
+  """Reads a file's contents at HEAD (the PR head commit), bypassing the mutated working tree."""
+  raw = _run_git_for_bytes(repo_dir, ["show", f"HEAD:{path}"])
+  if raw is None:
+    return None
+  lines = raw.decode("utf-8", errors="replace").split("\n")
+  if lines and lines[-1] == "":
+    lines.pop()
+  return lines
+
+
+def _build_suggestion_hunk(
+    repo_dir: str,
+    path: str,
+    old_start: int,
+    old_count: int,
+    body: List[str],
+    head_cache: dict,
+) -> Tuple[Optional[SuggestionHunk], Optional[str]]:
+  """Converts one unified-diff hunk body into a suggestion anchor plus replacement text.
+
+  Returns:
+    (hunk, None) on success, (None, None) when the hunk contains no changes, or
+    (None, reason) when the hunk cannot be expressed as a GitHub suggestion.
+  """
+  change_indices = [k for k, b in enumerate(body) if b[:1] in ("+", "-")]
+  if not change_indices:
+    # Context-only hunk: nothing to suggest.
+    return None, None
+
+  first, last = change_indices[0], change_indices[-1]
+  window = body[first : last + 1]
+
+  # Trim surrounding context so the anchor range stays as narrow as possible,
+  # which maximizes the chance it falls inside the Pull Request's diff hunks.
+  leading_old = sum(1 for b in body[:first] if b[:1] in (" ", "-"))
+  consumed_old = sum(1 for b in window if b[:1] in (" ", "-"))
+  replacement = [b[1:] for b in window if b[:1] in (" ", "+")]
+  anchor_start = old_start + leading_old
+
+  # Standard case: the hunk replaces one or more existing lines.
+  if consumed_old > 0:
+    return (
+        SuggestionHunk(
+            path=path,
+            start_line=anchor_start,
+            end_line=anchor_start + consumed_old - 1,
+            replacement_lines=replacement,
+        ),
+        None,
+    )
+
+  # Pure insertion: no existing lines are consumed, so resolve which old line
+  # the new content is inserted in front of. Git's zero-length range form
+  # (`@@ -5,0 +6,2 @@`) anchors *after* line 5; a context-bearing hunk whose
+  # change window is insert-only inserts *before* the computed anchor line.
+  insert_before = (old_start + 1) if old_count == 0 else anchor_start
+
+  if path not in head_cache:
+    head_cache[path] = _read_head_file_lines(repo_dir, path)
+  head_lines = head_cache[path]
+  if not head_lines:
+    return None, f"cannot read '{path}' at HEAD to anchor an insertion"
+
+  # Prefer anchoring on the preceding line so the insertion reads naturally.
+  preceding = insert_before - 1
+  if 1 <= preceding <= len(head_lines):
+    return (
+        SuggestionHunk(
+            path=path,
+            start_line=preceding,
+            end_line=preceding,
+            replacement_lines=[head_lines[preceding - 1]] + replacement,
+        ),
+        None,
+    )
+
+  # Insertion at the very top of the file: anchor the following line instead.
+  if 1 <= insert_before <= len(head_lines):
+    return (
+        SuggestionHunk(
+            path=path,
+            start_line=insert_before,
+            end_line=insert_before,
+            replacement_lines=replacement + [head_lines[insert_before - 1]],
+        ),
+        None,
+    )
+
+  return None, f"cannot anchor an insertion in '{path}'"
+
+
+def parse_patch_to_suggestions(
+    repo_dir: str, patch_diff: str
+) -> Tuple[List[SuggestionHunk], List[str]]:
+  """Converts a unified diff produced against HEAD into GitHub suggestion hunks.
+
+  The patch is generated by `git diff HEAD` where HEAD is the Pull Request head
+  commit, so the diff's OLD side corresponds to the RIGHT side of the Pull
+  Request's own diff. Suggestion anchors are therefore derived from the old
+  line numbers.
+
+  Returns:
+    A tuple of (hunks, blockers). A non-empty `blockers` list means the patch
+    cannot be fully represented as suggestions and the caller must fall back.
+  """
+  hunks: List[SuggestionHunk] = []
+  blockers: List[str] = []
+
+  if not patch_diff or not patch_diff.strip():
+    return hunks, ["patch is empty"]
+
+  lines = patch_diff.splitlines()
+  head_cache: dict = {}
+  current_path: Optional[str] = None
+  file_blocked = False
+  i = 0
+
+  while i < len(lines):
+    line = lines[i]
+
+    # 1. File header: resolve the target path and reset per-file state
+    file_match = _DIFF_GIT_RE.match(line)
+    if file_match:
+      old_path, new_path = file_match.group(1), file_match.group(2)
+      current_path = normalize_repo_relative_path(new_path)
+      file_blocked = False
+      if old_path != new_path:
+        blockers.append(f"renames '{old_path}' to '{new_path}'")
+        file_blocked = True
+      elif current_path == ".github" or current_path.startswith(".github/"):
+        blockers.append(f"modifies workflow or GitHub configuration '{current_path}'")
+        file_blocked = True
+      i += 1
+      continue
+
+    # 2. Structural markers that cannot be expressed as a suggestion
+    label = current_path or "unknown file"
+    if line.startswith("new file mode"):
+      blockers.append(f"creates a new file '{label}'")
+      file_blocked = True
+    elif line.startswith("deleted file mode") or line.startswith("+++ /dev/null"):
+      blockers.append(f"deletes file '{label}'")
+      file_blocked = True
+    elif line.startswith("Binary files ") or line.startswith("GIT binary patch"):
+      blockers.append(f"contains a binary change to '{label}'")
+      file_blocked = True
+
+    # 3. Hunk header: collect the body and convert it
+    hunk_match = _HUNK_HEADER_RE.match(line)
+    if not hunk_match:
+      i += 1
+      continue
+
+    old_start = int(hunk_match.group(1))
+    old_count = int(hunk_match.group(2)) if hunk_match.group(2) is not None else 1
+    body: List[str] = []
+    i += 1
+    while i < len(lines):
+      candidate = lines[i]
+      if _HUNK_HEADER_RE.match(candidate) or candidate.startswith("diff --git "):
+        break
+      # Skip the "\ No newline at end of file" marker
+      if candidate.startswith("\\"):
+        i += 1
+        continue
+      if candidate == "":
+        body.append(" ")
+      elif candidate[0] in " +-":
+        body.append(candidate)
+      i += 1
+
+    if file_blocked or not current_path:
+      continue
+
+    hunk, reason = _build_suggestion_hunk(
+        repo_dir, current_path, old_start, old_count, body, head_cache
+    )
+    if reason:
+      blockers.append(reason)
+    elif hunk:
+      hunks.append(hunk)
+
+  if not hunks and not blockers:
+    blockers.append("patch contains no applicable changes")
+
+  return hunks, blockers
 
 # How long the working-tree helpers below wait for one Git call.
 _WORKTREE_GIT_TIMEOUT_SEC = 120

@@ -95,15 +95,23 @@ _REPORT_TIMEOUT_SEC = 60.0
 
 @dataclasses.dataclass(frozen=True)
 class Finding:
-  """One finding in `cm`'s local database, as read from `cm report --format json`.
+  """One finding from `cm` or a SARIF report.
 
   Attributes:
-    finding_id: The ID `cm` assigned to the finding.
+    finding_id: The ID or fingerprint identifying the finding.
     status: `cm`'s lifecycle status (e.g. "OPEN", "FIXED", "VERIFIED").
     title: Short title reported by `cm`, if present.
     severity: Severity reported by `cm`, if present.
-    file_path: Repository-relative file path reported by `cm`, if present.
+    file_path: Repository-relative file path, if present.
     dismiss_reason: Reason `cm` gave when dismissing a finding, if present.
+    index: 1-based position of the finding in a SARIF report (0 when unset).
+    start_line: First flagged line (1-based), or 0 when unset.
+    end_line: Last flagged line, or 0 when unset.
+    rule_id: SARIF rule ID, if present.
+    level: SARIF level (`error`, `warning`, `note`), in lower case.
+    message: Full SARIF message text, if present.
+    document: Single-result SARIF document for this finding, when split from a
+      SARIF report.
   """
 
   finding_id: str
@@ -112,6 +120,15 @@ class Finding:
   severity: str = ""
   file_path: str = ""
   dismiss_reason: str = ""
+  index: int = 0
+  start_line: int = 0
+  end_line: int = 0
+  rule_id: str = ""
+  level: str = ""
+  message: str = ""
+  document: Optional[Dict[str, Any]] = dataclasses.field(
+      default=None, repr=False, compare=False
+  )
 
   @classmethod
   def from_report_item(cls, item: Dict[str, Any]) -> Optional["Finding"]:
@@ -142,6 +159,16 @@ class Finding:
   def is_dismissed(self) -> bool:
     """True when `cm verify` has refuted/dismissed this finding."""
     return self.status in ("DISMISSED", "FALSE_POSITIVE")
+
+  @property
+  def path(self) -> str:
+    """Alias for `file_path`."""
+    return self.file_path
+
+  @property
+  def name(self) -> str:
+    """The finding's file stem, e.g. `finding-007`."""
+    return f"finding-{self.index:03d}" if self.index else self.finding_id
 
 
 def _parse_token_count(text: str) -> int:

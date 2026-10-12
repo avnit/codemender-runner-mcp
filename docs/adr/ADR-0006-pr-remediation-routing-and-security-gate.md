@@ -28,45 +28,44 @@ How should the orchestrator route remediations and enforce merge criteria across
 
 ## Decision Outcome
 
-Chosen option: **"Option 3: Tiered Remediation Routing & Dedicated Commit Status Gate"**, implemented in `codemender-runner/runners/worker.py`, `vcs/github.py`, and `runners/aggregate.py`.
+Chosen option: **"Option 3: Tiered Remediation Routing & Dedicated Commit Status Gate"**, implemented in the GitHub Action (`github-actions/actions/codemender/`, [SPEC-GHA-FIX](../openspec/specs/github-actions-fix/spec.md)) and the legacy runner pipeline (`codemender-runner/runners/worker.py`, `vcs/github.py`, and `runners/aggregate.py`).
 
 ### Remediation Routing Rules
 
-1.  **Differential PR Filtering & Dependency Exposure (`find --diff`)**:
-    *   On PR scans, discovered findings are evaluated against the PR changes (`git diff -U0 origin/<pr_base_ref>...HEAD`).
+1.  **Differential PR Filtering & Dependency Exposure (`find-diff --base <PR base SHA>`)**:
+    *   On PR scans, discovered findings are evaluated against the PR changes (`git diff -U0 <pr_base_sha>...HEAD` on a checkout of the PR head).
     *   Findings are considered actionable if they either:
         a. Directly modify or introduce vulnerable code lines within the PR diff, or
         b. Introduce code paths, call sites, or configurations that open up, activate, or insecurely utilize existing code or dependencies. For example, if newly introduced code calls a vulnerable API in an existing library, `cm fix` can suggest updating the dependency in package manifests or adapting the call site.
-    *   Untouched, dormant legacy findings are marked ignored in the findings manifest and excluded from remediation tasks, keeping PR reviews noise-free.
+    *   Untouched, dormant legacy findings are excluded from remediation tasks, keeping PR reviews noise-free.
 2.  **Tier 1 (Default): One-Click Inline Review Suggestions**:
-    *   Fix patches are parsed into contiguous diff line ranges and posted as ` ```suggestion ` blocks in a single GitHub PR review.
+    *   When a patch touches a single file, does not modify `.github/`, and all of its hunks fall within the PR diff, it is parsed into contiguous diff line ranges and posted as ` ```suggestion ` blocks in a single GitHub PR review per finding (all-or-nothing per patch).
     *   Developers can accept the fix with a single click in GitHub without pulling branches locally.
-    *   Each comment embeds an invisible HTML marker `<!-- codemender-finding:<id> -->` to achieve idempotent deduplication across re-runs.
-3.  **Tier 2 (Fallback): Child Pull Requests with Transactional Rollback**:
-    *   If a patch touches lines outside the PR diff, adds new binary files, or if `pr_remediation_mode == "child_pr"`: the worker pushes `codemender/fix-<vuln>-<hash>` and opens a **Child PR** targeting the developer's feature branch (`pr_head_ref`).
+    *   Each comment embeds an invisible HTML marker `<!-- codemender-finding:<fingerprint> -->` (where `<fingerprint>` is a hash of the file path, rule ID, and flagged source lines, because `cm`'s internal finding IDs change on every run) to achieve idempotent deduplication across re-runs and subsequent pushes.
+3.  **Tier 2: Child Pull Requests with Transactional Rollback (When Branch Write Access Is Enabled)**:
+    *   In environments configured with repository branch-push permissions (`contents: write` and `pr_remediation_mode == "child_pr"`), if a patch touches lines outside the PR diff or adds new binary files, the worker pushes `codemender/fix-<vuln>-<hash>` and opens a **Child PR** targeting the developer's feature branch (`pr_head_ref`).
     *   **Transactional Rollback:** If PR creation fails or is rejected, the worker automatically deletes the remote branch via `git push origin --delete` to prevent branch clutter.
-4.  **Tier 3: Fork Pull Request Safe Handling**:
-    *   For fork PRs where branch push access is rejected, the worker posts a structured Markdown review comment containing the patch diff and local `git apply` instructions.
+    *   In the default least-privilege GitHub Action workflow (`contents: read`, `pull-requests: write`), child PRs are not opened and patches that cannot be inline suggestions route directly to Tier 3.
+4.  **Tier 3 (Fallback): Collapsible Patch Comment**:
+    *   Whenever a patch cannot be posted as an inline suggestion (for example when it touches lines outside the PR diff, spans multiple files, touches `.github/`, or runs on a fork PR or read-only checkout without branch-push access), the action posts a structured Markdown review comment on the flagged line (or PR comment) containing the unified diff collapsed in `<details>` and local `git apply` instructions.
 
 ### Security Quality Gate Contract
 
-*   The Aggregator (Stage 3) posts a dedicated GitHub Commit Status check: `CodeMender / Security Gate`.
-*   If actionable, un-remediated vulnerabilities exist on the PR diff and `fail_on_findings == true`:
-    *   The Commit Status is marked `failure` (blocking GitHub branch protection rules).
-    *   However, the workflow itself completes cleanly (`exit 0`), ensuring SARIF alerts, HTML dashboards, and Step Summaries are uploaded to GitHub Security tabs.
+*   Findings and failed fixes never fail the CI workflow execution itself (`exit 0`), ensuring SARIF reports, Markdown summaries, and generated `.diff` patches are always uploaded as workflow artifacts.
+*   When security gating is enabled in the aggregator (`fail_on_findings == true`), a dedicated GitHub Commit Status check (`CodeMender / Security Gate`) is posted and marked `failure` when actionable, un-remediated vulnerabilities remain on the PR diff.
 
 ### Consequences
 
 *   **Good:** Clean as You Code: Developers are never blocked by pre-existing legacy issues they did not touch.
 *   **Good:** Zero git push race conditions across parallel workers.
-*   **Good:** Universal support for internal and fork PRs with graceful fallbacks.
+*   **Good:** Universal support for internal and fork PRs with graceful fallbacks and least-privilege `contents: read` operation.
 *   **Good:** Clear separation between workflow execution status (did the CI job run?) and security policy status (did the code pass security audit?).
-*   **Bad:** Inline suggestions cannot span files not already modified in the PR diff (handled cleanly by Child PR fallback).
+*   **Bad:** Inline suggestions cannot span files or lines not already modified in the PR diff (handled cleanly by Tier 2 / Tier 3 fallback).
 
 ### Confirmation
 
-*   **PR Review Unit Tests:** Verified via `codemender-runner/tests/test_pr_review_suggestions.py` and `test_vcs_github.py`.
-*   **Security Gate Tests:** Tested via `codemender-runner/tests/test_runners_aggregate.py:test_security_gate_commit_status`.
+*   **GitHub Action Fix & Suggestion Unit Tests:** Verified via `github-actions/actions/codemender/tests/test_fix_comments.py`, `test_launcher.py`, and `test_gha_runner.py`.
+*   **Legacy Runner PR Review & Security Gate Tests:** Verified via `codemender-runner/tests/test_pr_review_suggestions.py`, `test_vcs_github.py`, and `test_runners_aggregate.py:test_security_gate_commit_status`.
 
 ## Pros and Cons of the Options
 
@@ -98,32 +97,32 @@ digraph PRRemediationRouting {
   node [shape=box, style="filled,rounded", fontname="Helvetica"];
 
   PR [label="PR Opened / Synchronized\n(Target: main)", fillcolor="#E8F0FE"];
-  DiffFilter [label="Differential Filter (find --diff)\n(PR Diff & Activated Vulns)", fillcolor="#CEEAD6"];
-  Worker [label="Remediation Worker\n(Synthesizes Patch via cm fix)", fillcolor="#CEEAD6"];
+  DiffFilter [label="Differential Filter (find-diff)\n(PR Diff & Activated Vulns)", fillcolor="#CEEAD6"];
+  Worker [label="Remediation Worker\n(Synthesizes Patch via cm-runner fix)", fillcolor="#CEEAD6"];
   
   CanSuggest [label="Does Patch Fit Within\nPR Diff Hunks?", shape=diamond, fillcolor="#FEF7E0"];
-  IsFork [label="Is PR from Fork?", shape=diamond, fillcolor="#FEF7E0"];
+  CanPushBranch [label="Branch Write Enabled\n(child_pr mode, non-fork)?", shape=diamond, fillcolor="#FEF7E0"];
 
   InlineSuggestion [label="Tier 1: Inline Review Suggestion\n(One-Click Commit in PR Diff)", fillcolor="#C2E7FF"];
   ChildPR [label="Tier 2: Child PR\n(Push Branch + Open PR to feature branch)\nTransactional Rollback on Error", fillcolor="#C2E7FF"];
-  ForkComment [label="Tier 3: Fork PR Comment\n(Markdown patch + git apply instructions)", fillcolor="#C2E7FF"];
+  PatchComment [label="Tier 3: Collapsible Patch Comment\n(Markdown diff + git apply instructions)", fillcolor="#C2E7FF"];
 
-  Aggregator [label="Aggregator & Reporter\n(Enforce Security Gate)", fillcolor="#CEEAD6"];
-  GateStatus [label="Commit Status:\n'CodeMender / Security Gate'\n(Blocks Merge if Unfixed Vulnerabilities)", fillcolor="#FCE8E6"];
+  Aggregator [label="Reporter / Aggregator\n(Update Sticky Comment & Upload Artifacts)", fillcolor="#CEEAD6"];
+  GateStatus [label="Optional Commit Status:\n'CodeMender / Security Gate'", fillcolor="#FCE8E6"];
 
   PR -> DiffFilter;
   DiffFilter -> Worker [label="Actionable Findings"];
   Worker -> CanSuggest;
 
   CanSuggest -> InlineSuggestion [label="Yes"];
-  CanSuggest -> IsFork [label="No"];
+  CanSuggest -> CanPushBranch [label="No"];
 
-  IsFork -> ForkComment [label="Yes (Fork)"];
-  IsFork -> ChildPR [label="No (Internal)"];
+  CanPushBranch -> ChildPR [label="Yes"];
+  CanPushBranch -> PatchComment [label="No (Default GHA / Fork)"];
 
   InlineSuggestion -> Aggregator;
   ChildPR -> Aggregator;
-  ForkComment -> Aggregator;
+  PatchComment -> Aggregator;
 
   Aggregator -> GateStatus;
 }
@@ -131,6 +130,8 @@ digraph PRRemediationRouting {
 
 ## More Information
 
+*   [SPEC-GHA-FIX: GitHub Actions PR Fix Specification & Design](../openspec/specs/github-actions-fix/spec.md)
 *   [GitHub Actions Orchestration & Execution Backends Design (docs/openspec/specs/github-actions/design.md)](../openspec/specs/github-actions/design.md)
 *   [ADR-0001: Machine-Readable Output Contract for cm-runner CLI](ADR-0001-machine-readable-output-contract.md)
 *   [ADR-0004: Project Tech Stack & Scenario-Decoupled Monorepo Architecture](ADR-0004-project-tech-stack-and-repo-architecture.md)
+

@@ -3,12 +3,14 @@
 A GitHub Action that runs CodeMender (`cm-runner`) on pull requests and reports
 the results back on the PR.
 
-> **Status: M1 (`init` + `find-diff`).** On every pull request the action
-> authenticates to Google Cloud via Workload Identity Federation (WIF), runs
-> `cm-runner init` and `cm-runner find-diff` in a `docker run` container under
-> gVisor, uploads `report.sarif` and `report.md` as workflow artifacts, and
-> posts a top-level Markdown PR comment with any vulnerabilities found. `fix`
-> and `verify` will be wired in next (see [Roadmap](#roadmap)).
+> **Status: M2 (`init` + `find-diff` + `fix`).** On every pull request the
+> action authenticates to Google Cloud via Workload Identity Federation (WIF),
+> runs `cm-runner init` and `cm-runner find-diff` in a `docker run` container
+> under gVisor, uploads `report.sarif` and `report.md` as workflow artifacts,
+> and posts a top-level Markdown PR comment with any vulnerabilities found. It
+> then runs `cm-runner fix` for every finding at once and posts each fix on the
+> PR, next to the code it changes (see [Fixes](#fixes)). `verify` comes next
+> (see [Roadmap](#roadmap)).
 
 ## How it fits together
 
@@ -40,12 +42,13 @@ github-actions/
 │       ├── action.yml             # Composite action: installs gVisor, pulls the image, runs src/gha_runner.py
 │       ├── requirements.txt       # Dependencies of this action (not of cm-runner)
 │       ├── src/
-│       │   ├── gha_runner.py      # Entry point: reads the GitHub event, runs cm-runner, posts the result
+│       │   ├── gha_runner.py      # Entry point: reads the GitHub event, runs cm-runner scan + parallel fixes, posts results
+│       │   ├── fix_comments.py    # Deduplicates findings and routes patches to PR suggestions or fallback patch comments
 │       │   ├── launcher/
-│       │   │   ├── base.py        # Launcher interface + ADR-0001 output contract (NDJSON, exit codes)
+│       │   │   ├── base.py        # Launcher interface + parallel task execution (`run_parallel`)
 │       │   │   └── local_docker.py  # `docker run` on the GitHub Actions VM, under gVisor by default
 │       │   └── vcs/
-│       │       └── github.py      # GitHub REST API: create/update the CodeMender PR comment
+│       │       └── github.py      # GitHub REST API: sticky comment, PR reviews, inline/file patch comments
 │       └── tests/                 # Unit tests (no network, no Docker needed)
 └── workflows/
     └── cm-merge-scan.yml          # Workflow template to copy into a repo's .github/workflows/
@@ -63,20 +66,27 @@ A published, versioned action may follow later (see [Roadmap](#roadmap)).
 
 ## Packaging for a customer (maintainers)
 
-Build the tarball from a committed ref with `git archive`, so only tracked files
-are included (no local notes, caches, or uncommitted changes):
+Build the package from a committed ref so only tracked files and the shared
+`codemender-runner` data models (`codemender/cm.py`, `cli/sarif.py`,
+`vcs/git.py`) are included:
 
 ```bash
 # From the root of codemender-runner
-git archive --format=tar.gz --prefix=codemender-action/ \
-  -o codemender-action.tar.gz HEAD:github-actions
+STAGE=$(mktemp -d)
+git archive HEAD:github-actions | tar -x -C "$STAGE"
+mkdir -p "$STAGE/actions/codemender/codemender-runner"/{codemender,cli,vcs}
+cp codemender-runner/codemender/{__init__.py,cm.py} "$STAGE/actions/codemender/codemender-runner/codemender/"
+cp codemender-runner/cli/{__init__.py,sarif.py} "$STAGE/actions/codemender/codemender-runner/cli/"
+cp codemender-runner/vcs/{__init__.py,git.py} "$STAGE/actions/codemender/codemender-runner/vcs/"
+tar -czf codemender-action.tar.gz -C "$STAGE" --transform='s,^\.,codemender-action,' .
+rm -rf "$STAGE"
 ```
 
 The package mirrors a repository's `.github/` directory:
 
 | Path | Copy to | Needed at runtime? |
 | :--- | :--- | :--- |
-| `actions/codemender/` (`action.yml`, `requirements.txt`, `src/`) | `.github/actions/codemender/` | Yes: this is the action |
+| `actions/codemender/` (`action.yml`, `requirements.txt`, `src/`, `codemender-runner/`) | `.github/actions/codemender/` | Yes: this is the action |
 | `actions/codemender/tests/` | — | No: included for transparency |
 | `workflows/cm-merge-scan.yml` | `.github/workflows/cm-merge-scan.yml` | Yes: the workflow that calls the action |
 | `README.md` | — | Setup only: these instructions |
@@ -105,8 +115,13 @@ Result:
 .github/actions/codemender/
 ├── action.yml
 ├── requirements.txt
+├── codemender-runner/
+│   ├── cli/sarif.py
+│   ├── codemender/cm.py
+│   └── vcs/git.py
 └── src/
     ├── gha_runner.py
+    ├── fix_comments.py
     ├── launcher/
     │   ├── __init__.py
     │   ├── base.py
@@ -125,44 +140,110 @@ mkdir -p .github/workflows
 cp /path/to/codemender-action/workflows/cm-merge-scan.yml .github/workflows/
 ```
 
-It checks out the repository (required, so the local action exists on the
-runner) and then runs `uses: ./.github/actions/codemender`. It runs only on
-PRs targeting `main` or `master`; edit `branches:` if your default branch is
-named differently.
+It checks out the repository at the PR head (`ref: ${{ github.event.pull_request.head.sha }}`)
+and then runs `uses: ./.github/actions/codemender`. It runs only on PRs
+targeting `main` or `master`; edit `branches:` if your default branch is named
+differently.
 
 ### 3. Configure the cm-runner image and Google Cloud (WIF)
 
 Set the required inputs in `.github/workflows/cm-merge-scan.yml`:
 
-- **`runner_image`**: Set to a cm-runner image your repository can pull, pinned
-  to a commit SHA tag (not `:latest`). The action uses the workflow's automatic
-  token (scoped by `permissions:`) to pull the image and to post the comment as
+- **`runner_image`**: Set to the **Universal Runner Image** (which comes pre-baked
+  with Python 3.11, Node 22 + `npm`/`yarn`/`pnpm`, Java 17 + `mvn`/`gradle`,
+  Go 1.22, and C/C++ `build-essential`) or a **Bring-Your-Own-Image (BYOI)**
+  built `FROM <registry>/codemender-runner:<sha>` with your repository's
+  third-party dependencies pre-installed. Pin to a commit SHA tag (not
+  `:latest`). The action uses the workflow's automatic token (scoped by
+  `permissions:`) to pull the image and to post the comment as
   `github-actions[bot]`. Only if the image is in a registry the repository's
   token can't read (e.g. another org), pass a token with
   `registry_token: ${{ secrets.<NAME> }}`. It is used only for `docker pull`.
 - **`gcp_project_id`**, **`gcp_workload_identity_provider`**, and
-  **`gcp_service_account`**: `cm` calls Vertex AI during `init` and `find-diff`.
-  The action authenticates via `google-github-actions/auth@v2` using keyless
-  Workload Identity Federation (`id-token: write`) and mounts the short-lived
-  ADC file read-only into the container.
-
-> [!NOTE]
-> How customers build and host their own cm-runner image (e.g. in their own
-> registry) is still to be documented (see `docs/guides/calling_cm_runner.md`).
+  **`gcp_service_account`**: `cm` calls Vertex AI during `init`, `find-diff` and
+  `fix`. The action authenticates via `google-github-actions/auth@v2` using
+  keyless Workload Identity Federation (`id-token: write`) and mounts the
+  short-lived ADC file read-only into the container.
 
 ### 4. Open a pull request
 
 A **CodeMender** comment appears on the PR with either a clean scan message or a
 summary table of vulnerabilities found in the diff (with links to the affected
-lines and collapsible analysis details). `report.sarif` and `report.md` are also
-uploaded as a workflow artifact (`codemender-report-pr-<N>`). Later pushes
-update the same comment.
+lines and collapsible analysis details). When `fix` is enabled (the default),
+CodeMender then generates a fix for each finding in parallel and updates the
+sticky comment's **Fix** column as each container finishes. `report.sarif`,
+`report.md`, `findings/*.sarif`, and `fixes/*.diff` are uploaded as a workflow
+artifact (`codemender-report-pr-<N>`).
+
+## Fixes
+
+- **On by default (`fix: 'true'`):** After `find-diff` reports findings, the
+  action runs `cm-runner fix` once per finding in isolated gVisor containers
+  (up to `max_parallel_fixes: '4'` at a time). Each fix usually takes 10 minutes
+  or more. Set `fix: false` in the workflow `with:` block to run only the scan.
+- **How fixes are posted:**
+  - **One-click suggestions (`✅ Suggested`):** When every line changed by a
+    patch lies inside the PR diff's hunks (and does not touch `.github/`), the
+    action posts a PR review with ` ```suggestion ` blocks that can be committed
+    directly on GitHub (or batched via *Add suggestion to batch*).
+  - **Patch comments (`📎 Patch`):** When a patch changes lines outside the PR
+    diff (such as adding an import at the top of a file) or touches `.github/`,
+    the action posts a collapsed `diff` block on the flagged line (or file) with
+    `git apply` instructions.
+- **What each value in the `Fix` column means:**
+  | Value | Meaning |
+  | :--- | :--- |
+  | `⏳ Working` | `cm-runner fix` is currently running for this finding. |
+  | `✅ Suggested` | Links to a PR review with one-click ` ```suggestion ` block(s). |
+  | `📎 Patch` | Links to a line/file review comment with a unified diff (or to the workflow run artifacts if GitHub rejected both comments). |
+  | `❌ No fix` | `cm-runner fix` finished with exit code 3 (CodeMender could not produce or verify a fix). Does not fail the job. |
+  | `⚠️ Failed` | The fix container failed or timed out. Does not fail the job; see the collapsible `::group::` in the job log. |
+- **Builds, dependencies, and testing (Universal Image & BYOI):**
+  - When `cm fix` generates a candidate patch, it runs your project's build/test
+    command to verify that the fix compiles and passes tests (`cm` rejects the
+    patch and reports `No fix` if the build command fails).
+  - Because `cm`'s inner sandbox runs with no network access
+    (`permissive-closed`) and the action does not install dependencies on the
+    GitHub Actions host, builds work in one of three ways:
+    1. **Universal Runner Image (default):** `codemender-runner` comes pre-baked
+      with standard language toolchains (Python 3.11, Node.js 22 with
+      `npm`/`yarn`/`pnpm`, OpenJDK 17 with `mvn`/`gradle`, Go 1.22, and C/C++
+      `gcc`/`g++`/`make`/`cmake`). Projects that only rely on standard library
+      or pre-baked tools build and test out of the box.
+    2. **Bring-Your-Own-Image (BYOI) via `runner_image`:** For repositories that
+      need third-party packages (e.g. `pytest`, `flask`, `jest`) or custom
+      toolchains (e.g. Rust, PHP), build a thin image extending
+      `codemender-runner` with those dependencies pre-installed and pass it via
+      `runner_image`:
+      ```dockerfile
+      FROM <registry>/codemender-runner:<commit-sha>
+      # Pre-install project dependencies so cm fix can build/test offline
+      # without opening the sandbox network or pre-installing on the GHA host:
+      COPY requirements.txt /tmp/requirements.txt
+      RUN pip install --no-cache-dir -r /tmp/requirements.txt pytest
+      ```
+      With a BYOI image, you do **not** need to open the sandbox network or
+      pre-install dependencies in your GitHub Actions workflow before calling
+      CodeMender.
+    3. **`.codemender.yaml`:** You can override the command `cm-runner init`
+      configures via `build.command` in `.codemender.yaml` (for example, to run
+      a lightweight compile/syntax check like `python3 -m py_compile ...` when
+      using the base image without third-party test dependencies).
+- **Responsibility warning (`--bypass-warning`):**
+  - `cm` normally prompts interactively before modifying files or running
+    commands: *"The CodeMender agent may modify files or execute commands on
+    your system. It is highly recommended to run this CLI in a safe sandboxed
+    environment or isolated VM."*
+  - Because the action runs unattended in CI, `cm-runner fix` passes
+    `--bypass-warning` on the client's behalf inside the ephemeral gVisor
+    container. Nothing is ever committed or pushed automatically—a human
+    reviewer must explicitly commit any suggested change or apply a patch.
 
 ### Inputs
 
 | Input | Default | Description |
 | :--- | :--- | :--- |
-| `runner_image` | — (**required**) | cm-runner image. Pin a commit SHA tag, not `:latest`. |
+| `runner_image` | — (**required**) | Universal `codemender-runner` image or custom Bring-Your-Own-Image (BYOI) built `FROM codemender-runner` with project dependencies pre-installed. Pin a commit SHA tag, not `:latest`. |
 | `gcp_project_id` | — (**required**) | Google Cloud project ID used by `cm` for Vertex AI API calls. |
 | `gcp_workload_identity_provider` | — (**required**) | Full Workload Identity Provider resource name (`projects/<num>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`). |
 | `gcp_service_account` | — (**required**) | Service account email that Workload Identity Federation impersonates (needs `roles/aiplatform.user`). |
@@ -171,7 +252,9 @@ update the same comment.
 | `container_runtime` | `runsc` | `runsc` runs cm-runner under gVisor, which `cm`'s sandbox needs (see [Security model](#security-model)). `runc` is an explicit opt-out: plain Docker, where `cm`'s sandbox can't start. |
 | `gvisor_release` | `20260921.0` | gVisor release installed when `container_runtime` is `runsc`: `yyyymmdd` or `yyyymmdd.N` ([versions](https://gvisor.dev/docs/user_guide/install/#versions)). Pinned so every run uses the same build. |
 | `diff_workers` | `'8'` | Number of concurrent workers for `cm-runner find-diff` (1..16). |
-| `artifact_retention_days` | `'3'` | Days to retain the uploaded `codemender-report-pr-<N>` artifact (`report.sarif` and `report.md`). |
+| `fix` | `'true'` | Run `cm-runner fix` for each finding and post suggestions/patches on the PR. Set to `'false'` to scan only. |
+| `max_parallel_fixes` | `'4'` | Maximum number of `cm-runner fix` containers to run concurrently. |
+| `artifact_retention_days` | `'3'` | Days to retain the uploaded `codemender-report-pr-<N>` artifact (`report.sarif`, `report.md`, `findings/*.sarif`, `fixes/*.diff`). |
 
 ### Required workflow permissions
 
@@ -295,8 +378,8 @@ python3 -m unittest discover -s tests -v
 | Milestone | What it adds | Blocked on |
 | :--- | :--- | :--- |
 | M0 | `cm-runner version` via `docker run` under gVisor, PR comment | — |
-| **M1** (this) | Real findings posted to the PR (`init` + `find-diff`), SARIF/Markdown artifacts, GCP auth (WIF) | — |
-| M2 | One-click fix suggestions on the PR | `cm-runner fix` |
+| M1 | Real findings posted to the PR (`init` + `find-diff`), SARIF/Markdown artifacts, GCP auth (WIF) | — |
+| **M2** (this) | Parallel `cm-runner fix` runs, one-click fix suggestions & fallback patch comments on the PR, sticky comment Fix column | — |
 | M3 | `@codemender verify <id>` and the Security Gate status check | `cm-runner verify` |
 | Later | Cloud Run / GKE launchers | Workstream 3 |
 | Later | Official release as a published, versioned action (`uses: <org>/<action>@v1`) instead of copying the code in | A public home for the action; the copy-in version working end to end |

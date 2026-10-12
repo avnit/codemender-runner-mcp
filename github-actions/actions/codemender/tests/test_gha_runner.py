@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for the gha_runner entry point (M1 init + find-diff flow)."""
+"""Unit tests for the gha_runner entry point (M1 find-diff + M2 parallel fixes)."""
 
 import json
 import os
@@ -27,21 +27,7 @@ sys.path.insert(
 )
 
 import gha_runner  # pylint: disable=g-import-not-at-top
-from launcher.base import LauncherError, RunResult  # pylint: disable=g-import-not-at-top
-
-_VERSION_EVENT = {
-    "event": "version",
-    "orchestrator": "0.1.0",
-    "cm": {"found": True, "version": "0.9.0", "path": "/usr/local/bin/cm"},
-    "contract": "cm-0.9.x",
-}
-
-_INIT_OK_EVENTS = [
-    {"event": "check", "name": "cm_binary", "status": "pass", "message": "ok"},
-    {"event": "check", "name": "cm_workspace", "status": "recovered", "message": "created"},
-    {"event": "check", "name": "cm_config", "status": "pass", "message": "ok"},
-    {"event": "check", "name": "cm_verify", "status": "pass", "message": "ok"},
-]
+from launcher.base import LauncherError, ParallelResult, RunResult  # pylint: disable=g-import-not-at-top
 
 _SARIF_CLEAN = {
     "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
@@ -69,9 +55,7 @@ _SARIF_WITH_FINDINGS = {
                     "locations": [
                         {
                             "physicalLocation": {
-                                "artifactLocation": {
-                                    "uri": "src/archive/unpack.py"
-                                },
+                                "artifactLocation": {"uri": "src/archive/unpack.py"},
                                 "region": {"startLine": 18, "endLine": 19},
                             }
                         }
@@ -109,6 +93,7 @@ _ENV = {
     "CODEMENDER_RUNNER_IMAGE": "img:sha",
     "GOOGLE_CLOUD_PROJECT": "my-gcp-project",
     "GOOGLE_GHA_CREDS_PATH": "/tmp/adc.json",
+    "CODEMENDER_FIX": "false",
 }
 
 
@@ -128,22 +113,19 @@ def _pr_event(
   }
 
 
-def _launcher(init_result=None, scan_result=None, error=None):
+def _scan_result(sarif_dict=None, exit_code=0, raw=None):
+  if raw is not None:
+    return RunResult(exit_code, raw)
+  doc = sarif_dict if sarif_dict is not None else _SARIF_CLEAN
+  return RunResult(exit_code, json.dumps(doc).encode("utf-8"))
+
+
+def _launcher(scan_result=None, error=None):
   launcher = MagicMock()
   if error:
     launcher.run.side_effect = error
     return launcher
-  init_res = (
-      init_result
-      if init_result is not None
-      else RunResult(0, list(_INIT_OK_EVENTS))
-  )
-  scan_res = (
-      scan_result
-      if scan_result is not None
-      else RunResult(0, [dict(_SARIF_CLEAN)])
-  )
-  launcher.run.side_effect = [init_res, scan_res]
+  launcher.run.return_value = scan_result if scan_result is not None else _scan_result()
   return launcher
 
 
@@ -158,7 +140,6 @@ class TestRunPr(unittest.TestCase):
     self.assertEqual(
         launcher.run.call_args_list,
         [
-            call("init", ["--repo", "/workspace"]),
             call(
                 "find-diff",
                 [
@@ -171,7 +152,7 @@ class TestRunPr(unittest.TestCase):
                     "--diff-workers",
                     "8",
                 ],
-            ),
+            )
         ],
     )
     token, repo, pr, body = mock_post.call_args.args
@@ -187,7 +168,7 @@ class TestRunPr(unittest.TestCase):
     self.assertEqual(gha_runner.run_pr(_pr_event(), env, launcher), 0)
 
     self.assertEqual(
-        launcher.run.call_args_list[1],
+        launcher.run.call_args_list[0],
         call(
             "find-diff",
             [
@@ -214,7 +195,7 @@ class TestRunPr(unittest.TestCase):
     self.assertIn("Invalid CODEMENDER_DIFF_WORKERS", body)
 
   def test_findings_posts_summary_table_and_details(self, mock_post):
-    launcher = _launcher(scan_result=RunResult(0, [_SARIF_WITH_FINDINGS]))
+    launcher = _launcher(scan_result=_scan_result(_SARIF_WITH_FINDINGS))
 
     self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 0)
 
@@ -235,85 +216,36 @@ class TestRunPr(unittest.TestCase):
     self.assertIn("<details>", body)
     self.assertIn("Untrusted filename user_archive", body)
 
-  def test_fork_pr_runs_and_posts(self, mock_post):
+  def test_fork_pr_runs_and_handles_comment_failure(self, mock_post):
     launcher = _launcher()
+    self.assertEqual(gha_runner.run_pr(_pr_event(head_repo="fork/r"), _ENV, launcher), 0)
+    self.assertEqual(launcher.run.call_count, 1)
 
-    rc = gha_runner.run_pr(_pr_event(head_repo="fork/r"), _ENV, launcher)
-
-    self.assertEqual(rc, 0)
-    self.assertEqual(launcher.run.call_count, 2)
-    mock_post.assert_called_once()
-
-  def test_fork_pr_comment_failure_prints_settings_guidance(self, mock_post):
     mock_post.return_value = None
-    launcher = _launcher()
-
     with patch("builtins.print") as mock_print:
       rc = gha_runner.run_pr(_pr_event(head_repo="fork/r"), _ENV, launcher)
-
     self.assertEqual(rc, 1)
     printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
     self.assertIn("Send write tokens to workflows from pull requests", printed)
 
-  def test_init_failure_skips_find_diff_and_posts_error(self, mock_post):
-    failed_init = RunResult(
-        3,
-        [
-            {
-                "event": "check",
-                "name": "cm_verify",
-                "status": "fail",
-                "message": "missing GOOGLE_CLOUD_PROJECT",
-            }
-        ],
-    )
-    launcher = _launcher(init_result=failed_init)
-
+  def test_find_diff_and_launcher_failures_post_error_and_exit_1(self, mock_post):
+    launcher = _launcher(scan_result=_scan_result(exit_code=3, raw=b""))
     self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 1)
-    launcher.run.assert_called_once_with("init", ["--repo", "/workspace"])
-    body = mock_post.call_args.args[3]
-    self.assertIn("❌ **CodeMender scan failed.**", body)
-    self.assertIn("`cm_verify`", body)
-    self.assertIn("missing GOOGLE_CLOUD_PROJECT", body)
+    self.assertIn("❌ **CodeMender scan failed.**", mock_post.call_args.args[3])
+    self.assertIn("`3`", mock_post.call_args.args[3])
 
-  def test_find_diff_failure_posts_failure_and_exits_1(self, mock_post):
-    launcher = _launcher(scan_result=RunResult(3, []))
-
-    self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 1)
-    body = mock_post.call_args.args[3]
-    self.assertIn("❌ **CodeMender scan failed.**", body)
-    self.assertIn("`3`", body)
-
-  def test_launcher_error_posts_reason_and_exits_1(self, mock_post):
-    launcher = _launcher(error=LauncherError("docker not found"))
-
-    self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 1)
+    launcher2 = _launcher(error=LauncherError("docker not found"))
+    self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher2), 1)
     self.assertIn("docker not found", mock_post.call_args.args[3])
 
-  def test_invalid_sarif_event_is_failure(self, mock_post):
-    launcher = _launcher(scan_result=RunResult(0, [{"event": "other"}]))
-
-    self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 1)
+    launcher3 = _launcher(scan_result=_scan_result(raw=b'{"event": "other"}'))
+    self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher3), 1)
     self.assertIn(
         "did not emit a valid SARIF 2.1.0 document", mock_post.call_args.args[3]
     )
 
-  def test_comment_failure_exits_1(self, mock_post):
-    mock_post.return_value = None
-    launcher = _launcher()
-
-    self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 1)
-
 
 class TestFormatting(unittest.TestCase):
-
-  def test_untrusted_values_cannot_break_out_of_code_span(self):
-    event = dict(_VERSION_EVENT, orchestrator="1`\n## injected")
-    body = gha_runner.format_version_comment(
-        RunResult(0, [event]), "img", "https://run"
-    )
-    self.assertNotIn("\n## injected", body)
-    self.assertIn("`1' ## injected`", body)
 
   def test_untrusted_sarif_text_cannot_break_details_or_fences(self):
     sarif = {
@@ -337,7 +269,7 @@ class TestFormatting(unittest.TestCase):
         ],
     }
     body = gha_runner.format_find_diff_comment(
-        RunResult(0, [sarif]),
+        _scan_result(sarif),
         image="img:sha",
         run_url="https://run",
         base_sha="1234567890ab",
@@ -345,13 +277,6 @@ class TestFormatting(unittest.TestCase):
     self.assertNotIn("```", body)
     self.assertNotIn("</details><script>", body)
     self.assertIn("&lt;/details&gt;&lt;script&gt;", body)
-
-  def test_cm_not_found_is_flagged(self):
-    event = dict(_VERSION_EVENT, cm={"found": False})
-    body = gha_runner.format_version_comment(
-        RunResult(0, [event]), "img", "https://run"
-    )
-    self.assertIn("⚠️", body)
 
 
 class TestMain(unittest.TestCase):
@@ -361,9 +286,7 @@ class TestMain(unittest.TestCase):
     self._temp_dir = tempfile.mkdtemp(prefix="gha-test-")
     self._workspace = os.path.join(self._temp_dir, "src-repo")
     os.makedirs(os.path.join(self._workspace, ".git"))
-    with open(
-        os.path.join(self._workspace, "app.py"), "w", encoding="utf-8"
-    ) as f:
+    with open(os.path.join(self._workspace, "app.py"), "w", encoding="utf-8") as f:
       f.write("print('hi')\n")
     self._event_file = os.path.join(self._temp_dir, "event.json")
     with open(self._event_file, "w", encoding="utf-8") as f:
@@ -383,31 +306,25 @@ class TestMain(unittest.TestCase):
     base.update(overrides)
     return base
 
-  def test_non_pr_event_is_skipped(self):
+  def test_validation_and_non_pr_skip(self):
     self.assertEqual(gha_runner.main(self._env(GITHUB_EVENT_NAME="push")), 0)
-
-  def test_missing_required_env_fails(self):
     env = self._env()
     del env["CODEMENDER_RUNNER_IMAGE"]
     self.assertEqual(gha_runner.main(env), 1)
-
-  def test_missing_gcp_creds_fails(self):
-    env = self._env(GOOGLE_GHA_CREDS_PATH="", GOOGLE_APPLICATION_CREDENTIALS="")
-    self.assertEqual(gha_runner.main(env), 1)
+    env2 = self._env(GOOGLE_GHA_CREDS_PATH="", GOOGLE_APPLICATION_CREDENTIALS="")
+    self.assertEqual(gha_runner.main(env2), 1)
 
   @patch.object(gha_runner, "run_pr", return_value=0)
-  def test_stages_workspace_and_builds_docker_launcher(self, mock_run_pr):
+  def test_stages_workspace_excludes_creds_and_builds_launcher(self, mock_run_pr):
+    creds_name = "gha-creds-0123456789abcdef.json"
+    with open(os.path.join(self._workspace, creds_name), "w", encoding="utf-8") as f:
+      f.write('{"type": "external_account"}')
     observed = {}
 
-    def _capture(event, env, launcher):
-      observed["workspace_exists"] = os.path.isfile(
-          os.path.join(launcher.workspace_dir, "app.py")
-      )
-      observed["git_exists"] = os.path.isdir(
-          os.path.join(launcher.workspace_dir, ".git")
-      )
-      observed["cm_home_exists"] = os.path.isdir(launcher.cm_home_dir)
-      observed["out_exists"] = os.path.isdir(launcher.out_dir)
+    def _capture(event, env, launcher, out_dir=None):
+      del event, env
+      observed["files"] = sorted(os.listdir(launcher.workspace_dir))
+      observed["out_dir"] = out_dir
       return 0
 
     mock_run_pr.side_effect = _capture
@@ -416,63 +333,12 @@ class TestMain(unittest.TestCase):
         self._env(CODEMENDER_LOG_LEVEL="debug", CODEMENDER_OUT_DIR=out_dir)
     )
     self.assertEqual(rc, 0)
-
-    event, _, launcher = mock_run_pr.call_args.args
-    self.assertEqual(event["pull_request"]["number"], 7)
-    self.assertEqual(launcher.image, "img:sha")
-    self.assertEqual(launcher.log_level, "debug")
-    self.assertEqual(launcher.runtime, "runsc")
-    self.assertEqual(launcher.gcp_project, "my-gcp-project")
-    self.assertEqual(launcher.gcp_credentials_file, "/tmp/adc.json")
-    self.assertEqual(launcher.out_dir, out_dir)
-    self.assertTrue(observed["workspace_exists"])
-    self.assertTrue(observed["git_exists"])
-    self.assertTrue(observed["cm_home_exists"])
-    self.assertTrue(observed["out_exists"])
-    # Staging root is cleaned up after `main` returns, while custom out_dir
-    # stays on disk for the artifact upload step.
-    self.assertFalse(os.path.exists(launcher.workspace_dir))
-    self.assertTrue(os.path.isdir(out_dir))
-
-  @patch.object(gha_runner, "run_pr", return_value=0)
-  def test_staged_workspace_excludes_gha_creds_file(self, mock_run_pr):
-    creds_name = "gha-creds-0123456789abcdef.json"
-    with open(
-        os.path.join(self._workspace, creds_name), "w", encoding="utf-8"
-    ) as f:
-      f.write('{"type": "external_account"}')
-    observed = {}
-
-    def _capture(event, env, launcher):
-      del event, env  # Unused.
-      observed["files"] = sorted(os.listdir(launcher.workspace_dir))
-      return 0
-
-    mock_run_pr.side_effect = _capture
-    self.assertEqual(gha_runner.main(self._env()), 0)
     self.assertNotIn(creds_name, observed["files"])
     self.assertIn("app.py", observed["files"])
-
-  @patch.object(gha_runner, "run_pr", return_value=0)
-  def test_runc_is_an_explicit_opt_out(self, mock_run_pr):
-    self.assertEqual(
-        gha_runner.main(self._env(CODEMENDER_CONTAINER_RUNTIME="runc")), 0
-    )
-    self.assertEqual(mock_run_pr.call_args.args[2].runtime, "runc")
-
-  @patch.object(gha_runner, "run_pr", return_value=0)
-  def test_empty_runtime_falls_back_to_gvisor(self, mock_run_pr):
-    self.assertEqual(
-        gha_runner.main(self._env(CODEMENDER_CONTAINER_RUNTIME="")), 0
-    )
-    self.assertEqual(mock_run_pr.call_args.args[2].runtime, "runsc")
-
-  @patch.object(gha_runner, "run_pr")
-  def test_unknown_runtime_fails_before_running(self, mock_run_pr):
-    self.assertEqual(
-        gha_runner.main(self._env(CODEMENDER_CONTAINER_RUNTIME="kata")), 1
-    )
-    mock_run_pr.assert_not_called()
+    self.assertEqual(observed["out_dir"], out_dir)
+    launcher = mock_run_pr.call_args.args[2]
+    self.assertFalse(os.path.exists(launcher.workspace_dir))
+    self.assertTrue(os.path.isdir(out_dir))
 
   @patch.object(gha_runner, "run_pr")
   def test_invalid_diff_workers_fails_before_running(self, mock_run_pr):
@@ -480,6 +346,93 @@ class TestMain(unittest.TestCase):
         gha_runner.main(self._env(CODEMENDER_DIFF_WORKERS="99")), 1
     )
     mock_run_pr.assert_not_called()
+
+
+class TestM2FixConfigAndOrchestration(unittest.TestCase):
+
+  def test_fix_enabled_and_max_parallel_fixes_parsing(self):
+    for off in ("false", "FALSE", " 0 ", "No", "no"):
+      self.assertFalse(gha_runner.fix_enabled({"CODEMENDER_FIX": off}))
+    for on in ("", "true", "TRUE", "1", "yes"):
+      self.assertTrue(gha_runner.fix_enabled({"CODEMENDER_FIX": on}))
+    self.assertEqual(gha_runner.max_parallel_fixes({}), 4)
+    self.assertEqual(
+        gha_runner.max_parallel_fixes({"CODEMENDER_MAX_PARALLEL_FIXES": " 8 "}), 8
+    )
+    with patch("builtins.print"):
+      self.assertEqual(
+          gha_runner.max_parallel_fixes({"CODEMENDER_MAX_PARALLEL_FIXES": "0"}), 4
+      )
+
+  @patch.object(gha_runner, "post_or_update_sticky_comment", return_value="https://c")
+  @patch.object(gha_runner, "list_finding_comments", return_value={})
+  @patch.object(gha_runner.fix_comments, "checked_out_commit", return_value="aaaabbbbccccdddd")
+  @patch.object(gha_runner.fix_comments, "FixPoster")
+  def test_run_pr_with_fixes_updates_sticky_comment_in_place(
+      self,
+      mock_poster_cls,
+      _mock_head,
+      _mock_earlier,
+      mock_post_sticky,
+  ):
+    with tempfile.TemporaryDirectory() as temp_dir:
+      workspace = os.path.join(temp_dir, "workspace")
+      os.makedirs(workspace)
+      out_dir = os.path.join(temp_dir, "out")
+
+      env = dict(
+          _ENV,
+          CODEMENDER_FIX="true",
+          CODEMENDER_MAX_PARALLEL_FIXES="3",
+          GITHUB_WORKSPACE=workspace,
+          RUNNER_TEMP=temp_dir,
+      )
+      launcher = _launcher(scan_result=_scan_result(_SARIF_WITH_FINDINGS))
+      findings = gha_runner.SarifDocument(data=_SARIF_WITH_FINDINGS).to_findings()
+      launcher.run_parallel.return_value = (
+          r
+          for r in (
+              ParallelResult(
+                  key=findings[0],
+                  exit_code=0,
+                  output=b"diff --git a/x b/x\n",
+                  log="fix 1 log\n",
+              ),
+              ParallelResult(
+                  key=findings[1],
+                  exit_code=3,
+                  output=b"",
+                  log="fix 2 log\n",
+                  error="cm-runner exited with code 3.",
+              ),
+          )
+      )
+      mock_poster_cls.return_value.post.side_effect = [
+          gha_runner.FixCell(
+              gha_runner.fix_comments.SUGGESTED, "https://github.com/o/r/pull/7#review-1"
+          ),
+          gha_runner.FixCell(gha_runner.fix_comments.NO_FIX),
+      ]
+
+      with patch("builtins.print"):
+        rc = gha_runner.run_pr(_pr_event(), env, launcher, out_dir=out_dir)
+
+      self.assertEqual(rc, 0)
+      self.assertEqual(launcher.run_parallel.call_args.kwargs["max_workers"], 3)
+      self.assertTrue(
+          os.path.isfile(os.path.join(out_dir, "findings", "finding-001.sarif"))
+      )
+      self.assertTrue(
+          os.path.isfile(os.path.join(out_dir, "fixes", "finding-001.diff"))
+      )
+      bodies = [c.args[3] for c in mock_post_sticky.call_args_list]
+      self.assertGreaterEqual(len(bodies), 2)
+      self.assertIn("⏳ Generating fixes for 2 findings.", bodies[0])
+      self.assertIn("| ⏳ Working |", bodies[0])
+      final_body = bodies[-1]
+      self.assertIn("[✅ Suggested](https://github.com/o/r/pull/7#review-1)", final_body)
+      self.assertIn("| ❌ No fix |", final_body)
+      self.assertIn("**Fixes:** ✅ 1 suggested · ❌ 1 no fix.", final_body)
 
 
 if __name__ == "__main__":

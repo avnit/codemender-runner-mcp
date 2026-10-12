@@ -13,4 +13,6 @@ capabilities.
 | [SPEC-WIF](wif/spec.md)                         | [wif](wif/design.md)                                               | Component | Approved    | Unified Terraform Root & Composable Mode-Aware WIF Module (`terraform/` & `terraform/modules/{wif,gcp}`) |
 | [SPEC-DIST](distribute/spec.md)                 | [distribute](distribute/design.md)                                 | Component | Implemented | Customer Repository Distribution Engine & Propagation Kit (`scripts/distribute.sh`)                      |
 | [SPEC-GHA](github-actions/spec.md)              | [github-actions](github-actions/design.md)                         | Component | Draft       | GitHub Actions Orchestration & Dual Execution Backends (`LocalDocker` & `CloudRun`) |
+| [SPEC-GHA-FIX](github-actions-fix/spec.md)      | [github-actions-fix](github-actions-fix/design.md)                 | Component | Draft       | Fixes on Pull Requests: parallel `cm-runner fix` runs, suggestions & patch comments (GitHub Action M2) |
 | [SPEC-GITLAB-CI](gitlab-ci/spec.md)             | [gitlab-ci](gitlab-ci/design.md)                                   | Component | Draft       | GitLab CI Orchestration, gVisor OCI Sandbox & Dual Execution Backends (`Gvisor` & `CloudRun`) |
+

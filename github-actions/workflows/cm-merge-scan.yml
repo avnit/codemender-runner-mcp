@@ -10,6 +10,11 @@
 # `cm-runner find-diff` in a gVisor container, uploads `report.sarif` and
 # `report.md` as workflow artifacts, and posts/updates one CodeMender PR comment
 # with the findings.
+#
+# M2 (fixes): when the scan finds something, the action also runs
+# `cm-runner fix` for every finding at once, one gVisor container each, and
+# posts each fix on the PR next to the code it changes. Each fix takes 10
+# minutes or more. Set `fix: false` below to turn fixes off.
 
 name: CodeMender
 
@@ -28,12 +33,13 @@ permissions:
   contents: read        # Check out this repo (needed to find the local action and diff)
   id-token: write       # Mint OIDC token for Google Cloud Workload Identity Federation
   packages: read        # Pull the cm-runner image from GHCR
-  pull-requests: write  # Post / update the CodeMender PR comment
+  pull-requests: write  # Post / update the CodeMender PR comment and post fixes
 
 jobs:
   codemender:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The scan, plus the slowest fix: cm-runner stops a fix after 30 minutes.
+    timeout-minutes: 60
     steps:
       # Required: the action lives in this repository, so it must be checked
       # out first. `fetch-depth: 0` ensures the PR base commit is present locally
@@ -41,15 +47,23 @@ jobs:
       # GitHub token out of .git/config (ADR-0003).
       - uses: actions/checkout@v4
         with:
+          # Check out the PR head commit. By default, checkout puts a temporary
+          # merge commit on disk, so line numbers would not match the PR's
+          # "Files changed" view, where suggestions attach.
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - uses: ./.github/actions/codemender
         with:
-          # Defaults to the image published by build_runner_image.yml in this
-          # org/user's GHCR. Override by setting the CODEMENDER_RUNNER_IMAGE
-          # repository or organization variable (e.g. to pin a specific commit
-          # SHA tag or use Artifact Registry).
+          # Defaults to the Universal cm-runner image published by
+          # build_runner_image.yml in this org/user's GHCR (pre-baked with
+          # Python, Node, Java, Go, C/C++). Override by setting the
+          # CODEMENDER_RUNNER_IMAGE repository or organization variable (e.g.
+          # to pin a specific commit SHA tag, use Artifact Registry, or point
+          # to a Bring-Your-Own-Image built `FROM codemender-runner` with your
+          # project's dependencies pre-installed so `cm fix` can build/test
+          # offline without opening the sandbox network).
           runner_image: ${{ vars.CODEMENDER_RUNNER_IMAGE || format('ghcr.io/{0}/codemender-runner:latest', github.repository_owner) }}
           # Required: Google Cloud Workload Identity Federation settings for the
           # CodeMender API (provisioned by .github/terraform/).
@@ -58,6 +72,9 @@ jobs:
           gcp_service_account: ${{ secrets.CODEMENDER_SERVICE_ACCOUNT }}
           # log_level: debug
           # diff_workers: '8'
+          # Fixes are on by default. Each fix takes 10 minutes or more.
+          # fix: false
+          # max_parallel_fixes: '4'
           # Defaults: run cm-runner under gVisor (needed for cm's sandbox),
           # pinned to a tested release. See README.md → "Inputs".
           # container_runtime: runsc

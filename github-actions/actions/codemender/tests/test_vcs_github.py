@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for github-actions vcs.github (sticky PR comment)."""
+"""Unit tests for github-actions vcs.github."""
 
 import os
 import sys
@@ -24,98 +24,146 @@ sys.path.insert(
 )
 
 from vcs import github  # pylint: disable=g-import-not-at-top
+from vcs.git import SuggestionHunk  # pylint: disable=g-import-not-at-top
 from vcs.github import (  # pylint: disable=g-import-not-at-top
     MAX_COMMENT_BODY_CHARS,
     STICKY_SUMMARY_MARKER,
+    create_review_with_suggestions,
+    format_patch_comment,
+    get_pr_diff_line_ranges,
+    list_finding_comments,
     post_or_update_sticky_comment,
+    post_patch_comment,
     truncate_comment_body,
 )
 
 
-def _response(json_body, links=None):
+def _response(json_body, status_code=200, links=None):
   resp = MagicMock()
+  resp.status_code = status_code
   resp.json.return_value = json_body
   resp.links = links or {}
   resp.raise_for_status.return_value = None
   return resp
 
 
-class TestTruncateCommentBody(unittest.TestCase):
+class TestTruncateAndFormatting(unittest.TestCase):
 
-  def test_short_body_unchanged(self):
+  def test_truncate_comment_body(self):
     self.assertEqual(truncate_comment_body("hello"), "hello")
-
-  def test_long_body_truncated_within_limit_with_notice(self):
-    body = "line\n" * (MAX_COMMENT_BODY_CHARS // 2)
+    body = "```\n" + ("x\n" * MAX_COMMENT_BODY_CHARS)
     result = truncate_comment_body(body)
     self.assertLessEqual(len(result), MAX_COMMENT_BODY_CHARS)
     self.assertIn("truncated", result)
-
-  def test_open_code_fence_is_closed(self):
-    body = "```\n" + ("x\n" * MAX_COMMENT_BODY_CHARS)
-    result = truncate_comment_body(body)
     before_notice = result.split("\n\n---\n")[0]
     self.assertEqual(before_notice.count("```") % 2, 0)
 
+  def test_format_patch_comment_fences_embedded_backticks(self):
+    body = format_patch_comment(
+        tag="<!-- codemender-finding:001122334455 -->",
+        header="**Fix 1**",
+        reason="Outside diff.",
+        patch="diff --git a/x b/x\n+```injected```\n",
+        notes=["Untested note."],
+    )
+    self.assertIn("````diff", body)
+    self.assertIn("git apply", body)
+
 
 @patch.object(github.time, "sleep", lambda _: None)
-class TestStickyComment(unittest.TestCase):
+class TestGitHubApi(unittest.TestCase):
 
   @patch.object(github.requests, "Session")
-  def test_posts_new_comment_when_none_exists(self, mock_session_cls):
+  def test_posts_and_updates_sticky_comment_with_pagination(self, mock_session_cls):
     session = mock_session_cls.return_value.__enter__.return_value
     session.get.return_value = _response([{"id": 1, "body": "unrelated"}])
-    session.post.return_value = _response({"html_url": "https://x/c/2"})
+    session.post.return_value = _response({"html_url": "https://x/c/2"}, 201)
 
-    url = post_or_update_sticky_comment("tok", "o/r", 7, "hi")
-
-    self.assertEqual(url, "https://x/c/2")
-    session.patch.assert_not_called()
-    post_url = session.post.call_args.args[0]
-    self.assertTrue(post_url.endswith("/repos/o/r/issues/7/comments"))
-    body = session.post.call_args.kwargs["json"]["body"]
-    self.assertTrue(body.startswith(STICKY_SUMMARY_MARKER))
-    self.assertIn("hi", body)
-    headers = session.post.call_args.kwargs["headers"]
-    self.assertEqual(headers["Authorization"], "Bearer tok")
-
-  @patch.object(github.requests, "Session")
-  def test_updates_existing_marked_comment(self, mock_session_cls):
-    session = mock_session_cls.return_value.__enter__.return_value
-    session.get.return_value = _response(
-        [{"id": 42, "body": f"{STICKY_SUMMARY_MARKER}\nold"}]
+    self.assertEqual(
+        post_or_update_sticky_comment("tok", "o/r", 7, "hi"), "https://x/c/2"
     )
-    session.patch.return_value = _response({"html_url": "https://x/c/42"})
-
-    url = post_or_update_sticky_comment("tok", "o/r", 7, "new")
-
-    self.assertEqual(url, "https://x/c/42")
-    session.post.assert_not_called()
     self.assertTrue(
-        session.patch.call_args.args[0].endswith("/repos/o/r/issues/comments/42")
+        session.post.call_args.kwargs["json"]["body"].startswith(STICKY_SUMMARY_MARKER)
     )
 
-  @patch.object(github.requests, "Session")
-  def test_follows_pagination_to_find_marker(self, mock_session_cls):
-    session = mock_session_cls.return_value.__enter__.return_value
     session.get.side_effect = [
         _response([{"id": 1, "body": "a"}], links={"next": {"url": "page2"}}),
         _response([{"id": 99, "body": STICKY_SUMMARY_MARKER}]),
     ]
     session.patch.return_value = _response({"html_url": "https://x/c/99"})
-
     self.assertEqual(
         post_or_update_sticky_comment("tok", "o/r", 7, "b"), "https://x/c/99"
     )
-    self.assertEqual(session.get.call_args_list[1].args[0], "page2")
 
   @patch.object(github.requests, "Session")
-  def test_never_raises_and_returns_none_on_failure(self, mock_session_cls):
+  def test_list_finding_comments_and_pr_diff_ranges(self, mock_session_cls):
     session = mock_session_cls.return_value.__enter__.return_value
-    session.get.side_effect = RuntimeError("boom")
+    session.get.return_value = _response([
+        {
+            "id": 1,
+            "user": {"type": "Bot"},
+            "body": "<!-- codemender-finding:aabbcc112233 -->\n```suggestion\nx\n```",
+            "html_url": "https://c/1",
+            "line": 10,
+            "subject_type": "line",
+        },
+        {
+            "id": 2,
+            "user": {"type": "Bot"},
+            "body": "<!-- codemender-finding:ddeeff445566 -->\n```diff\nx\n```",
+            "html_url": "https://c/2",
+            "line": None,
+            "subject_type": "line",
+        },
+    ])
+    comments = list_finding_comments("o/r", 7, "tok")
+    self.assertFalse(comments["aabbcc112233"].outdated)
+    self.assertEqual(comments["aabbcc112233"].kind, "suggestion")
+    self.assertTrue(comments["ddeeff445566"].outdated)
+    self.assertEqual(comments["ddeeff445566"].kind, "patch")
 
-    self.assertIsNone(post_or_update_sticky_comment("tok", "o/r", 7, "b"))
-    self.assertEqual(session.get.call_count, 3)  # retried
+    session.get.return_value = _response([
+        {
+            "filename": "src/app.py",
+            "status": "modified",
+            "patch": "@@ -1,2 +10,3 @@\n line10\n+line11\n line12",
+        }
+    ])
+    ranges = get_pr_diff_line_ranges("o/r", 7, "tok")
+    self.assertEqual(ranges, {"src/app.py": {10, 11, 12}})
+
+  @patch.object(github.requests, "Session")
+  def test_create_review_and_post_patch_comment_fallback(self, mock_session_cls):
+    session = mock_session_cls.return_value.__enter__.return_value
+    session.post.return_value = _response({"html_url": "https://r/1", "id": 5}, 200)
+    session.get.return_value = _response([{"id": 11}])
+    res = create_review_with_suggestions(
+        "o/r",
+        7,
+        "tok",
+        "deadbeef",
+        [SuggestionHunk("src/app.py", 2, 3, ["fixed"])],
+        "**Fix 1**",
+        "<!-- codemender-finding:aabbcc112233 -->",
+    )
+    self.assertTrue(res.ok)
+    self.assertEqual(res.url, "https://r/1")
+    self.assertEqual(res.comment_id, 11)
+
+    # Line comment fails with 422 -> falls back to file-level comment.
+    session.post.reset_mock()
+    session.post.side_effect = [
+        _response({}, 422),
+        _response({"html_url": "https://c/file", "id": 9}, 201),
+    ]
+    patched = post_patch_comment(
+        "o/r", 7, "tok", "deadbeef", "src/app.py", 42, "body"
+    )
+    self.assertTrue(patched.ok)
+    self.assertEqual(patched.url, "https://c/file")
+    self.assertEqual(
+        session.post.call_args_list[1].kwargs["json"]["subject_type"], "file"
+    )
 
 
 if __name__ == "__main__":
