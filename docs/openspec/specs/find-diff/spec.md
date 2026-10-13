@@ -44,7 +44,7 @@ This specification is governed by and references:
   — Tier 0 heuristic non-production file pruning and Tier 1 impact-aware pull
   request delta scanning (`cm find --diff`).
 - [ADR-0001: Machine-Readable Output Contract (`stdout` JSON, `stderr` Logs, Coarse Exit Codes)](../../adr/ADR-0001-machine-readable-output-contract.md)
-- [ADR-0002: Runner Layout and Build](../../adr/ADR-0002-runner-layout-and-build.md)
+- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../adr/ADR-0008-repository-layout-and-package-structure.md)
 - [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../adr/ADR-0003-environment-scrubbing.md)
 
 ## Requirements
@@ -177,7 +177,7 @@ ______________________________________________________________________
 
 - **CUJ UUID:** cuj-find-diff-adapter-execution
 
-In accordance with [ADR-0002](../../adr/ADR-0002-runner-layout-and-build.md),
+In accordance with [ADR-0008](../../adr/ADR-0008-repository-layout-and-package-structure.md),
 `cli/commands/find_diff.py` MUST NOT import `subprocess`, `utils`, or
 `vcs.github`, and MUST NOT invoke `run_command` or `build_cm_command`. All `cm`
 binary executions MUST go through the `CmAdapter` instance verified by

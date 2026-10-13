@@ -60,10 +60,9 @@ normalization and Merge Request reporting never branch on the backend
 This specification is governed by:
 
 - [ADR-0001: Machine-Readable Output Contract](../../../adr/ADR-0001-machine-readable-output-contract.md)
-- [ADR-0002: Runner Layout, Build, and How to Call It](../../../adr/ADR-0002-runner-layout-and-build.md)
 - [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../../adr/ADR-0003-environment-scrubbing.md)
-- [ADR-0004: Project Tech Stack & Scenario-Decoupled Monorepo Architecture](../../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md)
 - [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
+- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
 - [SPEC-GITLAB-SARIF: GitLab Native SARIF 2.1.0 Normalization](../gitlab-sarif-report/spec.md)
 - [SPEC-GHA: GitHub Actions Orchestration & Execution Backends](../github-actions/spec.md)
 
@@ -331,7 +330,7 @@ ______________________________________________________________________
 
 - **CUJ UUID:** `cuj-gitlab-security-boundary`
 
-In compliance with [ADR-0002](../../../adr/ADR-0002-runner-layout-and-build.md)
+In compliance with [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
 and [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md):
 
 1. **Allowlisted Environments:**
@@ -555,10 +554,10 @@ ______________________________________________________________________
 
 To keep `local` and `cloudrun` interchangeable (modeled on
 [SPEC-GHA](../github-actions/spec.md) REQ-0008, per
-[ADR-0002](../../../adr/ADR-0002-runner-layout-and-build.md)):
+[ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md)):
 
 1. **Single Self-Contained `find-diff` Invocation & Symmetric Artifact Interface:**
-   - Per [ADR-0002](../../../adr/ADR-0002-runner-layout-and-build.md), `cm-runner`
+   - Per [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md), `cm-runner`
      commands are self-contained and automatically run `init` before dispatching
      `find-diff`. The orchestrator MUST invoke `find-diff` in a single ephemeral
      sandbox/Cloud Run execution rather than spawning separate `version` or

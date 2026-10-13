@@ -4,7 +4,7 @@
 
 CodeMender runs in customer CI pipelines and executes untrusted code, compilers, and test suites. Packaging every potential language runtime (Java, Go, Node.js, Python, Rust) into a single monolithic base container results in massive images (>1.5 GB), slow cold-start pulling in Cloud Run and GitHub Actions, and elevated CVE vulnerability surface.
 
-Governed by [SPEC-0003](spec.md), [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md), and [ADR-0004](../../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md), this design specifies a lean container packaging strategy that strips the base image to core orchestrator essentials and defers specialized toolchains to modular custom images.
+Governed by [SPEC-0003](spec.md), [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md), and [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md), this design specifies a lean container packaging strategy that strips the base image to core orchestrator essentials and defers specialized toolchains to modular custom images.
 
 ## Goals / Non-Goals
 

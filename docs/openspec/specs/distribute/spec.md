@@ -65,9 +65,8 @@ This specification is governed by and references:
   Workload Identity Federation module (`terraform/` &
   `terraform/modules/{wif,gcp}`).
 - [ADR-0001: Machine-Readable Output Contract](../../../adr/ADR-0001-machine-readable-output-contract.md)
-- [ADR-0002: Runner Layout and Build](../../../adr/ADR-0002-runner-layout-and-build.md)
 - [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../../adr/ADR-0003-environment-scrubbing.md)
-- [ADR-0004: Project Tech Stack & Scenario-Decoupled Monorepo Architecture](../../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md)
+- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
 
 ## Requirements
 

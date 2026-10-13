@@ -42,7 +42,7 @@ This specification is governed by and references:
 - [SPEC-FIND-DIFF](../find-diff/spec.md) — produces the SARIF this command
   consumes.
 - [ADR-0001: Machine-Readable Output Contract](../../adr/ADR-0001-machine-readable-output-contract.md)
-- [ADR-0002: Runner Layout and Build](../../adr/ADR-0002-runner-layout-and-build.md)
+- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../adr/ADR-0008-repository-layout-and-package-structure.md)
 - [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../adr/ADR-0003-environment-scrubbing.md)
 
 ## Requirements
@@ -160,7 +160,7 @@ ______________________________________________________________________
 
 - **CUJ UUID:** cuj-fix-adapter-execution
 
-In accordance with [ADR-0002](../../adr/ADR-0002-runner-layout-and-build.md),
+In accordance with [ADR-0008](../../adr/ADR-0008-repository-layout-and-package-structure.md),
 `cli/commands/fix.py` MUST NOT import `subprocess`, `utils`, or `vcs.github`.
 All `cm` calls MUST go through the `CmAdapter` checked by `cli/__main__.py`,
 with `cwd=str(cfg.repo)`. Git calls MUST go through `vcs/git.py`.

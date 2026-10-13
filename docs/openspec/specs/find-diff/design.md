@@ -44,7 +44,7 @@ Scanning** (`cm find <repo> --diff[=<ref>]`), which:
 
 Governed by [SPEC-FIND-DIFF](spec.md),
 [ADR-0001](../../adr/ADR-0001-machine-readable-output-contract.md),
-[ADR-0002](../../adr/ADR-0002-runner-layout-and-build.md), and
+[ADR-0008](../../adr/ADR-0008-repository-layout-and-package-structure.md), and
 [ADR-0003](../../adr/ADR-0003-environment-scrubbing.md), `cm-runner find-diff`
 exposes this native capability as a first-class subcommand of the generic
 `cm-runner` orchestrator (`codemender-runner/cli/commands/find_diff.py`).

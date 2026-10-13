@@ -19,7 +19,7 @@ The CodeMender GitHub Actions integration (`github-actions/`) provides automated
 
 However, enterprise environments require strong microVM isolation, execution durations exceeding standard CI runner timeouts, and isolation against malicious exploits during dynamic verification. Workstream 3 of the [CM CI/CD Project Plan](https://docs.google.com/document/d/1Vv2o5C2UD3wYY9RQpq00dYst_5apT9-PO0CVoAV5wLU/edit) is building the Google Cloud infrastructure (Cloud Run Jobs, GCS transit, WIF) and providing a local client CLI to manage job lifecycle.
 
-Governed by [SPEC-GHA](spec.md), [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md), [ADR-0002](../../../adr/ADR-0002-runner-layout-and-build.md), and [ADR-0004](../../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md), this design details how `github-actions/` is extended to support Cloud Run execution via the client CLI while preserving 100% backward compatibility for local Docker runs.
+Governed by [SPEC-GHA](spec.md), [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md), and [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md), this design details how `github-actions/` is extended to support Cloud Run execution via the client CLI while preserving 100% backward compatibility for local Docker runs.
 
 To keep the GitHub Action interface minimal and maintain a clean separation of concerns, the action input schema accepts only `backend: 'local' | 'cloudrun'` (and `runner_image` when running locally). All cloud-specific execution details (GCP project, Cloud Run Job name, region, IAM, transit buckets, and client invocation) are delegated entirely to the canonical Cloud Run client CLI and ambient environment.
 
@@ -33,7 +33,7 @@ To keep the GitHub Action interface minimal and maintain a clean separation of c
 - Provide a clean launcher factory in `gha_runner.py` that selects between `LocalDockerLauncher` and `CloudRunLauncher` based on `CODEMENDER_BACKEND`.
 - Bypass Docker pull and registry operations completely when running in Cloud Run mode.
 - Maintain full compatibility with ADR-0001 NDJSON output contract and existing PR sticky comment reporting.
-- Enforce strict host token isolation ([ADR-0002](../../../adr/ADR-0002-runner-layout-and-build.md)) by scrubbing `GITHUB_TOKEN` from the subprocess environment.
+- Enforce strict host token isolation ([ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md)) by scrubbing `GITHUB_TOKEN` from the subprocess environment.
 - Enforce symmetric interface and workspace file parity between local Docker and Cloud Run backends, standardizing on file-based communication so downstream actions remain backend-agnostic.
 - Ensure 100% hermetic unit testing with mock subprocesses without needing live cloud infrastructure.
 

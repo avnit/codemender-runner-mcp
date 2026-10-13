@@ -33,9 +33,8 @@ Both backends adhere to an identical, symmetric execution interface: CLI argumen
 
 This specification is governed by:
 - [ADR-0001: Machine-Readable Output Contract](../../../adr/ADR-0001-machine-readable-output-contract.md) (NDJSON events on `stdout`, logs on `stderr`, coarse exit codes)
-- [ADR-0002: Runner Layout and Build](../../../adr/ADR-0002-runner-layout-and-build.md) (Host token boundary; credentials never enter the container)
-- [ADR-0004: Project Tech Stack & Scenario-Decoupled Monorepo Architecture](../../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md)
 - [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
+- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md) (Host token boundary; credentials never enter the container)
 - [Proposal: gha-cloudrun-launcher](../../proposals/gha-cloudrun-launcher/proposal.md)
 
 ---
@@ -235,7 +234,7 @@ PR comment formatting and GitHub REST API reporting MUST function identically re
 
 - **CUJ UUID:** `cuj-security-boundary`
 
-In compliance with [ADR-0002](../../../adr/ADR-0002-runner-layout-and-build.md) and [ADR-0004](../../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md):
+In compliance with [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md):
 1. `GITHUB_TOKEN` MUST NOT be forwarded to the Cloud Run client CLI or passed as an environment variable to Cloud Run. The launcher MUST scrub `GITHUB_TOKEN` from environment variables passed to the subprocess.
 2. The Cloud Run client CLI MUST handle GCP authentication internally using ambient Application Default Credentials (ADC) or workload identity credentials present on the host.
 3. Untrusted container outputs from Cloud Run MUST be safely escaped by comment formatters using inline Markdown sanitization before posting to GitHub.

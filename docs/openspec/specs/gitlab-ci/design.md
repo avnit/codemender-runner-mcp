@@ -62,9 +62,8 @@ a new `Launcher` and requirement, selected through REQ-0004's factory.
 Governed by [SPEC-GITLAB-CI](spec.md),
 [SPEC-GITLAB-SARIF](../gitlab-sarif-report/spec.md),
 [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
-[ADR-0002](../../../adr/ADR-0002-runner-layout-and-build.md),
 [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md), and
-[ADR-0004](../../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md),
+[ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
 this document defines the architecture and security design of `gitlab-ci/`.
 
 ______________________________________________________________________
@@ -88,7 +87,7 @@ ______________________________________________________________________
   closed before launching `cm-runner`
   ([ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md)).
 - Invoke `cm-runner find-diff` in a single self-contained sandbox/microVM
-  execution per [ADR-0002](../../../adr/ADR-0002-runner-layout-and-build.md) and
+  execution per [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md) and
   give `local` and `cloudrun` the same arguments and output files, so downstream
   SARIF normalization ([SPEC-GITLAB-SARIF](../gitlab-sarif-report/spec.md)) and
   sticky MR commenting remain backend-agnostic.

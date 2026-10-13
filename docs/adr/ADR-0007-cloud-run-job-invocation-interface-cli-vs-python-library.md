@@ -8,7 +8,7 @@
 
 ## Context and Problem Statement
 
-Workstream 2 (GitHub Actions Integration) and Workstream 3 (Cloud Run Sandboxing) require a mechanism for CI/CD environments to offload untrusted CodeMender tasks (`find-diff`, `fix`, `verify`) to Google Cloud Run Jobs. As established in [ADR-0002](ADR-0002-runner-layout-and-build.md) and [ADR-0005](ADR-0005-multi-platform-transit-storage-and-isolation.md), the CI runner acts as the trusted coordinator, while Cloud Run Jobs execute in an isolated microVM sandbox (gVisor) with zero repository write credentials and zero long-lived cloud keys.
+Workstream 2 (GitHub Actions Integration) and Workstream 3 (Cloud Run Sandboxing) require a mechanism for CI/CD environments to offload untrusted CodeMender tasks (`find-diff`, `fix`, `verify`) to Google Cloud Run Jobs. As established in [ADR-0008](ADR-0008-repository-layout-and-package-structure.md) and [ADR-0005](ADR-0005-multi-platform-transit-storage-and-isolation.md), the CI runner acts as the trusted coordinator, while Cloud Run Jobs execute in an isolated microVM sandbox (gVisor) with zero repository write credentials and zero long-lived cloud keys.
 
 To coordinate these Cloud Run executions, the CI runner must authenticate via Workload Identity Federation (WIF), stage repository snapshot archives (`code.tar.gz`) and manifests to Google Cloud Storage (GCS) transit buckets, dispatch job executions with parameter overrides, monitor execution lifecycles, handle cancellation signals, and retrieve execution receipts and output artifacts.
 
@@ -39,7 +39,7 @@ Chosen option: **"Option 3: Layered Architecture: Core Python Library with Thin 
 ### Architecture & Design
 
 > [!NOTE]
-> *Directory Structure Alignment:* Per [ADR-0004](ADR-0004-project-tech-stack-and-repo-architecture.md), the working directory for Workstream 3 on disk is `gcp-sandboxing/` (superseding the provisional `gcp-cloudrun/` name).
+> *Directory Structure Alignment:* Per [ADR-0008](ADR-0008-repository-layout-and-package-structure.md), the working directory for Workstream 3 on disk is `gcp-sandboxing/` (superseding the provisional `gcp-cloudrun/` name).
 
 1.  **Core Library Layer (`gcp-sandboxing/client/`):**
     *   **`CloudRunClient`**: Exposes high-level programmatic methods:
@@ -169,8 +169,7 @@ flowchart TB
 ## More Information
 
 *   [ADR-0001: Machine-Readable Output Contract for cm-runner CLI](ADR-0001-machine-readable-output-contract.md)
-*   [ADR-0002: Runner Layout, Build, and How to Call It](ADR-0002-runner-layout-and-build.md)
-*   [ADR-0004: Project Tech Stack & Scenario-Decoupled Monorepo Architecture](ADR-0004-project-tech-stack-and-repo-architecture.md)
 *   [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](ADR-0005-multi-platform-transit-storage-and-isolation.md)
 *   [ADR-0006: Pull Request Remediation Routing & Security Quality Gate](ADR-0006-pr-remediation-routing-and-security-gate.md)
+*   [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](ADR-0008-repository-layout-and-package-structure.md)
 *   [Proposal: VCS to Cloud Run Communication Architecture](../openspec/proposals/vcs-cloudrun-comms/proposal.md)

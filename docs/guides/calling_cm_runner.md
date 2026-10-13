@@ -3,7 +3,7 @@
 How to run the CodeMender runner from CI, Cloud Run, or your own machine, and
 what it gives back. The design reasoning is in
 [ADR-0001](../adr/ADR-0001-machine-readable-output-contract.md) (output) and
-[ADR-0002](../adr/ADR-0002-runner-layout-and-build.md) (layout and build).
+[ADR-0008](../adr/ADR-0008-repository-layout-and-package-structure.md) (layout and build).
 
 > **Status:** `version`, `init`, `find-diff`, `fix`, and `verify` work today.
 

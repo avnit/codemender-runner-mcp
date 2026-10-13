@@ -18,7 +18,7 @@ sdd_cujspec_product: codemender-runner
 
 ## Overview
 
-This specification defines the container packaging and runtime environment requirements for the CodeMender Runner image (`codemender-runner/Dockerfile`). Governed by [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md), [ADR-0004](../../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md), and [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md), this container executes across GitHub Actions runner matrix jobs and Google Cloud Run Jobs. The image implements a lean container strategy, packaging strictly what is necessary for orchestrator and CodeMender execution, and deferring multi-language toolchains to post-launch modular/BYOI containers.
+This specification defines the container packaging and runtime environment requirements for the CodeMender Runner image (`codemender-runner/Dockerfile`). Governed by [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md), [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md), and [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md), this container executes across GitHub Actions runner matrix jobs and Google Cloud Run Jobs. The image implements a lean container strategy, packaging strictly what is necessary for orchestrator and CodeMender execution, and deferring multi-language toolchains to post-launch modular/BYOI containers.
 
 ## Requirements
 

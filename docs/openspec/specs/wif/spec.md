@@ -62,7 +62,7 @@ Governed by `var.execution_mode` (`"local"` or `"cloud_run"`):
 This specification is governed by and references:
 
 - [ADR-0001: Machine-Readable Output Contract](../../../adr/ADR-0001-machine-readable-output-contract.md)
-- [ADR-0004: Project Tech Stack & Scenario-Decoupled Monorepo Architecture](../../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md)
+- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
 - [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
 
 ## Requirements
@@ -556,7 +556,7 @@ and reflected across all repository documentation:
 1. **Documentation & Reference Migration:**
    - All references to `terraform/gha_wif`, standalone `terraform/wif`, or
      standalone `terraform/gcp` in
-     `docs/adr/ADR-0004-project-tech-stack-and-repo-architecture.md` MUST be
+     `docs/adr/ADR-0008-repository-layout-and-package-structure.md` MUST be
      updated to reflect the root `terraform/` entrypoint and
      `terraform/modules/{wif,gcp}` child hierarchy.
 

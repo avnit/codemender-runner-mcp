@@ -32,9 +32,8 @@ customer-facing Git repository without clobbering target repository changes.
 
 Governed by [SPEC-DIST](spec.md), [SPEC-WIF](../wif/spec.md),
 [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
-[ADR-0002](../../../adr/ADR-0002-runner-layout-and-build.md),
 [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md), and
-[ADR-0004](../../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md).
+[ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md).
 
 ## Goals / Non-Goals
 
@@ -198,7 +197,7 @@ Governed by [SPEC-DIST](spec.md), [SPEC-WIF](../wif/spec.md),
   `vcs.git` only for modern helpers (`is_git_repository`, `ref_exists`), neither
   of which uses `utils.py`. Lazy importing `utils` inside the legacy functions
   (matching the pattern established in `codemender/cm.py` under
-  [ADR-0002](../../../adr/ADR-0002-runner-layout-and-build.md)) and guarding
+  [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md)) and guarding
   legacy-only tests allows the stripped `.github/codemender-runner/` package in
   the distribution repository to run and pass its entire unit test suite without
   shipping `utils.py`, `main.py`, or `requests`.

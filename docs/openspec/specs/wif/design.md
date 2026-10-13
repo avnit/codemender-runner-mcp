@@ -16,7 +16,7 @@ sdd_cujspec_product: codemender-runner
 ## Context
 
 CodeMender supports two primary GitHub Actions execution topologies as defined
-in [ADR-0004](../../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md)
+in [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
 and
 [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md):
 
@@ -41,7 +41,7 @@ first-class GitHub App authentication (`app_auth`) alongside token and ambient
 CLI authentication.
 
 Governed by [SPEC-WIF](spec.md),
-[ADR-0004](../../../adr/ADR-0004-project-tech-stack-and-repo-architecture.md),
+[ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
 and
 [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md).
 
@@ -310,7 +310,7 @@ flowchart TD
     `terraform/modules/gcp` directly as standalone modules can still do so, or
     use `moved` blocks / `terraform state mv` when migrating to the unified
     root `terraform/`. Architecture documentation
-    (`docs/adr/ADR-0004-project-tech-stack-and-repo-architecture.md`) is
+    (`docs/adr/ADR-0008-repository-layout-and-package-structure.md`) is
     updated in tandem.
 
 ## Deployment & Rollback

@@ -33,7 +33,7 @@ The reasons behind each requirement are in [design.md](design.md).
 
 This specification is governed by:
 - [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md): stdout carries each command's result in its standard format.
-- [ADR-0002](../../../adr/ADR-0002-runner-layout-and-build.md): the GitHub token stays on the host.
+- [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md): the GitHub token stays on the host.
 - [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md): containers get only explicit environment variables.
 - [ADR-0006](../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md): remediation routing (inline suggestions and collapsible patch comment fallback).
 

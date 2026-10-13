@@ -25,7 +25,7 @@ does two things before the legacy runners (`runners/scan.py`,
 
 As we build the new `cm-runner` subcommands (`init`, `find-diff`, `fix`,
 `verify`) on top of `codemender/cm.py` (`CmAdapter`, per
-[ADR-0002](ADR-0002-runner-layout-and-build.md)), `CmAdapter.run()` currently
+[ADR-0008](ADR-0008-repository-layout-and-package-structure.md)), `CmAdapter.run()` currently
 passes `env=None`, inheriting the caller's environment without calling
 `get_scrubbed_env()`.
 
@@ -37,7 +37,7 @@ from the new CLI and retire `get_scrubbed_env()` along with the legacy pipeline?
 
 - **Permission Split Between Orchestration and `cm` Execution
   ([go/scaling-codemender-cicd](http://goto.google.com/scaling-codemender-cicd),
-  [ADR-0002](ADR-0002-runner-layout-and-build.md)):** Unlike legacy `main.py`
+  [ADR-0008](ADR-0008-repository-layout-and-package-structure.md)):** Unlike legacy `main.py`
   (which both ran `cm` and called the GitHub API to open PRs from the same
   Python process, forcing `main.py` to hold `GITHUB_TOKEN` in its own
   environment), the new `cm-runner` CLI never talks to the repository host.
@@ -74,7 +74,7 @@ from the new CLI and retire `get_scrubbed_env()` along with the legacy pipeline?
   environment variables (`PATH`, `HOME`, `JAVA_HOME`, language SDK paths,
   compiler flags).
 - **Simplicity and Low Maintenance
-  ([ADR-0002](ADR-0002-runner-layout-and-build.md)):** Avoid carrying over
+  ([ADR-0008](ADR-0008-repository-layout-and-package-structure.md)):** Avoid carrying over
   fragile legacy code and tests (`test_config.py`) into `CmAdapter` when it
   neither solves bare-runner isolation nor fits our container/sandbox
   boundaries.
@@ -111,7 +111,7 @@ either redundant, ineffective, or actively counterproductive for `cm-runner`:
      *and* called the GitHub REST API (`vcs/github.py`) and `git push` from the
      same Python process. Because `main.py` required `GITHUB_TOKEN` in its own
      `os.environ`, it had to strip `GITHUB_TOKEN` when spawning `cm`.
-   - Under [ADR-0002](ADR-0002-runner-layout-and-build.md), `cm-runner` (`init`,
+   - Under [ADR-0008](ADR-0008-repository-layout-and-package-structure.md), `cm-runner` (`init`,
      `find-diff`, `fix`, `verify`) never talks to the repository host. Even when
      running on the repo runner, the step or container invoking `cm-runner` has
      no reason to receive `GITHUB_TOKEN` at all; only the subsequent publishing
@@ -206,7 +206,7 @@ either redundant, ineffective, or actively counterproductive for `cm-runner`:
 - `CmAdapter` **MUST** pass the process environment through to `cm` (`env=None`
   by default), allowing `cm` to authenticate to the CodeMender backend and
   manage its own `exebox` worker environment and `TMPDIR`.
-- In accordance with [ADR-0002](ADR-0002-runner-layout-and-build.md) ("Kept
+- In accordance with [ADR-0008](ADR-0008-repository-layout-and-package-structure.md) ("Kept
   working, not extended"), `SENSITIVE_ENV_VARS` and `get_scrubbed_env()` in
   `config.py` **SHOULD** remain untouched while the legacy `runners/` pipeline
   is still active, and **MUST** be deleted alongside `config.py` and `runners/`
@@ -226,7 +226,7 @@ either redundant, ineffective, or actively counterproductive for `cm-runner`:
 ### Consequences
 
 - **Good**, because `CmAdapter` and `cli/` remain simple, dependency-free, and
-  aligned with [ADR-0002](ADR-0002-runner-layout-and-build.md) without carrying
+  aligned with [ADR-0008](ADR-0008-repository-layout-and-package-structure.md) without carrying
   forward ~40 lines of brittle denylist and `.codemender_cache` setup logic and
   ~100 lines of unit tests.
 - **Good**, because `cm-runner` no longer creates an untracked
@@ -279,7 +279,7 @@ either redundant, ineffective, or actively counterproductive for `cm-runner`:
   and `TMPDIR` isolation.
 - **Good**, because leaving `get_scrubbed_env()` untouched in `config.py` until
   legacy `runners/` is removed satisfies
-  [ADR-0002](ADR-0002-runner-layout-and-build.md)'s "do not break what runs
+  [ADR-0008](ADR-0008-repository-layout-and-package-structure.md)'s "do not break what runs
   today; small diffs" rule.
 - **Bad**, because legacy `config.py` retains dead-end code until the legacy
   pipeline is deleted.
@@ -349,7 +349,7 @@ flowchart TD
 
 - Related ADRs:
   - [ADR-0001: Machine-Readable Output Contract for cm-runner CLI](ADR-0001-machine-readable-output-contract.md)
-  - [ADR-0002: Runner Layout, Build, and How to Call It](ADR-0002-runner-layout-and-build.md)
+  - [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](ADR-0008-repository-layout-and-package-structure.md)
 - System & Sandbox Design Documents:
   - [Scaling CodeMender in the CI/CD Pipeline (go/scaling-codemender-cicd)](http://goto.google.com/scaling-codemender-cicd)
   - [CodeMender Sandbox (go/codemender-sandbox / go/codemender-rfc-6)](http://goto.google.com/codemender-sandbox)
