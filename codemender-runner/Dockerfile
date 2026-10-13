@@ -16,7 +16,8 @@
 FROM ubuntu:22.04
 
 ARG GO_VERSION=1.22.6
-ARG CM_VERSION=0.12.0
+ARG CM_DEFAULT_VERSION=0.12.0
+ARG CM_VERSION=""
 ARG CM_URL=""
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -43,7 +44,8 @@ RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" | tar -C /
 
 # 3. CodeMender CLI binary
 RUN set -eu && \
-    URL="${CM_URL:-https://artifactregistry.googleapis.com/download/v1/projects/cmoc-prod/locations/us/repositories/codemender-cli-production/files/cm%3A${CM_VERSION}%3Acm-linux-amd64.zip:download?alt=media}" && \
+    CM_VER="${CM_VERSION:-${CM_DEFAULT_VERSION}}" && \
+    URL="${CM_URL:-https://artifactregistry.googleapis.com/download/v1/projects/cmoc-prod/locations/us/repositories/codemender-cli-production/files/cm%3A${CM_VER}%3Acm-linux-amd64.zip:download?alt=media}" && \
     echo "Downloading CodeMender CLI from ${URL}..." && \
     curl -fsSL -o /tmp/cm.bin "${URL}" && \
     if unzip -q -o /tmp/cm.bin cm -d /usr/local/bin/ 2>/dev/null; then \

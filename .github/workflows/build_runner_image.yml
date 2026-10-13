@@ -16,9 +16,9 @@ on:
   workflow_dispatch:
     inputs:
       cm_version:
-        description: 'Specific version/tag from Artifact Registry'
+        description: 'Optional version/tag override from Artifact Registry (defaults to Dockerfile)'
         required: false
-        default: '0.12.0'
+        default: ''
         type: string
       cm_custom_url:
         description: 'Optional direct download URL for custom/rollback binary'
@@ -57,7 +57,7 @@ jobs:
           load: true
           tags: codemender-runner:test
           build-args: |
-            CM_VERSION=${{ inputs.cm_version || '0.12.0' }}
+            CM_VERSION=${{ inputs.cm_version || '' }}
             CM_URL=${{ inputs.cm_custom_url || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

@@ -138,7 +138,9 @@ class TestStdoutPurity(CLIContractTestBase):
     payload = self.assert_stdout_is_one_json_object(result)
     self.assertEqual(payload["event"], "version")
     self.assertIn("ts", payload)
-    self.assertIn("contract", payload)
+    self.assertIn("orchestrator", payload)
+    self.assertIn("cm", payload)
+    self.assertNotIn("contract", payload)
 
   def test_missing_cm_fails_with_empty_stdout(self):
     """With no cm, main exits 3 before any command runs; stdout stays empty.

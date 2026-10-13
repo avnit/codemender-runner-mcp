@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""`cm-runner version` -- report orchestrator, cm, and contract versions.
+"""`cm-runner version` -- report orchestrator and cm versions.
 
 `main` checks that `cm` is present and runs before any command starts. If it
 is not, the run exits `exit_codes.FAILED` with the reason on stderr and this
@@ -26,14 +26,6 @@ from cli import exit_codes
 from cli.events import EventEmitter
 from codemender.cm import CmAdapter
 from codemender.cm import detect_cm
-
-# The `cm` CLI surface this orchestrator was built and tested against.
-#
-# Recorded so that version drift is visible rather than mysterious. There is
-# precedent: cm 0.7.0 changed `cm report --format json` from PascalCase to
-# snake_case keys, which `codemender/cm.py` still carries a workaround for.
-# Observed working: cm 0.9.0 on 2026-09-24; cm 0.11.0 on 2026-09-30; cm 0.12.0 on 2026-10-07.
-CM_CONTRACT = "cm-0.12.x"
 
 
 def run(adapter: CmAdapter, emitter: EventEmitter) -> int:
@@ -51,6 +43,5 @@ def run(adapter: CmAdapter, emitter: EventEmitter) -> int:
       "version",
       orchestrator=cli.__version__,
       cm=cm,
-      contract=CM_CONTRACT,
   )
   return exit_codes.OK
