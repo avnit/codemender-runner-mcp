@@ -45,7 +45,7 @@ variable "runner_cpu" {
 variable "runner_memory" {
   type        = string
   description = "Memory limit for Cloud Run Job worker tasks (e.g. '2Gi', '4Gi', '8Gi', '16Gi')."
-  default     = "4Gi"
+  default     = "8Gi"
 }
 
 variable "create_vpc_and_nat" {

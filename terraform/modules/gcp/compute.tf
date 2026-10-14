@@ -17,7 +17,6 @@ resource "time_sleep" "wait_for_apis_and_iam" {
 
   depends_on = [
     google_project_service.enabled_services,
-    google_secret_manager_secret_iam_member.runner_secret_accessor,
   ]
 }
 
@@ -29,7 +28,8 @@ resource "google_cloud_run_v2_job" "runner" {
 
   template {
     template {
-      service_account = google_service_account.runner_sa.email
+      execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
+      service_account       = google_service_account.runner_sa.email
 
       containers {
         # Use a placeholder image initially so Terraform can provision the job before Cloud Build runs.
@@ -44,13 +44,8 @@ resource "google_cloud_run_v2_job" "runner" {
         }
 
         env {
-          name = "GITHUB_APP_TOKEN"
-          value_source {
-            secret_key_ref {
-              secret  = google_secret_manager_secret.github_app_token.secret_id
-              version = "latest"
-            }
-          }
+          name  = "EPHEMERAL_SCRATCH_DIR"
+          value = "/workspace"
         }
       }
 

@@ -37,6 +37,11 @@ run "storage_resources_default_names" {
     condition     = google_artifact_registry_repository.docker_repo.repository_id == "test-storage-runner"
     error_message = "Artifact Registry repository ID does not match expected prefix pattern."
   }
+
+  assert {
+    condition     = tolist(tolist(google_storage_bucket.reports.lifecycle_rule)[0].condition)[0].age == 1
+    error_message = "Reports/transit bucket lifecycle rule must enforce a 1-day (24-hour) TTL."
+  }
 }
 
 run "storage_resources_custom_names" {

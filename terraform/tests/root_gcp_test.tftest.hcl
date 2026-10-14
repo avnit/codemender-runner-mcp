@@ -74,4 +74,10 @@ run "cloud_run_mode_composition" {
     condition     = output.cloud_run_job_name != null
     error_message = "Expected cloud_run_job_name output to be non-null in cloud_run mode."
   }
+
+  assert {
+    condition     = var.runner_memory == "8Gi"
+    error_message = "Expected default runner_memory in root module to be '8Gi'."
+  }
 }
+

@@ -38,4 +38,25 @@ run "compute_resources_created_correctly" {
     condition     = google_secret_manager_secret.github_app_token.secret_id == "test-compute-github-token"
     error_message = "Secret Manager secret ID does not match the expected resource_prefix pattern."
   }
+
+  assert {
+    condition     = google_cloud_run_v2_job.runner.template[0].template[0].execution_environment == "EXECUTION_ENVIRONMENT_GEN2"
+    error_message = "Runner Cloud Run Job must enforce EXECUTION_ENVIRONMENT_GEN2."
+  }
+
+  assert {
+    condition     = google_cloud_run_v2_job.runner.template[0].template[0].containers[0].resources[0].limits["memory"] == "8Gi"
+    error_message = "Runner Cloud Run Job must default to 8Gi memory limit to prevent OOM (exit 137)."
+  }
+
+  assert {
+    condition     = contains([for e in google_cloud_run_v2_job.runner.template[0].template[0].containers[0].env : "${e.name}=${coalesce(e.value, "")}"], "EPHEMERAL_SCRATCH_DIR=/workspace")
+    error_message = "Runner Cloud Run Job container must set EPHEMERAL_SCRATCH_DIR=/workspace."
+  }
+
+  assert {
+    condition     = !contains([for e in google_cloud_run_v2_job.runner.template[0].template[0].containers[0].env : e.name], "GITHUB_APP_TOKEN")
+    error_message = "Runner Cloud Run Job container must not inject GITHUB_APP_TOKEN."
+  }
 }
+

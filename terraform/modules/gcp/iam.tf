@@ -29,22 +29,8 @@ resource "google_service_account" "worker_sa" {
 # Bucket-level IAM for Runner SA
 resource "google_storage_bucket_iam_member" "runner_reports_admin" {
   bucket = google_storage_bucket.reports.name
-  role   = "roles/storage.objectAdmin"
+  role   = "roles/storage.objectUser"
   member = "serviceAccount:${google_service_account.runner_sa.email}"
-}
-
-# Secret Manager IAM for Runner SA
-resource "google_secret_manager_secret_iam_member" "runner_secret_accessor" {
-  secret_id = google_secret_manager_secret.github_app_token.id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.runner_sa.email}"
-}
-
-# Service Account Token Creator IAM for Runner SA on itself (required for GCS signed URL generation)
-resource "google_service_account_iam_member" "runner_token_creator" {
-  service_account_id = google_service_account.runner_sa.name
-  role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:${google_service_account.runner_sa.email}"
 }
 
 locals {

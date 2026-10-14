@@ -62,4 +62,15 @@ run "iam_resources_created_correctly" {
     condition     = output.worker_service_account_email == "test-iam-worker-sa@test-project-123.iam.gserviceaccount.com"
     error_message = "worker_service_account_email output does not match expected worker SA email."
   }
+
+  assert {
+    condition     = google_storage_bucket_iam_member.runner_reports_admin.role == "roles/storage.objectUser" && google_storage_bucket_iam_member.runner_reports_admin.member == "serviceAccount:test-iam-runner-sa@test-project-123.iam.gserviceaccount.com"
+    error_message = "Runner SA must be granted roles/storage.objectUser on the transit/reports bucket."
+  }
+
+  assert {
+    condition     = google_project_iam_member.runner_aiplatform_user.role == "roles/aiplatform.user" && google_project_iam_member.runner_aiplatform_user.member == "serviceAccount:test-iam-runner-sa@test-project-123.iam.gserviceaccount.com"
+    error_message = "Runner SA must be granted roles/aiplatform.user for Vertex AI interactions."
+  }
 }
+

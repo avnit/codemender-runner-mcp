@@ -98,7 +98,7 @@ variable "runner_cpu" {
 
 variable "runner_memory" {
   type        = string
-  default     = "4Gi"
+  default     = "8Gi"
   description = "Memory limit for Cloud Run Job worker tasks (e.g. '2Gi', '4Gi', '8Gi')."
 }
 

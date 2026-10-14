@@ -80,8 +80,8 @@ execution_mode = "local" # or "cloud_run"
 # runner_cpu = "2"
 
 # Memory limit allocated to Cloud Run worker tasks (e.g., "2Gi", "4Gi", "8Gi", "16Gi").
-# Default: "4Gi"
-# runner_memory = "4Gi"
+# Default: "8Gi"
+# runner_memory = "8Gi"
 
 # Whether to provision a dedicated VPC network, subnets, and Cloud NAT gateway.
 # Default: false
