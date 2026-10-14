@@ -32,23 +32,29 @@ exactly how the contract has been broken before.
 """
 
 import ast
+from io import StringIO
 import json
 import os
+from pathlib import Path
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
-from io import StringIO
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import setuptools
 
-from cli import exit_codes
-from cli.events import EventEmitter
+# Directory containing the `codemender` package, used as cwd so `python -m codemender.runner` works.
+_PKG_DIR = str(Path(__file__).resolve().parents[2])
+_REPO_ROOT = Path(__file__).resolve().parents[5]
+_LEGACY_RUNNER_DIR = str(_REPO_ROOT / "codemender-runner")
+if _PKG_DIR not in sys.path:
+  sys.path.insert(0, _PKG_DIR)
 
-# Directory containing the `cli` package, used as cwd so `python -m cli` works.
-_PKG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from codemender.runner import exit_codes
+from codemender.runner.events import EventEmitter
 
 # A stub cm that only answers `--version`, which is all `main` needs from it.
 _WORKING_CM_BODY = '#!/bin/sh\necho "cm version 0.9.0"\n'
@@ -86,10 +92,10 @@ class CLIContractTestBase(unittest.TestCase):
     _write_stub_cm(self._stub_dir)
 
   def run_cli(self, *args, path=None):
-    """Invokes `python -m cli` and captures both streams separately.
+    """Invokes `python -m codemender.runner` and captures both streams separately.
 
     Args:
-      *args: Arguments passed after `-m cli`.
+      *args: Arguments passed after `-m codemender.runner`.
       path: Value for PATH in the child. Defaults to a folder holding only a
         working stub `cm`.
 
@@ -99,12 +105,12 @@ class CLIContractTestBase(unittest.TestCase):
     env = dict(os.environ)
     env["PATH"] = self._stub_dir if path is None else path
     # Keep the child from writing .pyc files into the source tree, and stop
-    # any inherited PYTHONPATH from changing what `cli` resolves to.
+    # any inherited PYTHONPATH from changing what `codemender.runner` resolves to.
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env.pop("PYTHONPATH", None)
 
     return subprocess.run(
-        [sys.executable, "-m", "cli", *args],
+        [sys.executable, "-m", "codemender.runner", *args],
         cwd=_PKG_DIR,
         env=env,
         capture_output=True,
@@ -217,7 +223,7 @@ class TestStdoutPurity(CLIContractTestBase):
 
   def test_no_init_sets_auto_init_false_before_and_after_subcommand(self):
     """`--no-init` populates `args.auto_init = False` in both positions; default is True."""
-    from cli import __main__ as cli_main
+    from codemender.runner import __main__ as cli_main
 
     parser = cli_main.build_parser()
     default_args = cli_main._apply_defaults(parser.parse_args(["find-diff"]))
@@ -314,20 +320,17 @@ class TestCmDetection(CLIContractTestBase):
 
 
 class TestImportIsolation(unittest.TestCase):
-  """The cli package must stay independent of the env-var pipeline."""
+  """The codemender.runner package must stay independent of the env-var pipeline."""
 
   def test_importing_cli_does_not_import_main(self):
-    """Importing cli must not pull in main.py.
-
-    `main.py` calls logging.basicConfig() with a StreamHandler(sys.stdout) at
-    module scope, so merely importing it attaches a log handler to the event
-    stream. Nothing in cli/ imports it today; this test makes sure a future
-    refactor cannot quietly change that.
-    """
+    """Importing codemender.runner must not pull in main.py."""
     probe = (
         "import sys;"
-        "import cli, cli.__main__, cli.events, cli.exit_codes,"
-        " cli.commands.version, cli.commands.find_diff, cli.commands.fix;"
+        "import codemender.runner, codemender.runner.__main__,"
+        " codemender.runner.events, codemender.runner.exit_codes,"
+        " codemender.runner.commands.version,"
+        " codemender.runner.commands.find_diff,"
+        " codemender.runner.commands.fix;"
         "print('main' in sys.modules)"
     )
     env = dict(os.environ)
@@ -348,16 +351,18 @@ class TestImportIsolation(unittest.TestCase):
     self.assertEqual(
         result.stdout.strip(),
         "False",
-        "cli must not import main.py; it configures logging on stdout at "
-        "import time.",
+        "codemender.runner must not import main.py; it configures logging on "
+        "stdout at import time.",
     )
 
   def test_version_command_needs_no_utils_or_third_party_packages(self):
-    """`cli.commands.version` must not load legacy `utils` or any package from requirements.txt."""
+    """`codemender.runner.commands.version` and `__main__` must not load `utils`, `requests`, `yaml`, or `google`."""
     probe = (
         "import sys;"
         "before = set(sys.modules);"
-        "import cli, cli.events, cli.exit_codes, cli.commands.version;"
+        "import codemender.runner, codemender.runner.__main__,"
+        " codemender.runner.events, codemender.runner.exit_codes,"
+        " codemender.runner.commands.version;"
         "loaded = set(sys.modules) - before;"
         "print(sorted(m for m in loaded"
         " if m.split('.')[0] in ('utils', 'requests', 'yaml', 'google')))"
@@ -422,7 +427,7 @@ class TestCmRunnerScript(unittest.TestCase):
 
   def setUp(self):
     super().setUp()
-    self._script = os.path.join(_PKG_DIR, "bin", "cm-runner")
+    self._script = os.path.join(_LEGACY_RUNNER_DIR, "bin", "cm-runner")
 
   def test_script_exists_and_is_executable(self):
     self.assertTrue(os.path.isfile(self._script))
@@ -474,7 +479,7 @@ class TestPackageDirectoryExecution(unittest.TestCase):
   def test_package_directory_runs_version(self):
     stub = _write_stub_cm(_temp_dir(self))
     result = subprocess.run(
-        [sys.executable, _PKG_DIR, "version", "--cm-binary", stub],
+        [sys.executable, _LEGACY_RUNNER_DIR, "version", "--cm-binary", stub],
         capture_output=True,
         text=True,
         timeout=30,
@@ -486,7 +491,7 @@ class TestPackageDirectoryExecution(unittest.TestCase):
 
   def test_package_directory_usage_on_missing_command(self):
     result = subprocess.run(
-        [sys.executable, _PKG_DIR],
+        [sys.executable, _LEGACY_RUNNER_DIR],
         capture_output=True,
         text=True,
         timeout=30,
@@ -496,14 +501,19 @@ class TestPackageDirectoryExecution(unittest.TestCase):
 
 
 class TestCliArchitectureRules(unittest.TestCase):
-  """ADR-0002 Confirmation: architectural boundary enforcement via AST inspection."""
+  """ADR-0008 & ADR-0003 Confirmation: architectural boundary enforcement via AST inspection."""
 
+  # Governing: ADR-0008, SPEC-0003
   def _get_cli_python_files(self):
-    cli_dir = os.path.join(_PKG_DIR, "cli")
+    runner_dir = os.path.join(_PKG_DIR, "codemender", "runner")
     py_files = []
-    for root, _, files in os.walk(cli_dir):
+    for root, _, files in os.walk(runner_dir):
       for f in files:
-        if f.endswith(".py"):
+        if (
+            f.endswith(".py")
+            and not f.startswith("test_")
+            and not f.endswith("_test.py")
+        ):
           py_files.append(os.path.join(root, f))
     return py_files
 
@@ -512,7 +522,11 @@ class TestCliArchitectureRules(unittest.TestCase):
     py_files = []
     for root, _, files in os.walk(codemender_dir):
       for f in files:
-        if f.endswith(".py"):
+        if (
+            f.endswith(".py")
+            and not f.startswith("test_")
+            and not f.endswith("_test.py")
+        ):
           py_files.append(os.path.join(root, f))
     return py_files
 
@@ -543,10 +557,8 @@ class TestCliArchitectureRules(unittest.TestCase):
         )
 
   def test_cli_and_codemender_do_not_reference_env_scrubbing(self):
-    """ADR-0003 Confirmation: cli/ and codemender/ must never reference get_scrubbed_env or SENSITIVE_ENV_VARS."""
-    target_files = (
-        self._get_cli_python_files() + self._get_codemender_python_files()
-    )
+    """ADR-0003 Confirmation: codemender/ must never reference get_scrubbed_env or SENSITIVE_ENV_VARS."""
+    target_files = self._get_codemender_python_files()
     self.assertGreater(len(target_files), 0)
     for py_file in target_files:
       with self.subTest(file=os.path.relpath(py_file, _PKG_DIR)):
@@ -569,7 +581,7 @@ class TestCliArchitectureRules(unittest.TestCase):
           )
 
   def test_cli_modules_do_not_import_subprocess(self):
-    """CLI modules must never import subprocess directly; cm runs through codemender.cm.CmAdapter, git through vcs/git.py."""
+    """CLI modules must never import subprocess directly; cm runs through codemender.cm.CmAdapter, git through codemender.vcs.git."""
     for py_file in self._get_cli_python_files():
       with self.subTest(file=os.path.relpath(py_file, _PKG_DIR)):
         with open(py_file, "r", encoding="utf-8") as handle:
@@ -590,8 +602,9 @@ class TestCliArchitectureRules(unittest.TestCase):
             )
 
   def test_cli_modules_do_not_import_vcs_github(self):
-    """CLI modules must never import vcs.github; posting to repo hosts belongs to the CI job."""
-    for py_file in self._get_cli_python_files():
+    """ADR-0008 Confirmation: codemender modules must never import launcher, repohost, or vcs.github."""
+    banned_roots = {"launcher", "repohost"}
+    for py_file in self._get_codemender_python_files():
       with self.subTest(file=os.path.relpath(py_file, _PKG_DIR)):
         with open(py_file, "r", encoding="utf-8") as handle:
           tree = ast.parse(handle.read(), filename=py_file)
@@ -603,23 +616,34 @@ class TestCliArchitectureRules(unittest.TestCase):
                   alias.name,
                   f"{py_file}:{node.lineno} imports banned module 'vcs.github'",
               )
+              self.assertNotIn(
+                  alias.name.split(".")[0],
+                  banned_roots,
+                  f"{py_file}:{node.lineno} imports banned package"
+                  f" '{alias.name}'",
+              )
           elif isinstance(node, ast.ImportFrom):
             mod = node.module or ""
             self.assertFalse(
                 mod == "vcs.github" or mod.startswith("vcs.github"),
                 f"{py_file}:{node.lineno} imports from banned module 'vcs.github'",
             )
-            if mod == "vcs":
+            self.assertNotIn(
+                mod.split(".")[0],
+                banned_roots,
+                f"{py_file}:{node.lineno} imports from banned package '{mod}'",
+            )
+            if mod in ("vcs", "codemender.vcs"):
               for alias in node.names:
                 self.assertNotEqual(
                     alias.name,
                     "github",
-                    f"{py_file}:{node.lineno} imports 'github' from 'vcs'",
+                    f"{py_file}:{node.lineno} imports 'github' from '{mod}'",
                 )
 
   def test_cli_modules_do_not_import_utils(self):
-    """CLI modules must never import legacy utils (go/no-utils); it is left untouched for the legacy pipeline."""
-    for py_file in self._get_cli_python_files():
+    """codemender modules must never import legacy utils (go/no-utils)."""
+    for py_file in self._get_codemender_python_files():
       with self.subTest(file=os.path.relpath(py_file, _PKG_DIR)):
         with open(py_file, "r", encoding="utf-8") as handle:
           tree = ast.parse(handle.read(), filename=py_file)
@@ -660,15 +684,15 @@ class TestCliArchitectureRules(unittest.TestCase):
 
 
 class TestStdoutRedirectDuringCommand(unittest.TestCase):
-  """ADR-0002 Confirmation: while a command runs, stray stdout writes land on stderr."""
+  """ADR-0008 Confirmation: while a command runs, stray stdout writes land on stderr."""
 
   def test_git_helper_inside_command_leaves_stdout_clean(self):
     """A bare print() inside a command reaches stderr only.
 
-    The probe goes through the real `cli.__main__.main`, with the `version`
-    command's `detect_cm` swapped for a helper that prints to `sys.stdout`.
-    This fails if `main` ever stops sending stray stdout writes to stderr,
-    or leaves them redirected after it returns.
+    The probe goes through the real `codemender.runner.__main__.main`, with the
+    `version` command's `detect_cm` swapped for a helper that prints to
+    `sys.stdout`. This fails if `main` ever stops sending stray stdout writes to
+    stderr, or leaves them redirected after it returns.
     """
     temp_dir = tempfile.mkdtemp(prefix="fake_cm_")
     self.addCleanup(shutil.rmtree, temp_dir, True)
@@ -676,8 +700,8 @@ class TestStdoutRedirectDuringCommand(unittest.TestCase):
 
     probe = (
         "import sys\n"
-        "import cli.commands.version as version_cmd\n"
-        "from cli.__main__ import main\n"
+        "import codemender.runner.commands.version as version_cmd\n"
+        "from codemender.runner.__main__ import main\n"
         "def noisy_detect_cm(adapter):\n"
         "  print('stray print from a helper')\n"
         "  return {'found': True, 'version': '0.9.0', 'path': adapter.binary}\n"
@@ -710,6 +734,107 @@ class TestStdoutRedirectDuringCommand(unittest.TestCase):
     self.assertEqual(json.loads(lines[0])["event"], "version")
     self.assertIn("stray print from a helper", res.stderr)
     self.assertIn("restored=True", res.stderr)
+
+
+# Governing: ADR-0008, SPEC-0003
+class TestPackagingAndDockerContract(unittest.TestCase):
+  """ADR-0008 & SPEC-0003 packaging, .dockerignore, and runner.Dockerfile contracts."""
+
+  def test_pyproject_toml_package_exclusions_and_entrypoint(self):
+    """packages/codemender/pyproject.toml defines cm-runner script and excludes tests/testdata."""
+    pyproject_path = _REPO_ROOT / "packages" / "codemender" / "pyproject.toml"
+    self.assertTrue(pyproject_path.is_file(), f"Missing {pyproject_path}")
+    data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+
+    self.assertEqual(
+        data["project"]["scripts"].get("cm-runner"),
+        "codemender.runner.__main__:main",
+    )
+    find_cfg = data["tool"]["setuptools"]["packages"]["find"]
+    self.assertEqual(find_cfg.get("where"), ["src"])
+    self.assertEqual(find_cfg.get("include"), ["codemender*"])
+    for pattern in ("test_*", "*_test", "testdata*"):
+      self.assertIn(pattern, find_cfg.get("exclude", []))
+
+    exclude_pkg_data = data["tool"]["setuptools"]["exclude-package-data"].get(
+        "*", []
+    )
+    for pattern in ("**/test_*.py", "**/*_test.py", "**/testdata/**"):
+      self.assertIn(pattern, exclude_pkg_data)
+
+  def test_setuptools_package_finder_discovers_only_codemender_subpackages(self):
+    """setuptools.PackageFinder.find discovers only the 5 expected codemender packages."""
+    discovered = setuptools.PackageFinder.find(
+        where=_PKG_DIR,
+        include=["codemender*"],
+        exclude=["test_*", "*_test", "testdata*"],
+    )
+    self.assertEqual(
+        set(discovered),
+        {
+            "codemender",
+            "codemender.runner",
+            "codemender.runner.commands",
+            "codemender.sarif",
+            "codemender.vcs",
+        },
+    )
+
+  def test_root_dockerignore_excludes_non_runner_dirs_and_tests(self):
+    """Root .dockerignore excludes non-package directories, caches, tests, and testdata."""
+    dockerignore_path = _REPO_ROOT / ".dockerignore"
+    self.assertTrue(dockerignore_path.is_file(), f"Missing {dockerignore_path}")
+    entries = {
+        line.strip()
+        for line in dockerignore_path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+    expected_entries = {
+        ".git/",
+        "docs/",
+        "cloud-run-jobs/",
+        "github-actions/",
+        "codemender-runner/",
+        "scripts/",
+        "dist/",
+        ".venv/",
+        "**/__pycache__/",
+        "**/*.pyc",
+        "**/test_*.py",
+        "**/testdata/",
+    }
+    for entry in expected_entries:
+      self.assertIn(entry, entries, f"Missing {entry!r} in root .dockerignore")
+
+    legacy_dockerignore = _REPO_ROOT / "codemender-runner" / ".dockerignore"
+    self.assertTrue(
+        legacy_dockerignore.is_file(),
+        "codemender-runner/.dockerignore must remain intact",
+    )
+
+  def test_runner_dockerfile_contract(self):
+    """docker/runner.Dockerfile installs packages/codemender into /opt/codemender/venv after cm binary."""
+    dockerfile_path = _REPO_ROOT / "docker" / "runner.Dockerfile"
+    self.assertTrue(dockerfile_path.is_file(), f"Missing {dockerfile_path}")
+    content = dockerfile_path.read_text(encoding="utf-8")
+
+    self.assertIn("VIRTUAL_ENV=/opt/codemender/venv", content)
+    self.assertIn("/opt/codemender/venv/bin", content)
+    self.assertIn("ARG CM_VERSION", content)
+    self.assertIn(
+        "/opt/codemender/venv/bin/pip install --no-cache-dir ./packages/codemender",
+        content,
+    )
+    self.assertIn('ENTRYPOINT ["cm-runner"]', content)
+    self.assertIn('CMD ["version"]', content)
+
+    cm_install_idx = content.index("/usr/local/bin/cm")
+    copy_pkg_idx = content.index("COPY packages/codemender")
+    self.assertLess(
+        cm_install_idx,
+        copy_pkg_idx,
+        "cm binary installation must precede COPY packages/codemender to preserve layer caching",
+    )
 
 
 if __name__ == "__main__":

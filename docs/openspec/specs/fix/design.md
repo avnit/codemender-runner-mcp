@@ -64,7 +64,7 @@ from `cm`'s SARIF.
 - Retrying a failed fix, choosing a model, or passing extra context to the
   agent, until a caller needs it.
 - Verifying the patch (`cm-runner verify`, E4), committing it, pushing it, or
-  posting it to a pull request (the CI job, per ADR-0002).
+  posting it to a pull request (the CI job, per ADR-0008).
 - Writing into `cm`'s SQLite database directly.
 
 ## Decisions
@@ -155,7 +155,7 @@ flowchart TD
 (--repo is dir, --finding readable, --out not file)"]
     parse["Read finding
 (valid SARIF, exactly 1 result)"]
-    git["vcs.git: is_git_repository
+    git["codemender.vcs.git: is_git_repository
 + no uncommitted work (ignoring .cm_project, .exploit)"]
     before["cm report --format json
 (IDs before)"]
@@ -197,10 +197,10 @@ flowchart TD
 
 | Module | Responsibility | Boundary Constraints |
 | :--- | :--- | :--- |
-| `cli/__main__.py` | Registers `fix` (`--finding`, `--repo`, `--out`), builds `FixConfig`, calls `fix.run(cfg, adapter, emitter)`. | Already redirects stray `stdout` writes to `stderr` while a command runs. |
-| `cli/commands/fix.py` | `FixConfig`, `validate()`, the steps above as one private function each, writing the diff. | **MUST NOT** import `subprocess`, `utils`, `vcs.github`, or `get_scrubbed_env`. `cm` only through `CmAdapter` (`env=None`). |
-| `codemender/cm.py` | `Finding` dataclass and `CmAdapter` methods (`import_finding()`, `get_finding()`, `list_findings()` over `cm report --format json`). | Shared with `cm-runner verify` (E4), so both commands interact with findings the same way. |
-| `vcs/git.py` | `is_git_repository` (shared with SPEC-FIND-DIFF), `list_uncommitted_paths()` (with exclusions), and `diff_working_tree()` (returns the patch as bytes). | Git subprocesses stay here, run directly with `subprocess`, not `utils.run_command`. Diagnostics go to `stderr`. |
+| `packages/codemender/src/codemender/runner/__main__.py` | Registers `fix` (`--finding`, `--repo`, `--out`), builds `FixConfig`, calls `fix.run(cfg, adapter, emitter)`. | Already redirects stray `stdout` writes to `stderr` while a command runs. |
+| `packages/codemender/src/codemender/runner/commands/fix.py` | `FixConfig`, `validate()`, the steps above as one private function each, writing the diff. | **MUST NOT** import `subprocess`, `utils`, `vcs.github`, or `get_scrubbed_env`. `cm` only through `CmAdapter` (`env=None`). |
+| `packages/codemender/src/codemender/cm.py` | `Finding` dataclass and `CmAdapter` methods (`import_finding()`, `get_finding()`, `list_findings()` over `cm report --format json`). | Shared with `cm-runner verify` (E4), so both commands interact with findings the same way. |
+| `packages/codemender/src/codemender/vcs/git.py` | `is_git_repository` (shared with SPEC-FIND-DIFF), `list_uncommitted_paths()` (with exclusions), and `diff_working_tree()` (returns the patch as bytes). | Git subprocesses stay here, run directly with `subprocess`, not `utils.run_command`. Diagnostics go to `stderr`. |
 
 ## Risks / Trade-offs
 
@@ -221,15 +221,17 @@ flowchart TD
 
 ## Deployment & Rollback
 
-- **Deployment:** add `codemender-runner/cli/commands/fix.py`, register it in
-  `cli/__main__.py`, add the helpers to `codemender/cm.py` and `vcs/git.py`,
-  update `docs/guides/calling_cm_runner.md`, and add unit tests in
-  `codemender-runner/tests/test_cli_fix.py` using stub `cm` binaries.
+- **Deployment:** add
+  `packages/codemender/src/codemender/runner/commands/fix.py`, register it in
+  `packages/codemender/src/codemender/runner/__main__.py`, add the helpers to
+  `packages/codemender/src/codemender/cm.py` and
+  `packages/codemender/src/codemender/vcs/git.py`, update
+  `docs/guides/calling_cm_runner.md`, and add unit tests in
+  `packages/codemender/src/codemender/runner/commands/test_fix.py` using stub
+  `cm` binaries.
 - **`cm` version:** relies on `cm` 0.11.0 behaviour. The Docker image,
   `cloudbuild.yaml` and the image workflow pin 0.11.0 (PR #25).
-- **Verification:**
-  `python3 -m unittest discover -s codemender-runner/tests -t codemender-runner -v`,
-  plus one live run on the test VM.
+- **Verification:** `make test`, plus one live run on the test VM.
 - **Rollback:** revert the `fix` commit(s).
 
 ## Open Questions

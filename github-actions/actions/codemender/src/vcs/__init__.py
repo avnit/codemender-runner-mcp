@@ -14,10 +14,10 @@
 
 """VCS and GitHub integration subpackage.
 
-Extends `sys.path` and `vcs.__path__` to include the shared `codemender-runner`
-root in both source (`../../../../codemender-runner`) and distributed
-(`../../../codemender-runner`) repository layouts so `vcs.git`, `codemender.cm`,
-and `cli.sarif` can be imported directly without duplicating modules.
+Extends `sys.path` and `vcs.__path__` to include `packages/codemender/src` and
+the legacy `codemender-runner` root in both source and distributed repository
+layouts so `codemender.vcs.git` (and `vcs.git`), `codemender.cm`, and
+`codemender.sarif` can be imported directly without duplicating modules.
 """
 
 import os
@@ -25,11 +25,15 @@ import pkgutil
 import sys
 
 # TODO(ADR-0008): Remove this temporary sys.path and __path__ manipulation once
-# the shared package structure from ADR-0008 is in place.
+# the full three-package workspace (repohost / launcher) from ADR-0008 is complete.
 _SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _SRC_DIR not in sys.path:
   sys.path.insert(0, _SRC_DIR)
+
 for _rel in (
+    "../../../../packages/codemender/src",
+    "../../../codemender-runner/packages/codemender/src",
+    "../../../packages/codemender/src",
     "../../../../codemender-runner",
     "../../../codemender-runner",
     "../codemender-runner",
@@ -39,5 +43,13 @@ for _rel in (
     sys.path.append(_candidate)
 
 __path__ = pkgutil.extend_path(__path__, __name__)
+for _pkg_rel in (
+    "../../../../packages/codemender/src/codemender/vcs",
+    "../../../codemender-runner/packages/codemender/src/codemender/vcs",
+    "../../../packages/codemender/src/codemender/vcs",
+):
+  _vcs_candidate = os.path.normpath(os.path.join(_SRC_DIR, _pkg_rel))
+  if os.path.isdir(_vcs_candidate) and _vcs_candidate not in __path__:
+    __path__.append(_vcs_candidate)
 
 

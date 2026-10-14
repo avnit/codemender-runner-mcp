@@ -1,0 +1,43 @@
+# Git, CI/CD, and non-package directories
+.git/
+.github/
+docs/
+cloud-run-jobs/
+github-actions/
+codemender-runner/
+scripts/
+dist/
+terraform/
+
+# Virtual environments, build artifacts, and Python bytecode
+.venv/
+venv/
+env/
+.pytest_cache/
+*.egg-info/
+build/
+**/__pycache__/
+**/*.pyc
+**/*.py[cod]
+**/*$py.class
+
+# Co-located unit tests and test fixtures (ADR-0008)
+**/test_*.py
+**/*_test.py
+**/testdata/
+
+# Local state, transit caches, databases, and logs
+.cm_project/
+.codemender_transit/
+state.db
+*.db
+*.sqlite
+*.sqlite3
+*.log
+report.html
+report.json
+report.sarif
+
+# Secrets, credentials, and local certificates
+*.key
+*.pem

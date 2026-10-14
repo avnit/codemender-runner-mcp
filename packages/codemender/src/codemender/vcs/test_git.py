@@ -12,19 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for vcs.git module."""
+"""Unit tests for codemender.vcs.git module."""
 
 import base64
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_PKG_DIR = Path(__file__).resolve().parents[2]
+if str(_PKG_DIR) not in sys.path:
+  sys.path.insert(0, str(_PKG_DIR))
 
-from vcs.git import (
+from codemender.vcs.git import (
     diff_working_tree,
     enforce_https_url,
     get_git_auth_header,

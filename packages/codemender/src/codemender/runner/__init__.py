@@ -12,16 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""cm-runner: the command-line face of the CodeMender orchestrator.
+"""cm-runner: the command-line interface of the CodeMender sandbox runner.
 
-This package is deliberately independent of `main.py`. That module calls
-`logging.basicConfig()` with a **stdout** handler at import time, so anything
-importing it inherits log output on stdout -- which would corrupt the
-machine-readable event stream this CLI emits.
-
-The env-var driven pipelines (`CODEMENDER_RUN_MODE=scan|worker|aggregate`)
-continue to run through `main.py` unchanged. This package is an additional way
-in, not a replacement.
+Wraps the native `cm` binary with pre-flight checks (`init`) and structured
+NDJSON event emission on `stdout` (ADR-0001).
 """
 
 __version__ = "0.1.0"

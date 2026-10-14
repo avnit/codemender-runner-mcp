@@ -24,8 +24,8 @@ flowchart LR
     runner -->|"vcs/github.py"| pr["PR comment"]
 ```
 
-- **cm-runner** (`codemender-runner/`) is environment-agnostic. It runs
-  CodeMender and never talks to GitHub (ADR-0002).
+- **cm-runner** (`packages/codemender/`) is environment-agnostic. It runs
+  CodeMender and never talks to GitHub (ADR-0008).
 - **This action** decides *where* cm-runner runs (the launcher), and it's the
   only part that holds the GitHub token and posts to the PR.
 
@@ -67,17 +67,17 @@ A published, versioned action may follow later (see [Roadmap](#roadmap)).
 ## Packaging for a customer (maintainers)
 
 Build the package from a committed ref so only tracked files and the shared
-`codemender-runner` data models (`codemender/cm.py`, `cli/sarif.py`,
-`vcs/git.py`) are included:
+`packages/codemender` library (`codemender/cm.py`,
+`codemender/sarif/__init__.py`, `codemender/vcs/git.py`) are included:
 
 ```bash
 # From the root of codemender-runner
 STAGE=$(mktemp -d)
 git archive HEAD:github-actions | tar -x -C "$STAGE"
-mkdir -p "$STAGE/actions/codemender/codemender-runner"/{codemender,cli,vcs}
-cp codemender-runner/codemender/{__init__.py,cm.py} "$STAGE/actions/codemender/codemender-runner/codemender/"
-cp codemender-runner/cli/{__init__.py,sarif.py} "$STAGE/actions/codemender/codemender-runner/cli/"
-cp codemender-runner/vcs/{__init__.py,git.py} "$STAGE/actions/codemender/codemender-runner/vcs/"
+mkdir -p "$STAGE/actions/codemender/packages/codemender/src/codemender"/{sarif,vcs}
+cp packages/codemender/src/codemender/{__init__.py,cm.py} "$STAGE/actions/codemender/packages/codemender/src/codemender/"
+cp packages/codemender/src/codemender/sarif/__init__.py "$STAGE/actions/codemender/packages/codemender/src/codemender/sarif/"
+cp packages/codemender/src/codemender/vcs/{__init__.py,git.py} "$STAGE/actions/codemender/packages/codemender/src/codemender/vcs/"
 tar -czf codemender-action.tar.gz -C "$STAGE" --transform='s,^\.,codemender-action,' .
 rm -rf "$STAGE"
 ```
@@ -86,7 +86,7 @@ The package mirrors a repository's `.github/` directory:
 
 | Path | Copy to | Needed at runtime? |
 | :--- | :--- | :--- |
-| `actions/codemender/` (`action.yml`, `requirements.txt`, `src/`, `codemender-runner/`) | `.github/actions/codemender/` | Yes: this is the action |
+| `actions/codemender/` (`action.yml`, `requirements.txt`, `src/`, `packages/codemender/`) | `.github/actions/codemender/` | Yes: this is the action |
 | `actions/codemender/tests/` | — | No: included for transparency |
 | `workflows/cm-merge-scan.yml` | `.github/workflows/cm-merge-scan.yml` | Yes: the workflow that calls the action |
 | `README.md` | — | Setup only: these instructions |
@@ -115,9 +115,9 @@ Result:
 .github/actions/codemender/
 ├── action.yml
 ├── requirements.txt
-├── codemender-runner/
-│   ├── cli/sarif.py
-│   ├── codemender/cm.py
+├── packages/codemender/src/codemender/
+│   ├── cm.py
+│   ├── sarif/__init__.py
 │   └── vcs/git.py
 └── src/
     ├── gha_runner.py

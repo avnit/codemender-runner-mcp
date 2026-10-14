@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for `cli/sarif.py`."""
+"""Unit tests for `codemender.sarif`."""
 
 import json
 import unittest
 
-from cli import sarif
+from codemender import sarif
 
 
 class TestSarifDocument(unittest.TestCase):

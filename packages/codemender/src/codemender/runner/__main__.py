@@ -14,11 +14,7 @@
 
 """Entrypoint for the cm-runner command-line interface.
 
-Run as:  python -m cli <command> [flags]
-
-This module must not import `main.py`. That module configures logging to
-**stdout** at import time, which would put log lines into the NDJSON event
-stream on stdout and break the output contract.
+Run as:  python -m codemender.runner <command> [flags]
 """
 
 from __future__ import annotations
@@ -29,13 +25,12 @@ import logging
 import sys
 from typing import List, Optional
 
-from cli import exit_codes
-from cli.commands import find_diff
-from cli.commands import fix
-from cli.commands import init
-from cli.commands import version
-from cli.events import EventEmitter
 from codemender.cm import CmAdapter
+from codemender.runner import exit_codes
+from codemender.runner.commands import find_diff
+from codemender.runner.commands import fix
+from codemender.runner.commands import version
+from codemender.runner.events import EventEmitter
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +281,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
   with contextlib.redirect_stdout(sys.stderr):
     if args.command not in _SKIP_INIT and args.auto_init:
+      from codemender.runner.commands import init  # pylint: disable=import-outside-toplevel
+
       init_rc = init.run(init.config_from_args(args), adapter, emitter=None)
       if init_rc != exit_codes.OK:
         return init_rc
@@ -293,13 +290,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "version":
       return version.run(adapter, emitter)
     if args.command == "init":
+      from codemender.runner.commands import init  # pylint: disable=import-outside-toplevel
+
       return init.run(init.config_from_args(args), adapter, emitter)
     if args.command == "find-diff":
       return find_diff.run(find_diff.config_from_args(args), adapter, emitter)
     if args.command == "fix":
       return fix.run(fix.config_from_args(args), adapter, emitter)
     if args.command == "verify":
-      from cli.commands import verify
+      from codemender.runner.commands import verify  # pylint: disable=import-outside-toplevel
 
       return verify.run(verify.config_from_args(args), adapter, emitter)
 

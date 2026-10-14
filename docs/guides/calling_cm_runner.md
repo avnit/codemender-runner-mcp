@@ -38,16 +38,12 @@ Pin a commit tag. Don't use `latest`.
 > pipelines (building from source and pushing to customer private registries
 > such as Google Cloud Artifact Registry, AWS ECR, or private GHCR).
 
-| Where          | How                                                                                                   |
-| :------------- | :---------------------------------------------------------------------------------------------------- |
-| Docker         | `docker run --rm ghcr.io/cloud-gtm/codemender-runner:<sha> version`                                   |
-| GitHub Actions | Set `container: ghcr.io/cloud-gtm/codemender-runner:<sha>` on the job, then `run: cm-runner version`. |
-| Cloud Run      | To be defined.                                                                                        |
-| From source    | `python3 codemender-runner version` (needs Python 3.11+ and the packages in `requirements.txt`).      |
-
-Running the image with **no arguments** starts the older pipeline, configured by
-`CODEMENDER_RUN_MODE`. Existing Cloud Run jobs depend on this. New integrations
-should always name a command.
+| Where          | How                                                                                                                 |
+| :------------- | :------------------------------------------------------------------------------------------------------------------ |
+| Docker         | `docker run --rm ghcr.io/cloud-gtm/codemender-runner:<sha> version`                                                 |
+| GitHub Actions | Set `container: ghcr.io/cloud-gtm/codemender-runner:<sha>` on the job, then `run: cm-runner version`.               |
+| Cloud Run      | To be defined.                                                                                                      |
+| From source    | `uvx --from ./packages/codemender cm-runner version` or `pip install -e ./packages/codemender && cm-runner version` |
 
 ## What you get back
 
@@ -325,7 +321,7 @@ fails:
    finding ID.
 3. `cm verify -y --bypass-warning <id>`, with a 30-minute limit.
 4. Resets the Git working tree (tracked modifications and untracked files
-   outside `.cm_project` and `.exploit/`) via `vcs/git.py`.
+   outside `.cm_project` and `.exploit/`) via `codemender.vcs.git`.
 5. `cm report --format json`, reading the post-verify status and `dismiss_reason`.
 
 **Output: updated SARIF 2.1.0 on stdout.**

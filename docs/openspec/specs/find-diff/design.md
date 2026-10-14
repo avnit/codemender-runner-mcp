@@ -47,7 +47,8 @@ Governed by [SPEC-FIND-DIFF](spec.md),
 [ADR-0008](../../adr/ADR-0008-repository-layout-and-package-structure.md), and
 [ADR-0003](../../adr/ADR-0003-environment-scrubbing.md), `cm-runner find-diff`
 exposes this native capability as a first-class subcommand of the generic
-`cm-runner` orchestrator (`codemender-runner/cli/commands/find_diff.py`).
+`cm-runner` orchestrator
+(`packages/codemender/src/codemender/runner/commands/find_diff.py`).
 
 ## Goals / Non-Goals
 
@@ -82,7 +83,8 @@ exposes this native capability as a first-class subcommand of the generic
   (`cm fix`), which belong to the dedicated `cm-runner verify` and
   `cm-runner fix` subcommands.
 - Posting GitHub PR comments or uploading SARIF directly to the GitHub API from
-  inside `cli/commands/find_diff.py` (enforced by ADR-0002's import boundary).
+  inside `codemender/runner/commands/find_diff.py` (enforced by ADR-0008's
+  import boundary).
 
 ## Decisions
 
@@ -148,7 +150,7 @@ exposes this native capability as a first-class subcommand of the generic
 - **Choice:** Enforce fixed outer timeout constants
   `_FIND_DIFF_TIMEOUT_SEC = 360.0` on `cm find --diff` and
   `_CM_REPORT_TIMEOUT_SEC = 60.0` on `cm report`, matching the pattern of
-  `_CM_INIT_TIMEOUT_SEC = 60.0` in `cli/commands/init.py`.
+  `_CM_INIT_TIMEOUT_SEC = 60.0` in `codemender/runner/commands/init.py`.
 - **Rationale:** `cm find --diff` enforces an internal `maxDiffCeiling` of `300`
   seconds (5 minutes), after which it spends up to `3` seconds per active
   session cancelling server LROs. Setting the outer `CmAdapter` circuit breaker
@@ -181,12 +183,12 @@ exposes this native capability as a first-class subcommand of the generic
 
 ```mermaid
 flowchart TD
-    cli["cli/__main__.py
+    cli["codemender/runner/__main__.py
 (Verify cm binary, parse flags)"]
     validate["FindDiffConfig.validate()
 (Check --repo is dir, --base non-empty, --out not file, --diff-workers 1..16)"]
-    gitCheck["vcs.git.is_git_repository(cfg.repo)
-& vcs.git.ref_exists(cfg.repo, cfg.base)"]
+    gitCheck["codemender.vcs.git.is_git_repository(cfg.repo)
+& codemender.vcs.git.ref_exists(cfg.repo, cfg.base)"]
     cmFind["CmAdapter.run()
 cm find <repo> -y --diff=<base> --diff-workers=<N> --fail-on NONE"]
     cmReportSarif["CmAdapter.run()
@@ -223,9 +225,9 @@ cm report --format md
 ```mermaid
 sequenceDiagram
     participant Caller as CI Workflow / Caller
-    participant Main as cli/__main__.py
-    participant Cmd as cli/commands/find_diff.py
-    participant Git as vcs/git.py
+    participant Main as codemender/runner/__main__.py
+    participant Cmd as codemender/runner/commands/find_diff.py
+    participant Git as codemender/vcs/git.py
     participant Adapter as codemender/cm.py (CmAdapter)
     participant CM as cm binary
 
@@ -258,11 +260,11 @@ sequenceDiagram
 
 ### Module Structure & Boundaries
 
-| Module                                        | Responsibility                                                                                                                                                                            | Boundary Constraints (ADR-0002 & ADR-0003)                                                                                                                                          |
-| :-------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `codemender-runner/cli/__main__.py`           | Registers `find-diff` subparser (`--repo`, `--base`, `--out`, `--diff-workers`), constructs `FindDiffConfig`, and dispatches `find_diff.run(cfg, adapter, emitter)`.                      | Redirects unhandled `stdout` writes to `stderr` via `contextlib.redirect_stdout(sys.stderr)`.                                                                                       |
-| `codemender-runner/cli/commands/find_diff.py` | Implements `FindDiffConfig`, `run(cfg, adapter, emitter)`, `cm find --diff` + `cm report --format sarif`/`md` orchestration, `--out` artifact writers, and compact SARIF `stdout` output. | **MUST NOT** import `subprocess`, `utils`, `vcs.github`, `get_scrubbed_env`, or `SENSITIVE_ENV_VARS`. Calls `cm` exclusively via `CmAdapter` (`env=None`) and Git via `vcs/git.py`. |
-| `codemender-runner/vcs/git.py`                | Provides `is_git_repository(repo_dir: str) -> bool` and `ref_exists(repo_dir: str, ref: str) -> bool` to verify `--repo` and `--base` during pre-flight without writing to `stdout`.      | Isolates Git subprocess calls; routes any diagnostics to `stderr` / `logger`.                                                                                                       |
+| Module                                                        | Responsibility                                                                                                                                                                            | Boundary Constraints (ADR-0008 & ADR-0003)                                                                                                                                                     |
+| :------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/codemender/src/codemender/runner/__main__.py`       | Registers `find-diff` subparser (`--repo`, `--base`, `--out`, `--diff-workers`), constructs `FindDiffConfig`, and dispatches `find_diff.run(cfg, adapter, emitter)`.                      | Redirects unhandled `stdout` writes to `stderr` via `contextlib.redirect_stdout(sys.stderr)`.                                                                                                  |
+| `packages/codemender/src/codemender/runner/commands/find_diff.py` | Implements `FindDiffConfig`, `run(cfg, adapter, emitter)`, `cm find --diff` + `cm report --format sarif`/`md` orchestration, `--out` artifact writers, and compact SARIF `stdout` output. | **MUST NOT** import `subprocess`, `utils`, `vcs.github`, `get_scrubbed_env`, or `SENSITIVE_ENV_VARS`. Calls `cm` exclusively via `CmAdapter` (`env=None`) and Git via `codemender.vcs.git`. |
+| `packages/codemender/src/codemender/vcs/git.py`               | Provides `is_git_repository(repo_dir: str) -> bool` and `ref_exists(repo_dir: str, ref: str) -> bool` to verify `--repo` and `--base` during pre-flight without writing to `stdout`.      | Isolates Git subprocess calls; routes any diagnostics to `stderr` / `logger`.                                                                                                                  |
 
 ### `stdout` Compact SARIF 2.1.0 Output Format
 
@@ -278,28 +280,29 @@ JSON line to `stdout`:
 
 - **Shallow Clones in CI Environments** → If a CI job checks out a shallow clone
   (`fetch-depth: 1`) where the `--base` ref (e.g., `origin/main`) is not fetched
-  locally, `vcs.git.ref_exists` during pre-flight (or `git merge-base` inside
-  `cm find --diff`) will fail.
+  locally, `codemender.vcs.git.ref_exists` during pre-flight (or
+  `git merge-base` inside `cm find --diff`) will fail.
   - *Mitigation:* `cm-runner find-diff` verifies `--base` via
-    `vcs.git.ref_exists` during pre-flight, logs an actionable error on
-    `stderr`, and exits early with code `3`. Caller documentation
+    `codemender.vcs.git.ref_exists` during pre-flight, logs an actionable error
+    on `stderr`, and exits early with code `3`. Caller documentation
     (`docs/guides/calling_cm_runner.md`) will document fetching the base branch
     (or using `fetch-depth: 0`) prior to running `find-diff --base <ref>`.
 - **Stdout Pollution from Internal Helpers** → Calling `utils.run_command` in
-  `vcs/git.py` prints command banners to `stdout` unless redirected.
-  - *Mitigation:* `cli/__main__.py` wraps command execution in
+  `codemender.vcs.git` prints command banners to `stdout` unless redirected.
+  - *Mitigation:* `codemender/runner/__main__.py` wraps command execution in
     `contextlib.redirect_stdout(sys.stderr)`, while `EventEmitter` holds a
     reference to the real `sys.stdout` stream. Unit tests in `test_cli.py`
     (`TestStdoutPurity` and `TestLayoutBoundaries`) enforce this invariant.
 
 ## Deployment & Rollback
 
-- **Deployment:** Ship `codemender-runner/cli/commands/find_diff.py`, wire the
-  `find-diff` subparser in `codemender-runner/cli/__main__.py`, update
+- **Deployment:** Ship
+  `packages/codemender/src/codemender/runner/commands/find_diff.py`, wire the
+  `find-diff` subparser in
+  `packages/codemender/src/codemender/runner/__main__.py`, update
   `docs/guides/calling_cm_runner.md`, and add hermetic unit tests in
-  `codemender-runner/tests/test_cli_find_diff.py`.
-- **Verification:** Run
-  `python3 -m unittest discover -s codemender-runner/tests -t codemender-runner -v`.
+  `packages/codemender/src/codemender/runner/commands/test_find_diff.py`.
+- **Verification:** Run `make test`.
 - **Rollback:** Revert the `find-diff` commit(s).
 
 ## Open Questions

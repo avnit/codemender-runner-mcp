@@ -27,14 +27,22 @@ else
 fi
 
 # 2. Locate package directory and set PYTHONPATH
-if [ -d "/opt/codemender/codemender-runner" ]; then
-    PKG_DIR="/opt/codemender/codemender-runner"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0")")" && pwd)"
+RUNNER_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${RUNNER_DIR}/.." && pwd)"
+if [ -d "${RUNNER_DIR}/packages/codemender/src" ]; then
+    PKG_SRC="${RUNNER_DIR}/packages/codemender/src"
+elif [ -d "${REPO_ROOT}/packages/codemender/src" ]; then
+    PKG_SRC="${REPO_ROOT}/packages/codemender/src"
+elif [ -d "/opt/codemender/packages/codemender/src" ]; then
+    PKG_SRC="/opt/codemender/packages/codemender/src"
 else
-    SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0")")" && pwd)"
-    PKG_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+    PKG_SRC=""
 fi
 
-export PYTHONPATH="${PKG_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
+if [ -n "${PKG_SRC}" ]; then
+    export PYTHONPATH="${PKG_SRC}${PYTHONPATH:+:${PYTHONPATH}}"
+fi
 
-# 3. Dispatch to directory execution (__main__.py)
-exec "$PYTHON" "${PKG_DIR}" "$@"
+# 3. Dispatch to codemender.runner
+exec "$PYTHON" -m codemender.runner "$@"

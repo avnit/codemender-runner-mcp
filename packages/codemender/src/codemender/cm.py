@@ -14,16 +14,9 @@
 
 """Code for running the `cm` binary and reading its output.
 
-Two audiences, kept apart on purpose:
-
-*   **New commands (`cli/`)** run `cm` only through `CmAdapter`. It starts `cm`
-    itself, with a timeout and with output captured, and returns a `CmResult`
-    this module owns. It never touches the legacy `utils` module.
-*   **The legacy pipeline (`runners/`)** keeps using `parse_findings_json`,
-    `extract_session_id` and `log_cm_version`, which still go through `utils`.
-    Those imports happen inside the functions, so importing this module does
-    not load `utils` (and through it, `requests`). `cm-runner version` has to
-    work before `requirements.txt` is installed.
+Runner commands (`codemender.runner`) invoke `cm` exclusively through
+`CmAdapter`, which runs `cm` with closed `stdin`, separate `stdout`/`stderr`
+capture, and an explicit timeout, returning a structured `CmResult`.
 """
 
 import dataclasses

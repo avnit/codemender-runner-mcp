@@ -38,7 +38,7 @@ order and stops at the first failure:
 On exit 2 or 3 nothing is written to stdout.
 
 `cm` runs through `CmAdapter` with the runner's own environment (ADR-0003).
-Git runs through `vcs/git.py`.
+Git runs through `codemender.vcs.git`.
 """
 
 from __future__ import annotations
@@ -50,13 +50,13 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from cli import exit_codes
-from cli import sarif
-from cli.commands import fix
-from cli.events import EventEmitter
+from codemender import sarif
 from codemender.cm import CmAdapter
 from codemender.cm import Finding
-from vcs import git
+from codemender.runner import exit_codes
+from codemender.runner.commands import fix
+from codemender.runner.events import EventEmitter
+from codemender.vcs import git
 
 logger = logging.getLogger(__name__)
 

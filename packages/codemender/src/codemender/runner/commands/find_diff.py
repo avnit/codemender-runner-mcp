@@ -32,11 +32,11 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from cli import exit_codes
-from cli import sarif
-from cli.events import EventEmitter
+from codemender import sarif
 from codemender.cm import CmAdapter
-from vcs import git
+from codemender.runner import exit_codes
+from codemender.runner.events import EventEmitter
+from codemender.vcs import git
 
 logger = logging.getLogger(__name__)
 

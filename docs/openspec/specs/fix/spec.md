@@ -21,7 +21,8 @@ sdd_cujspec_product: codemender-runner
 
 This specification defines the command-line interface, input contract,
 `stdout` output contract, and `--out` artifact contract for the
-`cm-runner fix` subcommand (`codemender-runner/cli/commands/fix.py`).
+`cm-runner fix` subcommand
+(`packages/codemender/src/codemender/runner/commands/fix.py`).
 
 `cm-runner fix` takes **one finding as a SARIF file** (the format
 `cm-runner find-diff` produces, see SPEC-FIND-DIFF), imports it into `cm` with
@@ -51,8 +52,9 @@ This specification is governed by and references:
 
 - **CUJ UUID:** cuj-fix-cli-args
 
-The orchestrator CLI (`codemender-runner/cli/__main__.py`) MUST register the
-`fix` subcommand and dispatch it to `codemender-runner/cli/commands/fix.py` via
+The orchestrator CLI (`packages/codemender/src/codemender/runner/__main__.py`)
+MUST register the `fix` subcommand and dispatch it to
+`packages/codemender/src/codemender/runner/commands/fix.py` via
 `fix.run(cfg, adapter, emitter)`.
 
 `fix` MUST accept only the following command-specific flags:
@@ -118,7 +120,7 @@ one `fix` run always means one finding and one patch.
 
 - **GIVEN** `finding.json` is valid JSON but has no `runs` list
 - **WHEN** `cm-runner fix --finding finding.json` is invoked
-- **THEN** the command emits zero bytes on `stdout` and exits `2`.
+- **THEN** the command emits zero bytes on `stdout`, and exits `2`.
 
 ______________________________________________________________________
 
@@ -126,12 +128,12 @@ ______________________________________________________________________
 
 - **CUJ UUID:** cuj-fix-preflight
 
-Before calling `cm`, `fix` MUST check the repository through `vcs/git.py`. On
-failure it MUST log the reason to `stderr`, write nothing to `stdout`, and exit
-`3` (`exit_codes.FAILED`):
+Before calling `cm`, `fix` MUST check the repository through
+`codemender.vcs.git`. On failure it MUST log the reason to `stderr`, write
+nothing to `stdout`, and exit `3` (`exit_codes.FAILED`):
 
-1. `--repo` is not inside a Git working tree (`vcs.git.is_git_repository`,
-   shared with SPEC-FIND-DIFF).
+1. `--repo` is not inside a Git working tree
+   (`codemender.vcs.git.is_git_repository`, shared with SPEC-FIND-DIFF).
 1. `--repo` has uncommitted changes: modified, staged, or untracked files.
    The files `cm` itself writes into a repository, **`.cm_project` and
    `.exploit/`, MUST be ignored** by this check.
@@ -161,9 +163,10 @@ ______________________________________________________________________
 - **CUJ UUID:** cuj-fix-adapter-execution
 
 In accordance with [ADR-0008](../../adr/ADR-0008-repository-layout-and-package-structure.md),
-`cli/commands/fix.py` MUST NOT import `subprocess`, `utils`, or `vcs.github`.
-All `cm` calls MUST go through the `CmAdapter` checked by `cli/__main__.py`,
-with `cwd=str(cfg.repo)`. Git calls MUST go through `vcs/git.py`.
+`codemender/runner/commands/fix.py` MUST NOT import `subprocess`, `utils`, or
+`vcs.github`. All `cm` calls MUST go through the `CmAdapter` checked by
+`codemender/runner/__main__.py`, with `cwd=str(cfg.repo)`. Git calls MUST go
+through `codemender.vcs.git`.
 
 `fix` MUST run these steps in order, stopping at the first failure:
 

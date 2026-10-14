@@ -61,7 +61,7 @@ from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Seque
 from urllib.parse import quote
 
 from vcs.github import list_finding_comments, post_or_update_sticky_comment
-from cli.sarif import SarifDocument
+from codemender.sarif import SarifDocument
 from codemender.cm import Finding
 import fix_comments
 from fix_comments import FixCell

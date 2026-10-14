@@ -21,11 +21,11 @@ command never runs.
 
 from __future__ import annotations
 
-import cli
-from cli import exit_codes
-from cli.events import EventEmitter
+from codemender import runner
 from codemender.cm import CmAdapter
 from codemender.cm import detect_cm
+from codemender.runner import exit_codes
+from codemender.runner.events import EventEmitter
 
 
 def run(adapter: CmAdapter, emitter: EventEmitter) -> int:
@@ -41,7 +41,7 @@ def run(adapter: CmAdapter, emitter: EventEmitter) -> int:
   cm = detect_cm(adapter)
   emitter.emit(
       "version",
-      orchestrator=cli.__version__,
+      orchestrator=runner.__version__,
       cm=cm,
   )
   return exit_codes.OK

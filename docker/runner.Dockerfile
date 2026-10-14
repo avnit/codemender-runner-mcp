@@ -22,8 +22,7 @@ ARG CM_URL=""
 
 ENV DEBIAN_FRONTEND=noninteractive \
     VIRTUAL_ENV=/opt/codemender/venv \
-    PATH="/opt/codemender/venv/bin:/usr/local/go/bin:${PATH}" \
-    PYTHONPATH=/opt/codemender/codemender-runner
+    PATH="/opt/codemender/venv/bin:/usr/local/go/bin:${PATH}"
 
 # 1. Consolidated multi-toolchain install (Python 3.11, Node.js 22, Java 17, and base build tools)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -56,17 +55,12 @@ RUN set -eu && \
     rm -f /tmp/cm.bin && \
     chmod +x /usr/local/bin/cm
 
-# 4. Isolated Python virtual environment (preserves layer caching for pip dependencies)
+# 4. Isolated Python virtual environment & packages/codemender installation
 WORKDIR /opt/codemender
-COPY requirements.txt ./
-RUN python3.11 -m venv /opt/codemender/venv && \
-    /opt/codemender/venv/bin/pip install --no-cache-dir -r requirements.txt
+RUN python3.11 -m venv /opt/codemender/venv
+COPY packages/codemender ./packages/codemender/
+RUN /opt/codemender/venv/bin/pip install --no-cache-dir ./packages/codemender
 
-# 5. Copy package and establish entrypoint symlinks
-COPY . ./codemender-runner/
-RUN chmod +x /opt/codemender/codemender-runner/bin/cm-runner && \
-    ln -s /opt/codemender/codemender-runner/bin/cm-runner /usr/local/bin/cm-runner
-
-# 6. Container contract
+# 5. Container contract
 ENTRYPOINT ["cm-runner"]
 CMD ["version"]

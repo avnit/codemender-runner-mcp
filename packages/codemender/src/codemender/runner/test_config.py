@@ -12,18 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for config module."""
+"""Unit tests for codemender.runner.config module."""
 
 import os
+from pathlib import Path
 import sys
 import tempfile
 import unittest
 import unittest.mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_PKG_DIR = Path(__file__).resolve().parents[2]
+if str(_PKG_DIR) not in sys.path:
+  sys.path.insert(0, str(_PKG_DIR))
 
-from config import inject_codemender_config
-from config import OrchestratorConfig
+from codemender.runner.config import detect_build_command
+from codemender.runner.config import inject_codemender_config
+from codemender.runner.config import OrchestratorConfig
 import yaml
 
 
@@ -115,7 +119,6 @@ class TestConfig(unittest.TestCase):
 
   def test_detect_build_command_nodejs(self):
     """Verify detect_build_command finds npm test in package.json."""
-    from config import detect_build_command
     with tempfile.TemporaryDirectory() as repo_dir:
       with open(os.path.join(repo_dir, "package.json"), "w") as f:
         f.write('{"name": "test-pkg", "scripts": {"test": "mocha"}}')
@@ -123,7 +126,6 @@ class TestConfig(unittest.TestCase):
 
   def test_detect_build_command_python(self):
     """Verify detect_build_command finds pytest when pyproject.toml exists."""
-    from config import detect_build_command
     with tempfile.TemporaryDirectory() as repo_dir:
       with open(os.path.join(repo_dir, "pyproject.toml"), "w") as f:
         f.write("[tool.pytest]")
@@ -131,7 +133,6 @@ class TestConfig(unittest.TestCase):
 
   def test_detect_build_command_go(self):
     """Verify detect_build_command finds go test when go.mod exists."""
-    from config import detect_build_command
     with tempfile.TemporaryDirectory() as repo_dir:
       with open(os.path.join(repo_dir, "go.mod"), "w") as f:
         f.write("module example.com/test")
@@ -152,7 +153,6 @@ class TestConfig(unittest.TestCase):
 
   def test_inject_codemender_config_env_override_takes_precedence(self):
     """Verify env override CODEMENDER_BUILD_COMMAND takes precedence over repo config."""
-    from config import OrchestratorConfig
     with tempfile.TemporaryDirectory() as temp_home:
       with tempfile.TemporaryDirectory() as repo_dir:
         local_config = {"build": {"command": "npm test"}}
@@ -170,7 +170,6 @@ class TestConfig(unittest.TestCase):
 
   def test_inject_codemender_config_composite_build_command(self):
     """Verify composite build commands with ampersands are safely preserved."""
-    from config import OrchestratorConfig
     with tempfile.TemporaryDirectory() as temp_home:
       with tempfile.TemporaryDirectory() as repo_dir:
         test_env = {"CODEMENDER_BUILD_COMMAND": "npm install && npm test"}

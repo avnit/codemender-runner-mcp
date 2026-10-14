@@ -35,8 +35,8 @@ Each step emits one `check` event. Any failed check makes the exit code
 `exit_codes.FAILED`; the reason is in the event and in the logs on stderr.
 
 `cm` runs through `CmAdapter`, which captures its output and applies a
-timeout. Outside `cli/` and `codemender.cm`, the only module imported is
-`config.py`, so `init` needs nothing installed beyond PyYAML.
+timeout. Outside `codemender.runner` and `codemender.cm`, `init` needs nothing
+installed beyond PyYAML.
 """
 
 from __future__ import annotations
@@ -50,12 +50,11 @@ import re
 import sys
 from typing import Optional
 
-import yaml
-
-from cli import exit_codes
-from cli.events import EventEmitter
 from codemender.cm import CmAdapter
-import config
+from codemender.runner import config
+from codemender.runner import exit_codes
+from codemender.runner.events import EventEmitter
+import yaml
 
 logger = logging.getLogger(__name__)
 

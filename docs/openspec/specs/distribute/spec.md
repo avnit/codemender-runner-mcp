@@ -64,9 +64,9 @@ This specification is governed by and references:
 - [SPEC-WIF](../wif/spec.md) — Unified Terraform root and composable mode-aware
   Workload Identity Federation module (`terraform/` &
   `terraform/modules/{wif,gcp}`).
-- [ADR-0001: Machine-Readable Output Contract](../../../adr/ADR-0001-machine-readable-output-contract.md)
-- [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../../adr/ADR-0003-environment-scrubbing.md)
-- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
+- [ADR-0001: Machine-Readable Output Contract](../../adr/ADR-0001-machine-readable-output-contract.md)
+- [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../adr/ADR-0003-environment-scrubbing.md)
+- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../adr/ADR-0008-repository-layout-and-package-structure.md)
 
 ## Requirements
 
@@ -163,12 +163,13 @@ database using `git archive "$SOURCE_REF"` into a temporary staging directory
 #### Scenario: Ignoring Untracked and Uncommitted Files in Source Workspace
 
 - **GIVEN** the maintainer's local `codemender-runner` checkout contains an
-  untracked file `codemender-runner/secret_notes.txt` and an uncommitted edit to
-  `codemender-runner/cli/__main__.py`
+  untracked file `packages/codemender/secret_notes.txt` and an uncommitted edit
+  to `packages/codemender/src/codemender/runner/__main__.py`
 - **WHEN** `./scripts/distribute.sh --target /tmp/cm-distro --source-ref HEAD`
   runs
 - **THEN** the staged distribution contains the committed `HEAD` version of
-  `codemender-runner/cli/__main__.py` and does not include `secret_notes.txt`.
+  `packages/codemender/src/codemender/runner/__main__.py` and does not include
+  `secret_notes.txt`.
 
 ______________________________________________________________________
 
@@ -186,11 +187,13 @@ transform the archive into the target repository layout:
      - Map `dist/README.md` to `README.md` at the target root.
    - Never copy `scripts/distribute.sh` or any `docs/` directory into
      `--target`.
-1. **Live GitHub Actions Configuration (`.github/actions/` & `.github/workflows/`):**
+1. **Live GitHub Actions Configuration (`.github/actions/` &
+   `.github/workflows/`):**
    - Map `github-actions/actions/codemender/` to `.github/actions/codemender/`
      (including `action.yml`, which normalizes `ghcr.io/` repository names to
-     lowercase and passes the resolved image via `steps.pull-image.outputs.image`
-     to `CODEMENDER_RUNNER_IMAGE`, `requirements.txt`, `src/`, and `tests/`).
+     lowercase and passes the resolved image via
+     `steps.pull-image.outputs.image` to `CODEMENDER_RUNNER_IMAGE`,
+     `requirements.txt`, `src/`, and `tests/`).
    - Map `github-actions/workflows/*.yml` (currently `cm-merge-scan.yml`, which
      defaults `runner_image` to
      `${{ vars.CODEMENDER_RUNNER_IMAGE || format('ghcr.io/{0}/codemender-runner:latest', github.repository_owner) }}`
@@ -200,26 +203,25 @@ transform the archive into the target repository layout:
      under `github-actions/workflows/`) to `.github/workflows/`.
    - Copy `.github/workflows/build_runner_image.yml` to
      `.github/workflows/build_runner_image.yml` (with the build context updated
-     to `.github/codemender-runner`, the `Verify Image Contract` step updated to
-     assert `CMD ["version"]` rather than `CMD ["legacy"]`, and the `Push Runner Image`
-     step honoring `vars.CODEMENDER_RUNNER_IMAGE` while publishing lowercase
-     `ghcr.io/${OWNER,,}/codemender-runner:latest` and `:${SHA}`).
+     to `.github/codemender-runner`, `file: docker/runner.Dockerfile` stripped,
+     the `Verify Image Contract` step asserting `CMD ["version"]`, and the
+     `Push Runner Image` step honoring `vars.CODEMENDER_RUNNER_IMAGE` while
+     publishing lowercase `ghcr.io/${OWNER,,}/codemender-runner:latest` and
+     `:${SHA}`).
    - Explicitly exclude `.github/workflows/codemender_parallel.yml`.
-1. **Stripped `codemender-runner/` Package (`.github/codemender-runner/`):**
-   - Map the `codemender-runner/` package files required to build, run, and
-     unit-test the `cm-runner` CLI (`cli/`, including `version`, `init`,
-     `find-diff`, and `fix`) into `.github/codemender-runner/`:
-     - `Dockerfile` (with the legacy `main.py` symlink removed and default
-       `CMD ["version"]`), `.dockerignore`, and `requirements.txt`
-     - `__main__.py` (dispatching directly to `cli.__main__`) and `bin/cm-runner`
-     - `cli/` (all modules and subcommands under `cli/` and `cli/commands/`)
-     - `codemender/__init__.py` and `codemender/cm.py`
-     - `config.py`
-     - `vcs/__init__.py` and `vcs/git.py` (with legacy `utils` imports deferred
-       inside legacy-only functions)
-     - Unit tests for the included modules under `.github/codemender-runner/tests/`:
-       `tests/__init__.py`, `tests/test_cli*.py`, `tests/test_codemender_cm.py`,
-       `tests/test_vcs_git.py`, `tests/test_config.py`, and `tests/testdata/`
+1. **Stripped `.github/codemender-runner/` Self-Contained Build Context:**
+   - Map `docker/runner.Dockerfile` to `.github/codemender-runner/Dockerfile`
+     (with the legacy `main.py` symlink removed and default `CMD ["version"]`),
+     along with `.dockerignore` and `codemender-runner/requirements.txt`.
+   - Copy `codemender-runner/__main__.py` (dispatching directly to
+     `codemender.runner.__main__`) and `codemender-runner/bin/cm-runner` into
+     `.github/codemender-runner/`.
+   - Map `packages/codemender/` into
+     `.github/codemender-runner/packages/codemender/`, stripping co-located
+     test files (`test_*.py`, `*_test.py`), `testdata/`, and `__pycache__/`
+     directories so `.github/codemender-runner` acts as a self-contained Docker
+     build context (`COPY packages/codemender/ ...` and
+     `/opt/codemender/venv/bin/pip install --no-cache-dir ./packages/codemender`).
    - **Explicitly exclude all legacy pipeline files:**
      - `main.py`, `runners/`, `storage.py`, `utils.py`, `codemender/db.py`,
        `vcs/github.py`, `codemender-runner/README.md`, and all legacy test files
@@ -227,8 +229,8 @@ transform the archive into the target repository layout:
        `test_pr_review_suggestions.py`, `test_storage.py`, `test_utils.py`,
        `test_vcs_github.py`, `test_codemender_db.py`, `test_command_builder.py`,
        `e2e_test_local.py`, `dummy_cm.py`, `tests/cm`).
-1. **GCP Workload Identity Federation Terraform Configuration (`.github/terraform/` &
-   `.github/terraform/modules/wif/`):**
+1. **GCP Workload Identity Federation Terraform Configuration
+   (`.github/terraform/` & `.github/terraform/modules/wif/`):**
    - Copy the root `terraform/` files (`main.tf`, `variables.tf`, `outputs.tf`,
      `provider.tf`, `terraform.tfvars.example`, `.terraform.lock.hcl`, and
      `tests/root_test.tftest.hcl`) and `terraform/modules/wif/` to
@@ -262,9 +264,8 @@ transform the archive into the target repository layout:
   `.github/terraform/gcp_override.tf`,
   `.github/terraform/tests/root_gcp_test.tftest.hcl`,
   `.github/codemender-runner/main.py`, or `.github/codemender-runner/utils.py`
-- **AND** running
-  `python3 -m unittest discover -s .github/codemender-runner/tests -t .github/codemender-runner`
-  and `python3 -m unittest discover -s .github/actions/codemender/tests` inside
+- **AND** running `python3 .github/codemender-runner --version` and
+  `python3 -m unittest discover -s .github/actions/codemender/tests` inside
   `/tmp/cm-distro` both pass with exit code `0`.
 
 ______________________________________________________________________
@@ -358,12 +359,13 @@ commit history:
   custom file `CODEOWNERS` was added and `.github/workflows/cm-merge-scan.yml`
   had its `runner_image:` line customized
 - **WHEN** source commit `C2` updates
-  `codemender-runner/cli/commands/find_diff.py` and
+  `packages/codemender/src/codemender/runner/commands/find_diff.py` and
   `./scripts/distribute.sh --target /tmp/cm-distro --source-ref C2` is executed
-- **THEN** `.github/codemender-runner/cli/commands/find_diff.py` is updated to
-  the `C2` version, `CODEOWNERS` and the customized `runner_image:` line in
-  `.github/workflows/cm-merge-scan.yml` remain intact, and the new commit on
-  `/tmp/cm-distro` records `Codemender-Source-Commit: <C2>`.
+- **THEN**
+  `.github/codemender-runner/packages/codemender/src/codemender/runner/commands/find_diff.py`
+  is updated to the `C2` version, `CODEOWNERS` and the customized
+  `runner_image:` line in `.github/workflows/cm-merge-scan.yml` remain intact,
+  and the new commit on `/tmp/cm-distro` records `Codemender-Source-Commit: <C2>`.
 
 #### Scenario: Repeat Sync Propagates Upstream File Deletions Without Deleting Target-Only Files
 

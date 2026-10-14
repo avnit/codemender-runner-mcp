@@ -22,7 +22,7 @@ sdd_cujspec_product: codemender-runner
 This specification defines the functional requirements, command-line interface,
 SARIF `stdout` output contract, and `--out` artifact contract for the
 `cm-runner find-diff` subcommand
-(`codemender-runner/cli/commands/find_diff.py`).
+(`packages/codemender/src/codemender/runner/commands/find_diff.py`).
 
 `cm-runner find-diff` provides a streamlined CLI command built on CodeMender's
 native impact-aware differential scanner
@@ -53,9 +53,9 @@ This specification is governed by and references:
 
 - **CUJ UUID:** cuj-find-diff-cli-args
 
-The orchestrator CLI (`codemender-runner/cli/__main__.py`) MUST register the
-`find-diff` subcommand and dispatch it to
-`codemender-runner/cli/commands/find_diff.py` via
+The orchestrator CLI (`packages/codemender/src/codemender/runner/__main__.py`)
+MUST register the `find-diff` subcommand and dispatch it to
+`packages/codemender/src/codemender/runner/commands/find_diff.py` via
 `find_diff.run(cfg, adapter, emitter)`.
 
 To keep the CLI surface lean and rely on `cm`'s built-in defaults (and
@@ -102,9 +102,9 @@ target Git reference prior to invoking `cm find`:
 1. **Command-Line Argument Validation (`FindDiffConfig.validate()`, Exit Code
    `2`):**
    - If `--repo` does not exist or is not a directory (matching
-     `InitConfig.validate()` in `cli/commands/init.py`), `validate()` MUST log
-     the reason to `stderr`, write nothing to `stdout`, and return exit code `2`
-     (`exit_codes.USAGE`).
+     `InitConfig.validate()` in `codemender/runner/commands/init.py`),
+     `validate()` MUST log the reason to `stderr`, write nothing to `stdout`,
+     and return exit code `2` (`exit_codes.USAGE`).
    - If `--base` is empty or contains only whitespace, `validate()` MUST log the
      reason to `stderr`, write nothing to `stdout`, and return exit code `2`
      (`exit_codes.USAGE`).
@@ -116,13 +116,15 @@ target Git reference prior to invoking `cm find`:
      code `2` (`exit_codes.USAGE`).
 1. **Git Repository & Base Reference Pre-Flight Checks (Exit Code `3`):**
    - Before invoking `cm find --diff`, `find-diff` MUST verify that `--repo`
-     resides inside a valid Git working tree (`vcs.git.is_git_repository`). If
-     not, the command MUST exit early, logging the error to `stderr`, writing
-     nothing to `stdout`, and returning exit code `3` (`exit_codes.FAILED`).
+     resides inside a valid Git working tree
+     (`codemender.vcs.git.is_git_repository`). If not, the command MUST exit
+     early, logging the error to `stderr`, writing nothing to `stdout`, and
+     returning exit code `3` (`exit_codes.FAILED`).
    - Before invoking `cm find --diff`, `find-diff` MUST verify that `--base` is
-     a valid, existing Git commit reference in `--repo` (`vcs.git.ref_exists`,
-     e.g., `git rev-parse --verify --quiet --end-of-options <base>^{commit}`).
-     If `--base` is invalidly formatted or does not resolve to an existing
+     a valid, existing Git commit reference in `--repo`
+     (`codemender.vcs.git.ref_exists`, e.g.,
+     `git rev-parse --verify --quiet --end-of-options <base>^{commit}`). If
+     `--base` is invalidly formatted or does not resolve to an existing
      reference in `--repo`, the command MUST exit early without spawning `cm`,
      log the error to `stderr`, write nothing to `stdout`, and return exit code
      `3` (`exit_codes.FAILED`).
@@ -167,9 +169,9 @@ target Git reference prior to invoking `cm find`:
 - **GIVEN** `--base` is invalidly formatted (e.g., `origin/..bad..ref`) or does
   not exist in `--repo` (e.g., `origin/nonexistent`)
 - **WHEN** `cm-runner find-diff --base origin/nonexistent` is executed
-- **THEN** `vcs.git.ref_exists` fails during pre-flight before `CmAdapter.run()`
-  is called, logs the invalid/missing reference error to `stderr`, emits zero
-  bytes on `stdout`, and exits with code `3`.
+- **THEN** `codemender.vcs.git.ref_exists` fails during pre-flight before
+  `CmAdapter.run()` is called, logs the invalid/missing reference error to
+  `stderr`, emits zero bytes on `stdout`, and exits with code `3`.
 
 ______________________________________________________________________
 
@@ -178,11 +180,11 @@ ______________________________________________________________________
 - **CUJ UUID:** cuj-find-diff-adapter-execution
 
 In accordance with [ADR-0008](../../adr/ADR-0008-repository-layout-and-package-structure.md),
-`cli/commands/find_diff.py` MUST NOT import `subprocess`, `utils`, or
-`vcs.github`, and MUST NOT invoke `run_command` or `build_cm_command`. All `cm`
-binary executions MUST go through the `CmAdapter` instance verified by
-`cli/__main__.py:main()`, and any local Git pre-flight checks MUST go through
-`vcs/git.py`.
+`codemender/runner/commands/find_diff.py` MUST NOT import `subprocess`, `utils`,
+or `vcs.github`, and MUST NOT invoke `run_command` or `build_cm_command`. All
+`cm` binary executions MUST go through the `CmAdapter` instance verified by
+`codemender/runner/__main__.py:main()`, and any local Git pre-flight checks MUST
+go through `codemender.vcs.git`.
 
 `cm-runner find-diff` MUST execute the differential scan and report extraction
 in two steps via `CmAdapter.run()`, relying on `cm find --diff` to filter
@@ -256,8 +258,8 @@ ______________________________________________________________________
 - **CUJ UUID:** cuj-find-diff-environment-passthrough
 
 In accordance with [ADR-0003](../../adr/ADR-0003-environment-scrubbing.md),
-`cli/commands/find_diff.py` and `CmAdapter` MUST NOT import or call
-`config.get_scrubbed_env()` or reference `SENSITIVE_ENV_VARS`.
+`codemender/runner/commands/find_diff.py` and `CmAdapter` MUST NOT import or
+call `config.get_scrubbed_env()` or reference `SENSITIVE_ENV_VARS`.
 `cm-runner find-diff` MUST invoke `CmAdapter.run()` with `env=None` (the
 default), inheriting the caller's environment so that parent `cm` can
 authenticate to the CodeMender backend via GCP Application Default Credentials
@@ -270,9 +272,9 @@ other untracked files inside `--repo`.
 
 - **GIVEN** a clean Git repository at `/workspace`
 - **WHEN** `cm-runner find-diff --repo /workspace` invokes `CmAdapter.run()`
-- **THEN** `cli/commands/find_diff.py` does not import `get_scrubbed_env` or
-  `SENSITIVE_ENV_VARS`, `CmAdapter.run()` is called with `env=None`, and no
-  `/workspace/.codemender_cache` directory is created.
+- **THEN** `codemender/runner/commands/find_diff.py` does not import
+  `get_scrubbed_env` or `SENSITIVE_ENV_VARS`, `CmAdapter.run()` is called with
+  `env=None`, and no `/workspace/.codemender_cache` directory is created.
 
 ______________________________________________________________________
 

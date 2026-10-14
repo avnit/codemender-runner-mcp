@@ -28,16 +28,19 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import unittest
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_PKG_DIR = str(Path(__file__).resolve().parents[3])
+if _PKG_DIR not in sys.path:
+  sys.path.insert(0, _PKG_DIR)
 
-from cli import __main__ as cli_main
-from cli import exit_codes
-from cli.commands import verify
-from cli.events import EventEmitter
 from codemender.cm import CmAdapter, CmResult, TokenUsage
+from codemender.runner import __main__ as cli_main
+from codemender.runner import exit_codes
+from codemender.runner.commands import verify
+from codemender.runner.events import EventEmitter
 
-_PKG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_SAMPLE_FINDING_PATH = Path(_PKG_DIR, "tests", "testdata", "cm_finding.json")
+_SAMPLE_FINDING_PATH = (
+    Path(__file__).resolve().parent / "testdata" / "cm_finding.json"
+)
 _EMBEDDED_SAMPLE_ID = "9f7b066a-0d33-5ced-b834-9ad42e83aa40"
 
 _APP_PY = (
@@ -180,6 +183,12 @@ class VerifyTestBase(unittest.TestCase):
 
   def setUp(self):
     super().setUp()
+    env_patcher = mock.patch.dict(
+        os.environ,
+        {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"},
+    )
+    env_patcher.start()
+    self.addCleanup(env_patcher.stop)
     self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="cm_runner_verify_"))
     self.addCleanup(shutil.rmtree, self.tmp, True)
     self.repo = os.path.join(self.tmp, "repo")
@@ -689,6 +698,12 @@ else:
 
   def setUp(self):
     super().setUp()
+    env_patcher = mock.patch.dict(
+        os.environ,
+        {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"},
+    )
+    env_patcher.start()
+    self.addCleanup(env_patcher.stop)
     self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="cm_runner_verify_cli_"))
     self.addCleanup(shutil.rmtree, self.tmp, True)
     self.home = os.path.join(self.tmp, "home")
@@ -710,7 +725,6 @@ else:
     self.finding = os.path.join(self.tmp, "cm_finding.json")
     shutil.copy(_SAMPLE_FINDING_PATH, self.finding)
     self.out_dir = os.path.join(self.tmp, "verified_out")
-    self.runner_script = os.path.join(_PKG_DIR, "bin", "cm-runner")
 
   def run_verify(self, *args, verify_status: str = "DISMISSED"):
     env = dict(os.environ)
@@ -721,7 +735,15 @@ else:
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env.pop("PYTHONPATH", None)
     return subprocess.run(
-        [self.runner_script, "verify", "--cm-binary", self.cm, *args],
+        [
+            sys.executable,
+            "-m",
+            "codemender.runner",
+            "verify",
+            "--cm-binary",
+            self.cm,
+            *args,
+        ],
         cwd=_PKG_DIR,
         env=env,
         capture_output=True,

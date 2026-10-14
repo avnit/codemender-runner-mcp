@@ -36,7 +36,7 @@ works. On exit 2 or 3 nothing is written to stdout. The patch is left applied
 in the repository and is not committed.
 
 `cm` runs through `CmAdapter` with the runner's own environment (ADR-0003).
-Git runs through `vcs/git.py`.
+Git runs through `codemender.vcs.git`.
 """
 
 from __future__ import annotations
@@ -51,12 +51,12 @@ import sys
 import tempfile
 from typing import Optional, TextIO
 
-from cli import exit_codes
-from cli import sarif
-from cli.events import EventEmitter
+from codemender import sarif
 from codemender.cm import CmAdapter
 from codemender.cm import Finding
-from vcs import git
+from codemender.runner import exit_codes
+from codemender.runner.events import EventEmitter
+from codemender.vcs import git
 
 logger = logging.getLogger(__name__)
 

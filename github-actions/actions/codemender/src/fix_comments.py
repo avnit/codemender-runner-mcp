@@ -29,7 +29,7 @@ import subprocess
 from typing import Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from vcs import github
-from vcs.git import SuggestionHunk, normalize_repo_relative_path, parse_patch_to_suggestions
+from codemender.vcs.git import SuggestionHunk, normalize_repo_relative_path, parse_patch_to_suggestions
 from codemender.cm import Finding
 
 logger = logging.getLogger("codemender-github-actions")

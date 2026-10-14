@@ -31,9 +31,9 @@ include Cloud Run in future syncs—and pushes updates into a standalone,
 customer-facing Git repository without clobbering target repository changes.
 
 Governed by [SPEC-DIST](spec.md), [SPEC-WIF](../wif/spec.md),
-[ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
-[ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md), and
-[ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md).
+[ADR-0001](../../adr/ADR-0001-machine-readable-output-contract.md),
+[ADR-0003](../../adr/ADR-0003-environment-scrubbing.md), and
+[ADR-0008](../../adr/ADR-0008-repository-layout-and-package-structure.md).
 
 ## Goals / Non-Goals
 
@@ -53,8 +53,8 @@ Governed by [SPEC-DIST](spec.md), [SPEC-WIF](../wif/spec.md),
   (mapped to `README.md`) at the repository root.
 - Strip all legacy pipeline modules (`main.py`, `runners/`, `storage.py`,
   `utils.py`, `codemender/db.py`, `vcs/github.py`) so only the new `cm-runner`
-  CLI (`cli/`, including `version`, `init`, `find-diff`, and additional
-  subcommands such as `fix` as they land in the existing layout) is shipped.
+  CLI (`packages/codemender`, including `version`, `init`, `find-diff`,
+  `verify`, and `fix`) is shipped.
 - Ship the root `terraform/` entrypoint (`main.tf`, `variables.tf`,
   `outputs.tf`, `provider.tf`, `terraform.tfvars.example`,
   `.terraform.lock.hcl`, `tests/root_test.tftest.hcl`) and
@@ -176,31 +176,30 @@ Governed by [SPEC-DIST](spec.md), [SPEC-WIF](../wif/spec.md),
     additional repositories by copying `.github/actions/codemender/` and
     `.github/workflows/cm-merge-scan.yml`.
 
-### Decision 4: Stripping the Legacy Pipeline & Decoupling Unit Tests from `utils.py` / `main.py` {#decision-4}
+### Decision 4: Self-Contained `.github/codemender-runner/` Build Context & Legacy Stripping {#decision-4}
 
-- **Choice:** Exclude all legacy modules (`main.py`, `runners/`, `storage.py`,
-  `utils.py`, `codemender/db.py`, `vcs/github.py`, `tests/cm`) when staging
-  `codemender-runner/`, and decouple the retained module and unit test files so
-  they have zero import-time or test-time dependencies on excluded files:
-  1. Move `from utils import retry_on_exception` in
-     `codemender-runner/vcs/git.py` inside the two legacy functions that use it
-     (`clone_repository` and `push_branch_to_remote`).
-  1. Guard legacy-only test cases in `test_vcs_git.py`
-     (`test_filter_stageable_files`) and `test_cli.py`
-     (`test_git_helper_inside_command_leaves_stdout_clean`,
-     `test_script_runs_legacy`, `test_package_directory_runs_legacy`) with
-     `@unittest.skipUnless` when `utils.py` or `main.py` is absent, and replace
-     `_FAKE_CM` (`tests/cm`) in
-     `test_binary_present_but_version_unreadable_fails` with an inline
-     `_write_fake_cm` stub.
-- **Rationale:** `cm-runner` subcommands (`find-diff`, `fix`, etc.) import
-  `vcs.git` only for modern helpers (`is_git_repository`, `ref_exists`), neither
-  of which uses `utils.py`. Lazy importing `utils` inside the legacy functions
-  (matching the pattern established in `codemender/cm.py` under
-  [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md)) and guarding
-  legacy-only tests allows the stripped `.github/codemender-runner/` package in
-  the distribution repository to run and pass its entire unit test suite without
-  shipping `utils.py`, `main.py`, or `requests`.
+- **Choice:** Stage `docker/runner.Dockerfile` as
+  `.github/codemender-runner/Dockerfile`, copy `packages/codemender/` into
+  `.github/codemender-runner/packages/codemender/` (stripping `test_*.py`,
+  `*_test.py`, `testdata/`, and `__pycache__/`), copy
+  `codemender-runner/__main__.py` (rewritten to dispatch directly to
+  `codemender.runner.__main__`) and `codemender-runner/bin/cm-runner`, and
+  exclude all legacy modules (`main.py`, `runners/`, `storage.py`, `utils.py`,
+  `codemender/db.py`, `vcs/github.py`, `tests/cm`).
+- **Rationale:** Because `docker/runner.Dockerfile` copies
+  `packages/codemender/` (`COPY packages/codemender/ ...`) and installs it via
+  `/opt/codemender/venv/bin/pip install --no-cache-dir ./packages/codemender`,
+  staging `docker/runner.Dockerfile` at `.github/codemender-runner/Dockerfile`
+  and `packages/codemender/` at
+  `.github/codemender-runner/packages/codemender/` makes
+  `.github/codemender-runner` a self-contained Docker build context in the
+  distributed repository (`docker build .github/codemender-runner`). In
+  addition, extending `sys.path` and `vcs.__path__` in
+  `github-actions/actions/codemender/src/vcs/__init__.py` allows the GitHub
+  Action's unit tests to resolve `codemender.*` and `vcs.*` in both the source
+  repository (`packages/codemender/src`) and the distributed repository
+  (`.github/codemender-runner/packages/codemender/src`) per
+  [ADR-0008](../../adr/ADR-0008-repository-layout-and-package-structure.md).
 
 ### Decision 5: No Profiles — Evolving the Distribution Set Over Time {#decision-5}
 
@@ -216,16 +215,17 @@ Governed by [SPEC-DIST](spec.md), [SPEC-WIF](../wif/spec.md),
     contents naturally grow as features mature.
 - **Rationale:**
   - For the initial sync, `scripts/distribute.sh` includes the GitHub Actions
-    layout, stripped `.github/codemender-runner/` CLI, the root `terraform/`
-    files (`main.tf`, `variables.tf`, `outputs.tf`, `provider.tf`,
-    `terraform.tfvars.example`, `.terraform.lock.hcl`,
+    layout, stripped `.github/codemender-runner/` self-contained build context
+    (`Dockerfile` from `docker/runner.Dockerfile` and `packages/codemender/`),
+    the root `terraform/` files (`main.tf`, `variables.tf`, `outputs.tf`,
+    `provider.tf`, `terraform.tfvars.example`, `.terraform.lock.hcl`,
     `tests/root_test.tftest.hcl`) plus `terraform/modules/wif/` mapped to
     `.github/terraform/` (with `terraform/modules/gcp/`, `terraform/gcp.tf`,
     `terraform/gcp_override.tf`, and `terraform/tests/root_gcp_test.tftest.hcl`
     stripped), and (when `--include-top-level` is passed) top-level `LICENSE`,
     `.gitignore`, and `README.md`.
-  - As new subcommands (`fix`, `verify`) land in `codemender-runner/cli/` or new
-    workflows land in `github-actions/workflows/`, they are picked up
+  - As new subcommands land in `packages/codemender/src/codemender/runner/` or
+    new workflows land in `github-actions/workflows/`, they are picked up
     automatically with zero changes to `scripts/distribute.sh`.
   - When Cloud Run is ready to distribute in a later commit, we simply retain
     `terraform/modules/gcp/`, `terraform/gcp.tf`, `terraform/gcp_override.tf`,
@@ -256,7 +256,7 @@ Find latest 'Codemender-Source-Commit: <prev_sha>'"]
 -> git write-tree -> $base_tree"]
     stageNew["git archive <source_ref> -> filter (REQ-0002, REQ-0003, REQ-0005)
 - github-actions/ -> .github/
-- codemender-runner/ -> .github/codemender-runner/
+- docker/runner.Dockerfile + packages/codemender/ -> .github/codemender-runner/
 - terraform/ + terraform/modules/wif/ -> .github/terraform/ (modules/gcp/, gcp.tf, gcp_override.tf & root_gcp_test stripped)
 - LICENSE, .gitignore, dist/README.md -> root (ONLY if --include-top-level)
 -> git write-tree -> $new_tree"]
@@ -288,7 +288,7 @@ flowchart LR
         s_gha["github-actions/actions/codemender/"]
         s_wf["github-actions/workflows/*.yml"]
         s_build[".github/workflows/build_runner_image.yml"]
-        s_cmr["codemender-runner/\n(cli/, codemender/cm.py, config.py, vcs/git.py, Dockerfile)"]
+        s_cmr["docker/runner.Dockerfile + packages/codemender/\n+ codemender-runner/{__main__.py,bin/cm-runner}"]
         s_wif["terraform/ + terraform/modules/wif/\n(modules/gcp/, gcp.tf, gcp_override.tf & root_gcp_test stripped)"]
         s_top["LICENSE, .gitignore, dist/README.md"]
     end
@@ -297,7 +297,7 @@ flowchart LR
         t_gha[".github/actions/codemender/"]
         t_wf[".github/workflows/*.yml"]
         t_build[".github/workflows/build_runner_image.yml"]
-        t_cmr[".github/codemender-runner/\n(Legacy main.py, runners/, utils.py stripped)"]
+        t_cmr[".github/codemender-runner/\n(Dockerfile + packages/codemender/, legacy stripped)"]
         t_wif[".github/terraform/ + .github/terraform/modules/wif/"]
         t_top["LICENSE, .gitignore, README.md"]
     end
@@ -319,7 +319,7 @@ flowchart LR
 | `github-actions/actions/codemender/`                                                                                                             | `.github/actions/codemender/`                                             | Composite GitHub Action (normalizing `ghcr.io/` references to lowercase across pull and execution) and unit tests.                                                                                                   |
 | `github-actions/workflows/*.yml`                                                                                                                 | `.github/workflows/*.yml`                                                 | GitHub Actions workflow templates (e.g. `cm-merge-scan.yml`, defaulting `runner_image` to `${{ vars.CODEMENDER_RUNNER_IMAGE || format('ghcr.io/{0}/codemender-runner:latest', github.repository_owner) }}`).          |
 | `.github/workflows/build_runner_image.yml`                                                                                                       | `.github/workflows/build_runner_image.yml`                                | Builds `.github/codemender-runner/Dockerfile` and publishes the image to GHCR (`ghcr.io/${OWNER,,}/codemender-runner:latest`, `:${SHA}`, and any `ghcr.io/*` `vars.CODEMENDER_RUNNER_IMAGE` override).                |
-| `codemender-runner/{Dockerfile,.dockerignore,requirements.txt,__main__.py,bin/,cli/,codemender/cm.py,config.py,vcs/git.py,tests/}`               | `.github/codemender-runner/...`                                           | Stripped `cm-runner` CLI (`cli/`, including `version`, `init`, `find-diff`, and `fix`) and hermetic unit tests.                                                                                                     |
+| `docker/runner.Dockerfile`, `packages/codemender/`, `codemender-runner/{.dockerignore,requirements.txt,__main__.py,bin/cm-runner}`               | `.github/codemender-runner/...`                                           | Self-contained Docker build context with `Dockerfile` and `packages/codemender` (`codemender.runner` CLI including `version`, `init`, `find-diff`, `verify`, and `fix`).                                            |
 | `terraform/{main.tf,variables.tf,outputs.tf,provider.tf,terraform.tfvars.example,.terraform.lock.hcl,tests/root_test.tftest.hcl,modules/wif/}`   | `.github/terraform/...`                                                   | Root Terraform configuration and `.github/terraform/modules/wif/` child module for GCP Workload Identity Federation (with `terraform/modules/gcp/`, `gcp.tf`, `gcp_override.tf`, and `root_gcp_test` stripped).     |
 
 ## Risks / Trade-offs
@@ -333,27 +333,27 @@ flowchart LR
     (`git cat-file -e "${prev_source_sha}^{commit}"`), `scripts/distribute.sh`
     logs a clear error message to `stderr` and exits with code `2` rather than
     falling back to a destructive 2-way overwrite.
-- **Legacy References in `codemender-runner/Dockerfile` and `__main__.py`** →
-  `codemender-runner/Dockerfile` currently creates a symlink to `main.py`
+- **Legacy References in `docker/runner.Dockerfile` and `__main__.py`** →
+  `docker/runner.Dockerfile` creates a symlink to `main.py`
   (`ln -s .../main.py /opt/codemender/orchestrator.py`) and sets
   `CMD ["legacy"]`.
   - *Mitigation:* During staging, `scripts/distribute.sh` strips the `main.py`
     symlink and sets `CMD ["version"]` in the distributed `Dockerfile` and
     `build_runner_image.yml`, and replaces `codemender-runner/__main__.py`'s
-    `legacy` branch with direct dispatch to `cli.__main__`.
+    `legacy` branch with direct dispatch to `codemender.runner.__main__`.
 
 ## Deployment & Rollback
 
-- **Deployment:** Add `scripts/distribute.sh` and `dist/README.md`, decouple
-  `codemender-runner/vcs/git.py`, `test_vcs_git.py`, and `test_cli.py` from
-  excluded legacy modules, and add automated integration tests in
+- **Deployment:** Maintain `scripts/distribute.sh` and `dist/README.md`, stage
+  `docker/runner.Dockerfile` and `packages/codemender/` into
+  `.github/codemender-runner/`, and verify automated integration tests in
   `scripts/tests/test_distribute.py` exercising initial sync, repeat
   3-way sync, target-only file preservation, upstream deletion propagation,
   conflict detection, and `--include-top-level` vs. default `.github/`-only
   sync.
 - **Verification:** Run
   `python3 -m unittest discover -s scripts/tests -v` and
-  `python3 -m unittest discover -s codemender-runner/tests -t codemender-runner -v`.
+  `pytest packages`.
 - **Rollback:** Revert the distribution script commit(s).
 
 ## Open Questions

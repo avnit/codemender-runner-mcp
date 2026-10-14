@@ -39,13 +39,13 @@ from unittest import mock
 
 import yaml
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Directory containing the `codemender` package, used as cwd so `python -m codemender.runner` works.
+_PKG_DIR = str(Path(__file__).resolve().parents[3])
+if _PKG_DIR not in sys.path:
+  sys.path.insert(0, _PKG_DIR)
 
-from cli import exit_codes
 from codemender.cm import CmAdapter
-
-# Directory containing the `cli` package, used as cwd so `python -m cli` works.
-_PKG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from codemender.runner import exit_codes
 
 # The repo's pre-existing fake cm. It rejects `--version`.
 _FAKE_CM = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cm")
@@ -163,7 +163,7 @@ class InitTestBase(unittest.TestCase):
       env["PYTHONPATH"] = _PKG_DIR
     env.update(extra_env or {})
     return subprocess.run(
-        [sys.executable, "-m", "cli", "init", *args],
+        [sys.executable, "-m", "codemender.runner", "init", *args],
         cwd=_PKG_DIR if cwd is None else cwd,
         env=env,
         stdin=subprocess.DEVNULL,
@@ -521,7 +521,7 @@ class TestVerifySummary(unittest.TestCase):
 
   def setUp(self):
     super().setUp()
-    from cli.commands import init as init_cmd
+    from codemender.runner.commands import init as init_cmd
 
     # pylint: disable=protected-access
     self.summary = init_cmd._verify_summary
@@ -613,7 +613,7 @@ class TestInitRepoFlag(InitTestBase):
 
   def test_repo_with_tilde_is_expanded(self):
     """`~` in --repo is expanded via expanduser().resolve()."""
-    from cli.commands import init as init_cmd
+    from codemender.runner.commands import init as init_cmd
 
     home_repo = os.path.join(self.home, "subrepo")
     os.mkdir(home_repo)
@@ -627,7 +627,7 @@ class TestInitSilentMode(InitTestBase):
 
   def setUp(self):
     super().setUp()
-    from cli.commands import init as init_cmd
+    from codemender.runner.commands import init as init_cmd
 
     self.init_cmd = init_cmd
 
@@ -647,7 +647,7 @@ class TestInitSilentMode(InitTestBase):
             clear=False,
         ),
         contextlib.redirect_stdout(stdout_buf),
-        self.assertLogs("cli.commands.init", level="INFO") as logs,
+        self.assertLogs("codemender.runner.commands.init", level="INFO") as logs,
     ):
       rc = self.init_cmd.run(cfg, adapter, emitter=None)
 
@@ -683,7 +683,7 @@ class TestInitSilentMode(InitTestBase):
             clear=False,
         ),
         contextlib.redirect_stdout(stdout_buf),
-        self.assertLogs("cli.commands.init", level="INFO") as logs,
+        self.assertLogs("codemender.runner.commands.init", level="INFO") as logs,
     ):
       rc = self.init_cmd.run(cfg, adapter)
 
@@ -717,7 +717,7 @@ class TestInitSilentMode(InitTestBase):
             clear=False,
         ),
         contextlib.redirect_stdout(stdout_buf),
-        self.assertLogs("cli.commands.init", level="INFO") as logs,
+        self.assertLogs("codemender.runner.commands.init", level="INFO") as logs,
     ):
       rc = self.init_cmd.run(cfg, adapter, emitter=None)
 
@@ -735,7 +735,7 @@ class TestInitConfigValidate(unittest.TestCase):
 
   def setUp(self):
     super().setUp()
-    from cli.commands import init as init_cmd
+    from codemender.runner.commands import init as init_cmd
 
     self.init_cmd = init_cmd
     self.tmp = tempfile.mkdtemp(prefix="cm_runner_validate_")
@@ -771,7 +771,7 @@ class TestInitImports(unittest.TestCase):
   def test_init_does_not_import_the_legacy_pipeline(self):
     """Importing the command loads none of main, utils, runners, requests."""
     code = (
-        "import sys, cli.commands.init\n"
+        "import sys, codemender.runner.commands.init\n"
         "bad = [m for m in ('main', 'utils', 'runners', 'requests')\n"
         "       if m in sys.modules]\n"
         "print(','.join(bad))\n"

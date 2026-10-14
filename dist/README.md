@@ -19,7 +19,7 @@ this repository or set it up in additional repositories.
     ├── workflows/
     │   ├── build_runner_image.yml              # Builds & pushes cm-runner image
     │   └── cm-merge-scan.yml                   # Runs CodeMender on Pull Requests
-    ├── codemender-runner/                      # Source for the cm-runner container image
+    ├── codemender-runner/                      # Self-contained cm-runner build context (Dockerfile + packages/codemender)
     └── terraform/                              # Root Terraform configuration
 ```
 

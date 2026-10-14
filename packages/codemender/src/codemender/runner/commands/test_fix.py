@@ -28,15 +28,15 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import unittest
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_PKG_DIR = str(Path(__file__).resolve().parents[3])
+if _PKG_DIR not in sys.path:
+  sys.path.insert(0, _PKG_DIR)
 
-from cli import __main__ as cli_main
-from cli import exit_codes
-from cli.commands import fix
-from cli.events import EventEmitter
 from codemender.cm import CmAdapter, CmResult, TokenUsage
-
-_PKG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from codemender.runner import __main__ as cli_main
+from codemender.runner import exit_codes
+from codemender.runner.commands import fix
+from codemender.runner.events import EventEmitter
 
 _APP_PY = (
     "import os\n"
@@ -685,7 +685,15 @@ else:
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env.pop("PYTHONPATH", None)
     return subprocess.run(
-        [sys.executable, "-m", "cli", "fix", "--cm-binary", self.cm, *args],
+        [
+            sys.executable,
+            "-m",
+            "codemender.runner",
+            "fix",
+            "--cm-binary",
+            self.cm,
+            *args,
+        ],
         cwd=_PKG_DIR,
         env=env,
         input=stdin,

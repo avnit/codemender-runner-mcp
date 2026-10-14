@@ -21,6 +21,11 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_CODEMENDER_SRC = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "packages", "codemender", "src")
+)
+if _CODEMENDER_SRC not in sys.path:
+  sys.path.insert(0, _CODEMENDER_SRC)
 
 from vcs.github import (
     FINDING_MARKER_PREFIX,

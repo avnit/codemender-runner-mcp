@@ -16,6 +16,7 @@
 
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
@@ -24,7 +25,9 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_PKG_DIR = Path(__file__).resolve().parents[1]
+if str(_PKG_DIR) not in sys.path:
+  sys.path.insert(0, str(_PKG_DIR))
 
 from codemender.cm import (
     CmAdapter,
@@ -307,7 +310,7 @@ class TestCmAdapter(unittest.TestCase):
 
     result = subprocess.run(
         [sys.executable, "-c", probe],
-        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        cwd=str(_PKG_DIR),
         env=env,
         input="runner input\n",
         capture_output=True,
@@ -341,7 +344,7 @@ class TestCmAdapter(unittest.TestCase):
 
     result = subprocess.run(
         [sys.executable, "-c", probe],
-        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        cwd=str(_PKG_DIR),
         env=env,
         capture_output=True,
         text=True,

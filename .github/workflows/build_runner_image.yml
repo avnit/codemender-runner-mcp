@@ -5,13 +5,17 @@ on:
     branches:
       - main
     paths:
-      - 'codemender-runner/**'
+      - 'packages/codemender/**'
+      - 'docker/runner.Dockerfile'
+      - '.dockerignore'
       - '.github/workflows/build_runner_image.yml'
     tags:
       - 'v*'
   pull_request:
     paths:
-      - 'codemender-runner/**'
+      - 'packages/codemender/**'
+      - 'docker/runner.Dockerfile'
+      - '.dockerignore'
       - '.github/workflows/build_runner_image.yml'
   workflow_dispatch:
     inputs:
@@ -53,7 +57,8 @@ jobs:
       - name: Build Runner Image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: codemender-runner
+          context: .
+          file: docker/runner.Dockerfile
           load: true
           tags: codemender-runner:test
           build-args: |
@@ -70,10 +75,12 @@ jobs:
           echo "Cmd: $CMD"
           test "$ENTRYPOINT" = '["cm-runner"]'
           test "$CMD" = '["version"]'
+          docker run --rm --entrypoint /opt/codemender/venv/bin/python codemender-runner:test -c "import codemender, codemender.runner, codemender.sarif, codemender.vcs"
 
       - name: Verify Version Command
         run: |
           docker run --rm codemender-runner:test version
+          docker run --rm --entrypoint /opt/codemender/venv/bin/cm-runner codemender-runner:test version
 
       - name: Push Runner Image
         if: github.event_name != 'pull_request'

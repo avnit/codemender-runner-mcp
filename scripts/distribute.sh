@@ -247,16 +247,25 @@ write_stripped_main_py() {
 """CodeMender Runner top-level package entrypoint.
 
 Enables native directory execution (e.g. `python3 .github/codemender-runner <command>`).
-Dispatches to the CLI subcommands (`cli.__main__`).
+Dispatches to the CLI subcommands (`codemender.runner.__main__`).
 """
 
-from typing import List, Optional
+from pathlib import Path
 import sys
+from typing import List, Optional
+
+_RUNNER_DIR = Path(__file__).resolve().parent
+for _candidate in (
+    _RUNNER_DIR / "packages" / "codemender" / "src",
+    _RUNNER_DIR.parent / "packages" / "codemender" / "src",
+):
+  if _candidate.is_dir() and str(_candidate) not in sys.path:
+    sys.path.insert(0, str(_candidate))
 
 
 def main(argv: Optional[List[str]] = None) -> int:
   args = list(sys.argv[1:] if argv is None else argv)
-  from cli.__main__ import main as cli_main  # pylint: disable=import-outside-toplevel
+  from codemender.runner.__main__ import main as cli_main  # pylint: disable=import-outside-toplevel
 
   return cli_main(args)
 
@@ -318,7 +327,12 @@ stage_distribution_tree() {
   fi
 
   if [[ -f "$src_dir/.github/workflows/build_runner_image.yml" ]]; then
-    sed -e "s|'codemender-runner/\*\*'|'.github/codemender-runner/**'|g" \
+    sed -e "s|'packages/codemender/\*\*'|'.github/codemender-runner/**'|g" \
+        -e "s|'docker/runner.Dockerfile'|'.github/codemender-runner/Dockerfile'|g" \
+        -e "s|'\.dockerignore'|'.github/codemender-runner/.dockerignore'|g" \
+        -e "s|'codemender-runner/\*\*'|'.github/codemender-runner/**'|g" \
+        -e 's|context: \.|context: .github/codemender-runner|g' \
+        -e 's|file: docker/runner\.Dockerfile|file: .github/codemender-runner/Dockerfile|g' \
         -e 's|context: codemender-runner|context: .github/codemender-runner|g' \
         -e 's|codemender-runner/Dockerfile|.github/codemender-runner/Dockerfile|g' \
         -e 's/\["legacy"\]/["version"]/g' \
@@ -335,11 +349,13 @@ stage_distribution_tree() {
     runner_src="$src_dir/.github/codemender-runner"
   fi
 
-  if [[ -n "$runner_src" ]]; then
+  if [[ -n "$runner_src" || -d "$src_dir/packages/codemender" ]]; then
     local runner_out="$out_dir/.github/codemender-runner"
     mkdir -p "$runner_out"
 
-    if [[ -f "$runner_src/Dockerfile" ]]; then
+    if [[ -f "$src_dir/docker/runner.Dockerfile" ]]; then
+      cp "$src_dir/docker/runner.Dockerfile" "$runner_out/Dockerfile"
+    elif [[ -n "$runner_src" && -f "$runner_src/Dockerfile" ]]; then
       sed -e '/ln -s \/opt\/codemender\/codemender-runner\/main\.py/d' \
           -e 's|\(ln -s /opt/codemender/codemender-runner/bin/cm-runner /usr/local/bin/cm-runner\) && \\|\1|' \
           -e 's/CMD \["legacy"\]/CMD ["version"]/g' \
@@ -347,80 +363,33 @@ stage_distribution_tree() {
           >"$runner_out/Dockerfile"
     fi
 
-    if [[ -f "$runner_src/.dockerignore" ]]; then
+    if [[ -n "$runner_src" && -f "$runner_src/.dockerignore" ]]; then
       cp "$runner_src/.dockerignore" "$runner_out/.dockerignore"
+    elif [[ -f "$src_dir/.dockerignore" ]]; then
+      cp "$src_dir/.dockerignore" "$runner_out/.dockerignore"
     fi
-    if [[ -f "$runner_src/requirements.txt" ]]; then
+    if [[ -n "$runner_src" && -f "$runner_src/requirements.txt" ]]; then
       cp "$runner_src/requirements.txt" "$runner_out/requirements.txt"
     fi
 
     write_stripped_main_py "$runner_out/__main__.py"
 
-    if [[ -f "$runner_src/bin/cm-runner" ]]; then
+    if [[ -n "$runner_src" && -f "$runner_src/bin/cm-runner" ]]; then
       mkdir -p "$runner_out/bin"
       cp "$runner_src/bin/cm-runner" "$runner_out/bin/cm-runner"
       chmod +x "$runner_out/bin/cm-runner"
     fi
 
-    if [[ -d "$runner_src/cli" ]]; then
-      mkdir -p "$runner_out/cli"
-      cp -R "$runner_src/cli/." "$runner_out/cli/"
+    if [[ -d "$src_dir/packages/codemender" ]]; then
+      mkdir -p "$runner_out/packages/codemender"
+      cp -R "$src_dir/packages/codemender/." "$runner_out/packages/codemender/"
+    elif [[ -n "$runner_src" && -d "$runner_src/packages/codemender" ]]; then
+      mkdir -p "$runner_out/packages/codemender"
+      cp -R "$runner_src/packages/codemender/." "$runner_out/packages/codemender/"
     fi
-
-    if [[ -d "$runner_src/codemender" ]]; then
-      mkdir -p "$runner_out/codemender"
-      if [[ -f "$runner_src/codemender/__init__.py" ]]; then
-        cp "$runner_src/codemender/__init__.py" "$runner_out/codemender/__init__.py"
-      fi
-      if [[ -f "$runner_src/codemender/cm.py" ]]; then
-        cp "$runner_src/codemender/cm.py" "$runner_out/codemender/cm.py"
-      fi
-    fi
-
-    if [[ -f "$runner_src/config.py" ]]; then
-      cp "$runner_src/config.py" "$runner_out/config.py"
-    fi
-
-    if [[ -d "$runner_src/vcs" ]]; then
-      mkdir -p "$runner_out/vcs"
-      if [[ -f "$runner_src/vcs/__init__.py" ]]; then
-        cp "$runner_src/vcs/__init__.py" "$runner_out/vcs/__init__.py"
-      fi
-      if [[ -f "$runner_src/vcs/git.py" ]]; then
-        cp "$runner_src/vcs/git.py" "$runner_out/vcs/git.py"
-      fi
-    fi
-
-    if [[ -d "$runner_src/tests" ]]; then
-      mkdir -p "$runner_out/tests"
-      if [[ -f "$runner_src/tests/__init__.py" ]]; then
-        cp "$runner_src/tests/__init__.py" "$runner_out/tests/__init__.py"
-      fi
-      for tf in "$runner_src/tests"/test_cli*.py; do
-        [[ -f "$tf" ]] || continue
-        cp "$tf" "$runner_out/tests/$(basename "$tf")"
-      done
-      for named_test in test_codemender_cm.py test_vcs_git.py test_config.py; do
-        if [[ -f "$runner_src/tests/$named_test" ]]; then
-          cp "$runner_src/tests/$named_test" "$runner_out/tests/$named_test"
-        fi
-      done
-      if [[ -f "$runner_out/tests/test_codemender_cm.py" ]] && ! grep -q "skipUnless" "$runner_out/tests/test_codemender_cm.py" 2>/dev/null; then
-        local skip_guard='  @unittest.skipUnless(os.path.exists(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "utils.py")), "legacy utils.py excluded in distribution")'
-        sed -i \
-          -e "s|^  def test_parse_findings_json_|${skip_guard}\\n  def test_parse_findings_json_|" \
-          -e "s|^  @patch(\"utils\.run_command\")|${skip_guard}\\n  @patch(\"utils.run_command\")|" \
-          "$runner_out/tests/test_codemender_cm.py"
-      fi
-      if [[ -f "$runner_out/tests/test_cli.py" ]]; then
-        sed -i \
-          -e 's|"/nonexistent/custom/python"|os.path.join(_temp_dir(self), "custom", "python")|g' \
-          "$runner_out/tests/test_cli.py"
-      fi
-      if [[ -d "$runner_src/tests/testdata" ]]; then
-        mkdir -p "$runner_out/tests/testdata"
-        cp -R "$runner_src/tests/testdata/." "$runner_out/tests/testdata/"
-      fi
+    if [[ -d "$runner_out/packages/codemender" ]]; then
+      find "$runner_out/packages/codemender" \( -name 'test_*.py' -o -name '*_test.py' \) -type f -delete
+      find "$runner_out/packages/codemender" \( -name 'testdata' -o -name '__pycache__' \) -type d -prune -exec rm -rf {} +
     fi
   fi
 

@@ -28,8 +28,8 @@ sys.path.insert(
 
 import fix_comments  # pylint: disable=g-import-not-at-top
 from codemender.cm import Finding  # pylint: disable=g-import-not-at-top
+from codemender.vcs.git import SuggestionHunk  # pylint: disable=g-import-not-at-top
 from vcs import github  # pylint: disable=g-import-not-at-top
-from vcs.git import SuggestionHunk  # pylint: disable=g-import-not-at-top
 
 _APP = b"line1\nline2\nline3\nline4\nline5\n"
 _ARTIFACTS = "https://github.com/o/r/actions/runs/123#artifacts"

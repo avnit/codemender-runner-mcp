@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Hermetic unit tests for `cm-runner find-diff` (`cli/commands/find_diff.py`)."""
+"""Hermetic unit tests for `cm-runner find-diff` (`codemender.runner.commands.find_diff`)."""
 
 import argparse
 import contextlib
@@ -30,16 +30,16 @@ import unittest
 
 import yaml
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_PKG_DIR = str(Path(__file__).resolve().parents[3])
+if _PKG_DIR not in sys.path:
+  sys.path.insert(0, _PKG_DIR)
 
-from cli import __main__ as cli_main
-from cli import exit_codes
-from cli.commands import find_diff
-from cli.events import EventEmitter
 from codemender.cm import CmAdapter, CmResult, TokenUsage
-from tests.test_cli import CLIContractTestBase, _write_stub_cm
-
-_PKG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from codemender.runner import __main__ as cli_main
+from codemender.runner import exit_codes
+from codemender.runner.commands import find_diff
+from codemender.runner.events import EventEmitter
+from codemender.runner.test_cli import CLIContractTestBase, _write_stub_cm
 
 _PRETTY_SARIF_TWO_FINDINGS = json.dumps(
     {
@@ -816,7 +816,7 @@ class TestFindDiffImports(unittest.TestCase):
 
   def test_find_diff_does_not_import_legacy_main_or_github(self):
     code = (
-        "import sys, cli.commands.find_diff\n"
+        "import sys, codemender.runner.commands.find_diff\n"
         "bad = [m for m in ('main', 'runners', 'vcs.github')\n"
         "       if m in sys.modules]\n"
         "print(','.join(bad))\n"
@@ -839,7 +839,7 @@ class TestFindDiffImports(unittest.TestCase):
 
 
 class TestFindDiffCLIContract(CLIContractTestBase):
-  """End-to-end subprocess CLI contract tests for `python -m cli find-diff`."""
+  """End-to-end subprocess CLI contract tests for `python -m codemender.runner find-diff`."""
 
   def setUp(self):
     super().setUp()
@@ -866,7 +866,7 @@ class TestFindDiffCLIContract(CLIContractTestBase):
     self._cli_path = f"{self._stub_dir}:/usr/bin:/bin"
 
   def run_cli(self, *args, path=None):
-    """Invokes `python -m cli` with an isolated HOME directory."""
+    """Invokes `python -m codemender.runner` with an isolated HOME directory."""
     env = dict(os.environ)
     env["PATH"] = self._stub_dir if path is None else path
     env["HOME"] = self.home
@@ -874,7 +874,7 @@ class TestFindDiffCLIContract(CLIContractTestBase):
     env.pop("PYTHONPATH", None)
 
     return subprocess.run(
-        [sys.executable, "-m", "cli", *args],
+        [sys.executable, "-m", "codemender.runner", *args],
         cwd=_PKG_DIR,
         env=env,
         capture_output=True,

@@ -252,7 +252,13 @@ class TestDistributeScript(unittest.TestCase):
       f.write("TOP SECRET UNTRACKED NOTE\n")
 
     cli_main_path = os.path.join(
-        src_clone, "codemender-runner", "cli", "__main__.py"
+        src_clone,
+        "packages",
+        "codemender",
+        "src",
+        "codemender",
+        "runner",
+        "__main__.py",
     )
     with open(cli_main_path, "r", encoding="utf-8") as f:
       committed_cli_main = f.read()
@@ -279,9 +285,17 @@ class TestDistributeScript(unittest.TestCase):
             )
         )
     )
-    # Uncommitted edit to cli/__main__.py must not be present in target
+    # Uncommitted edit to runner/__main__.py must not be present in target
     target_cli_main = os.path.join(
-        target, ".github", "codemender-runner", "cli", "__main__.py"
+        target,
+        ".github",
+        "codemender-runner",
+        "packages",
+        "codemender",
+        "src",
+        "codemender",
+        "runner",
+        "__main__.py",
     )
     with open(target_cli_main, "r", encoding="utf-8") as f:
       target_content = f.read()
@@ -344,26 +358,23 @@ class TestDistributeScript(unittest.TestCase):
         ".github/codemender-runner/requirements.txt",
         ".github/codemender-runner/__main__.py",
         ".github/codemender-runner/bin/cm-runner",
-        ".github/codemender-runner/config.py",
-        ".github/codemender-runner/cli/__main__.py",
-        ".github/codemender-runner/cli/sarif.py",
-        ".github/codemender-runner/cli/commands/version.py",
-        ".github/codemender-runner/cli/commands/init.py",
-        ".github/codemender-runner/cli/commands/find_diff.py",
-        ".github/codemender-runner/cli/commands/fix.py",
-        ".github/codemender-runner/codemender/__init__.py",
-        ".github/codemender-runner/codemender/cm.py",
-        ".github/codemender-runner/vcs/__init__.py",
-        ".github/codemender-runner/vcs/git.py",
-        ".github/codemender-runner/tests/__init__.py",
-        ".github/codemender-runner/tests/test_cli.py",
-        ".github/codemender-runner/tests/test_cli_init.py",
-        ".github/codemender-runner/tests/test_cli_find_diff.py",
-        ".github/codemender-runner/tests/test_cli_fix.py",
-        ".github/codemender-runner/tests/test_cli_sarif.py",
-        ".github/codemender-runner/tests/test_codemender_cm.py",
-        ".github/codemender-runner/tests/test_vcs_git.py",
-        ".github/codemender-runner/tests/test_config.py",
+        ".github/codemender-runner/packages/codemender/pyproject.toml",
+        ".github/codemender-runner/packages/codemender/src/codemender/__init__.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/cm.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/sarif/__init__.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/vcs/__init__.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/vcs/git.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/__init__.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/__main__.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/config.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/events.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/exit_codes.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/commands/__init__.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/commands/version.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/commands/init.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/commands/find_diff.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/commands/fix.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/commands/verify.py",
     ]
     for rel_path in required_paths:
       with self.subTest(required_path=rel_path):
@@ -430,15 +441,17 @@ class TestDistributeScript(unittest.TestCase):
         encoding="utf-8",
     ) as f:
       dunder_main_content = f.read()
-    self.assertIn("cli.__main__", dunder_main_content)
+    self.assertIn("codemender.runner.__main__", dunder_main_content)
     self.assertNotIn("legacy", dunder_main_content)
 
-    # 2. Verify all legacy, Cloud Run, and internal paths are absent (SPEC-DIST/REQ-0003)
+    # 2. Verify all legacy, Cloud Run, internal, and test/testdata paths are absent (SPEC-DIST/REQ-0003)
     excluded_paths = [
         "scripts",
         ".github/scripts",
         ".github/codemender",
         "codemender-runner",
+        "packages",
+        "docker",
         "terraform",
         "docs",
         ".github/docs",
@@ -458,16 +471,16 @@ class TestDistributeScript(unittest.TestCase):
         ".github/codemender-runner/codemender/db.py",
         ".github/codemender-runner/vcs/github.py",
         ".github/codemender-runner/README.md",
-        ".github/codemender-runner/tests/cm",
-        ".github/codemender-runner/tests/dummy_cm.py",
-        ".github/codemender-runner/tests/e2e_test_local.py",
-        ".github/codemender-runner/tests/test_orchestrator.py",
-        ".github/codemender-runner/tests/test_storage.py",
-        ".github/codemender-runner/tests/test_utils.py",
-        ".github/codemender-runner/tests/test_vcs_github.py",
-        ".github/codemender-runner/tests/test_codemender_db.py",
-        ".github/codemender-runner/tests/test_command_builder.py",
-        ".github/codemender-runner/tests/test_pr_review_suggestions.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/test_cm.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/test_cli.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/test_config.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/commands/test_init.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/commands/test_find_diff.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/commands/test_fix.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/commands/test_verify.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/runner/commands/testdata",
+        ".github/codemender-runner/packages/codemender/src/codemender/sarif/test_sarif.py",
+        ".github/codemender-runner/packages/codemender/src/codemender/vcs/test_git.py",
         "workflows/gcp_parallel_workflow.yaml",
         "cloudbuild.yaml",
         ".github/workflows/codemender_parallel.yml",
@@ -479,27 +492,18 @@ class TestDistributeScript(unittest.TestCase):
             f"Expected excluded path '{rel_path}' to be absent from target",
         )
 
-    # 3. Run unit test suites inside the distributed repository (REQ-0003)
-    cmr_tests = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "unittest",
-            "discover",
-            "-s",
-            ".github/codemender-runner/tests",
-            "-t",
-            ".github/codemender-runner",
-        ],
+    # 3. Verify runner entrypoints and GHA unit test suite inside the distributed repository (REQ-0003)
+    cmr_help = subprocess.run(
+        [sys.executable, ".github/codemender-runner", "--help"],
         cwd=target,
         capture_output=True,
         text=True,
         check=False,
     )
     self.assertEqual(
-        cmr_tests.returncode,
+        cmr_help.returncode,
         0,
-        msg=f"codemender-runner tests failed:\n{cmr_tests.stderr}",
+        msg=f"python .github/codemender-runner --help failed:\n{cmr_help.stderr}",
     )
 
     gha_tests = subprocess.run(
@@ -694,13 +698,24 @@ class TestDistributeScript(unittest.TestCase):
         target, "commit", "-q", "-m", "Customize CODEOWNERS and runner_image"
     )
 
-    # In source: create C2 updating codemender-runner/cli/commands/find_diff.py
+    # In source: create C2 updating packages/codemender/src/codemender/runner/commands/find_diff.py
     find_diff_src = os.path.join(
-        src_clone, "codemender-runner", "cli", "commands", "find_diff.py"
+        src_clone,
+        "packages",
+        "codemender",
+        "src",
+        "codemender",
+        "runner",
+        "commands",
+        "find_diff.py",
     )
     with open(find_diff_src, "a", encoding="utf-8") as f:
       f.write("\n# C2_UPSTREAM_ENHANCEMENT = True\n")
-    _run_git(src_clone, "add", "codemender-runner/cli/commands/find_diff.py")
+    _run_git(
+        src_clone,
+        "add",
+        "packages/codemender/src/codemender/runner/commands/find_diff.py",
+    )
     _run_git(src_clone, "commit", "-q", "-m", "Upstream C2 update to find_diff")
     c2_sha = _run_git(src_clone, "rev-parse", "HEAD").stdout.strip()
 
@@ -715,7 +730,11 @@ class TestDistributeScript(unittest.TestCase):
         target,
         ".github",
         "codemender-runner",
-        "cli",
+        "packages",
+        "codemender",
+        "src",
+        "codemender",
+        "runner",
         "commands",
         "find_diff.py",
     )
@@ -742,10 +761,24 @@ class TestDistributeScript(unittest.TestCase):
     """Verify upstream file deletions between C1 and C2 delete in target while preserving SECURITY.md (REQ-0004)."""
     src_clone = self._clone_source_repo("src_deletions")
     helper_rel = os.path.join(
-        "codemender-runner", "cli", "commands", "temp_helper.py"
+        "packages",
+        "codemender",
+        "src",
+        "codemender",
+        "runner",
+        "commands",
+        "temp_helper.py",
     )
     helper_target_rel = os.path.join(
-        ".github", "codemender-runner", "cli", "commands", "temp_helper.py"
+        ".github",
+        "codemender-runner",
+        "packages",
+        "codemender",
+        "src",
+        "codemender",
+        "runner",
+        "commands",
+        "temp_helper.py",
     )
     helper_src = os.path.join(src_clone, helper_rel)
     with open(helper_src, "w", encoding="utf-8") as f:

@@ -22,7 +22,7 @@ import time
 from typing import Dict, List, Optional, Set
 
 import requests
-from vcs.git import get_git_auth_header, parse_repo_owner_and_name, sanitize_git_url
+from codemender.vcs.git import get_git_auth_header, parse_repo_owner_and_name, sanitize_git_url
 
 logger = logging.getLogger("codemender-orchestrator")
 

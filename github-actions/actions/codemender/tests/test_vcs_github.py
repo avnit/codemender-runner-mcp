@@ -24,7 +24,7 @@ sys.path.insert(
 )
 
 from vcs import github  # pylint: disable=g-import-not-at-top
-from vcs.git import SuggestionHunk  # pylint: disable=g-import-not-at-top
+from codemender.vcs.git import SuggestionHunk  # pylint: disable=g-import-not-at-top
 from vcs.github import (  # pylint: disable=g-import-not-at-top
     MAX_COMMENT_BODY_CHARS,
     STICKY_SUMMARY_MARKER,
