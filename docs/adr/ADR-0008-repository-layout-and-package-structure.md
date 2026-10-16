@@ -62,18 +62,19 @@ codemender-runner/
     │           ├── sarif/          # SARIF parsing, splitting, fingerprinting, and normalization
     │           ├── vcs/            # Version Control System operations (local tree and diff parsing)
     │           └── runner/         # Generic CLI wrapper around the `cm` binary (`cm-runner`)
-    ├── launcher/                   # Sandbox execution backends & pipeline coordinator (`import launcher`)
+    ├── launcher/                   # Sandbox execution client (`Launcher`), worker (`Worker`/`cm-worker`), & `ArtifactCache` (`import launcher`)
     │   ├── pyproject.toml
     │   └── src/
     │       └── launcher/
-    │           ├── local/          # Local Docker / gVisor container execution backend
-    │           └── cloudrun/       # Google Cloud Run Jobs execution backend & transit staging
+    │           ├── cache/          # Short-lived run-scoped `ArtifactCache` (`LocalArtifactCache`, `GcsArtifactCache`)
+    │           ├── local/          # Local Docker / gVisor container execution backend (`LocalDockerLauncher`)
+    │           └── cloudrun/       # Google Cloud Run Jobs execution backend (`CloudRunLauncher`)
     └── repohost/                   # Repository hosting platform integrations (`import repohost`)
         ├── pyproject.toml
         └── src/
             └── repohost/
-                ├── github/         # GitHub PR review, inline suggestions, and API integration
-                └── gitlab/         # GitLab MR discussion, inline suggestions, and API integration
+                ├── github/         # GitHub PR review, inline suggestions, API integration, and `cm-github` CLI
+                └── gitlab/         # GitLab MR discussion, inline suggestions, API integration, and `cm-gitlab` CLI
 ```
 
 > **Note on `src/<package>/` nesting:** In standard Python `src/`-layout
@@ -88,19 +89,19 @@ codemender-runner/
 
 The table below mirrors the roadmap structure above:
 
-| Path                                | Responsibility                                                                                                                                                                                   | Boundary Rules                                                                                                                     |
-| :---------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------- |
-| `.github/`                          | Native GitHub Actions workflows and composite actions.                                                                                                                                           | Referenced directly at the repository root by org-level or single-repo GitHub callers.                                             |
-| `templates/`                        | Native GitLab CI/CD Component Catalog templates.                                                                                                                                                 | Referenced directly at the repository root via GitLab `include: component:` or `include: project:`.                                |
-| `docker/`                           | Target-specific container definitions (`*.Dockerfile`) and entrypoint scripts.                                                                                                                   | Built with the repository root (`.`) as the Docker build context via `Makefile` targets.                                           |
-| `terraform/` & `terraform/modules/` | Root Terraform configuration and composable child modules for cloud infrastructure.                                                                                                              | Root `terraform/` composes child modules under `terraform/modules/`.                                                               |
-| `scripts/`                          | Standalone maintenance and distribution utilities.                                                                                                                                               | Never imported by runtime Python packages.                                                                                         |
-| `docs/`                             | Architecture Decision Records (ADRs), OpenSpecs, and user guides.                                                                                                                                | Documentation only.                                                                                                                |
-| `Makefile`                          | Developer and CI entrypoints for running unit tests, linters, and container builds.                                                                                                              | Wraps test discovery and `docker build -f docker/...` commands into ergonomic targets.                                             |
-| `pyproject.toml`                    | Root Python workspace configuration (`[tool.uv.workspace]`) and shared tool settings.                                                                                                            | Links `packages/*` for unified local development and testing.                                                                      |
-| `packages/codemender/`              | Core package running inside the sandbox (`cm-runner`) plus shared `sarif/` and local `vcs/` primitives.                                                                                          | Minimal base dependencies. **Never imports `launcher` or `repohost`.** Executes `cm` exclusively through its internal `CmAdapter`. |
-| `packages/launcher/`                | Dispatches `cm-runner` commands to local containers (`local/`) or remote Cloud Run Jobs (`cloudrun/`) and coordinates the repo-host-agnostic `find-diff` -> `verify` -> parallel `fix` pipeline. | Depends on `codemender`. **Never imports `repohost`.** Isolates Cloud Run SDKs in the `cloudrun` optional extra.                   |
-| `packages/repohost/`                | Repository hosting platform integrations (`github/`, `gitlab/`) and shared PR/MR Markdown formatting.                                                                                            | Runs in the outer CI step (outside the `cm` sandbox) where repo-host tokens reside. Depends on `codemender` and `launcher`.        |
+| Path                                | Responsibility                                                                                                                                                                                                                | Boundary Rules                                                                                                                     |
+| :---------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------- |
+| `.github/`                          | Native GitHub Actions workflows and composite actions.                                                                                                                                                                        | Referenced directly at the repository root by org-level or single-repo GitHub callers.                                             |
+| `templates/`                        | Native GitLab CI/CD Component Catalog templates.                                                                                                                                                                              | Referenced directly at the repository root via GitLab `include: component:` or `include: project:`.                                |
+| `docker/`                           | Target-specific container definitions (`*.Dockerfile`) and entrypoint scripts.                                                                                                                                                | Built with the repository root (`.`) as the Docker build context via `Makefile` targets.                                           |
+| `terraform/` & `terraform/modules/` | Root Terraform configuration and composable child modules for cloud infrastructure.                                                                                                                                           | Root `terraform/` composes child modules under `terraform/modules/`.                                                               |
+| `scripts/`                          | Standalone maintenance and distribution utilities.                                                                                                                                                                            | Never imported by runtime Python packages.                                                                                         |
+| `docs/`                             | Architecture Decision Records (ADRs), OpenSpecs, and user guides.                                                                                                                                                             | Documentation only.                                                                                                                |
+| `Makefile`                          | Developer and CI entrypoints for running unit tests, linters, and container builds.                                                                                                                                           | Wraps test discovery and `docker build -f docker/...` commands into ergonomic targets.                                             |
+| `pyproject.toml`                    | Root Python workspace configuration (`[tool.uv.workspace]`) and shared tool settings.                                                                                                                                         | Links `packages/*` for unified local development and testing.                                                                      |
+| `packages/codemender/`              | Core package running inside the sandbox (`cm-runner`) plus shared `sarif/` and local `vcs/` primitives.                                                                                                                       | Minimal base dependencies. **Never imports `launcher` or `repohost`.** Executes `cm` exclusively through its internal `CmAdapter`. |
+| `packages/launcher/`                | Provides the host-side `Launcher` client (`local/`, `cloudrun/`), the inside-container `Worker` server (`cm-worker`), and the shared `ArtifactCache` (`cache/`) coordinating `find`, `verify`, and parallel `fix` workflows. | Depends on `codemender`. **Never imports `repohost`.** Isolates Cloud Run SDKs in the `cloudrun` optional extra.                   |
+| `packages/repohost/`                | Repository hosting platform integrations (`github/`, `gitlab/`), dedicated per-host CLIs (`cm-github`, `cm-gitlab`), and shared PR/MR Markdown formatting.                                                                    | Runs in the outer CI step (outside the `cm` sandbox) where repo-host tokens reside. Depends on `codemender` and `launcher`.        |
 
 ______________________________________________________________________
 
@@ -139,17 +140,19 @@ ______________________________________________________________________
      Contains `sarif/`, `vcs/`, and `runner/` (which exposes the `cm-runner`
      console script entrypoint). Maintains **minimal base dependencies** so the
      sandbox runner stays lightweight and self-contained.
-  1. **`packages/launcher` (`launcher`):** Runs on the CI host outside the `cm`
-     sandbox. Provides the repo-host-agnostic pipeline coordinator (running
-     `find-diff`, filtering findings, and fanning out `verify` / `fix` tasks)
-     and the sandbox execution backends (`local/` for local Docker/gVisor,
-     `cloudrun/` for Google Cloud Run Jobs). Isolates GCP libraries under
-     `[project.optional-dependencies] cloudrun = [...]`.
+  1. **`packages/launcher` (`launcher`):** Provides both the host-side
+     `Launcher` client (`local/` for local Docker/gVisor, `cloudrun/` for Google
+     Cloud Run Jobs), the inside-container `Worker` server (`cm-worker`), and
+     the shared `ArtifactCache` (`cache/`) that coordinates the repo-host-agnostic
+     `find`, `verify`, and parallel `fix` workflows (see
+     [ADR-0009](ADR-0009-abstraction-layers-and-dependency-injection.md)).
+     Isolates GCP libraries under `[project.optional-dependencies] cloudrun = [...]`.
   1. **`packages/repohost` (`repohost`):** Runs on the CI host where repository
-     host credentials (`GITHUB_TOKEN`, `CI_JOB_TOKEN`) live. Invokes `launcher`
-     to execute the scan/fix pipeline and translates the resulting SARIF
-     findings and patches into GitHub PR reviews (`github/`) or GitLab MR
-     discussions (`gitlab/`). Isolates platform libraries under
+     host credentials (`GITHUB_TOKEN`, `CI_JOB_TOKEN`) live. Exposes dedicated
+     per-host CLI entrypoints (`cm-github` and `cm-gitlab`) that invoke
+     `launcher` to execute the scan/fix/verify workflows and translate the
+     resulting SARIF findings and patches into GitHub PR reviews (`github/`) or
+     GitLab MR discussions (`gitlab/`). Isolates platform libraries under
      `[project.optional-dependencies] github = [...]` and `gitlab = [...]`.
 
   The snippets below are **illustrative examples** showing how the root
@@ -215,13 +218,13 @@ ______________________________________________________________________
   [project]
   name = "codemender-launcher"
   version = "0.1.0"
-  description = "CodeMender sandbox execution backends and pipeline coordinator"
+  description = "CodeMender sandbox execution client (Launcher), container worker (Worker), and ArtifactCache"
   requires-python = ">=3.11"
   # Base install requires only the core `codemender` workspace package
-  # (sufficient for running the `local` Docker/gVisor backend).
+  # (sufficient for running the `local` Docker/gVisor backend and local `cm-worker`).
   dependencies = ["codemender"]
 
-  # Cloud Run SDKs are isolated in the `cloudrun` extra so local Docker runs
+  # Cloud Run SDKs are isolated in the `cloudrun` extra so local-only installs
   # do not need to install Google Cloud libraries.
   [project.optional-dependencies]
   cloudrun = [
@@ -229,9 +232,10 @@ ______________________________________________________________________
       "google-cloud-run>=0.10.0",
   ]
 
-  # Console entrypoint for invoking the launcher / pipeline coordinator directly:
+  # Inside-container sandbox worker entrypoint invoked by Launcher.run_worker()
+  # (on the host, `launcher` is imported as a library by cm-github / cm-gitlab):
   [project.scripts]
-  cm-launcher = "launcher.__main__:main"
+  cm-worker = "launcher.worker:main"
 
   # Resolve `codemender` from the local monorepo workspace during development:
   [tool.uv.sources]
@@ -267,9 +271,10 @@ ______________________________________________________________________
   github = ["requests>=2.31.0"]
   gitlab = ["requests>=2.31.0"]
 
-  # Console entrypoint for repository host PR/MR integration:
+  # Dedicated per-host CLI console entrypoints for outer CI execution:
   [project.scripts]
-  cm-repohost = "repohost.__main__:main"
+  cm-github = "repohost.github.__main__:main"
+  cm-gitlab = "repohost.gitlab.__main__:main"
 
   # Resolve internal dependencies from the local monorepo workspace:
   [tool.uv.sources]
@@ -286,24 +291,26 @@ ______________________________________________________________________
 - **Why:**
 
   - **Enforces Security Boundaries at the Package Level:**
-    `docker/runner.Dockerfile` installs only `packages/codemender`
-    (`pip install ./packages/codemender`), guaranteeing that neither repo-host
-    API clients (`repohost`) nor cloud job dispatchers (`launcher`) are even
-    present inside the `cm` sandbox image.
-  - **Eliminates Orchestration Duplication:** Placing the multi-step `find-diff`
-    -> `verify` -> `fix` coordinator in `packages/launcher` means GitHub
-    (`repohost/github`) and GitLab (`repohost/gitlab`) share one pipeline engine
-    instead of re-implementing workflow orchestration per repo host.
-  - **Scoped Installation:** Installing `launcher` for local Docker execution
-    never pulls in `google-cloud-run`, and installing `repohost[github]` never
-    pulls in GitLab-only dependencies.
+    `docker/runner.Dockerfile` installs only `packages/codemender` and
+    `packages/launcher[cloudrun]` (see
+    [ADR-0009](ADR-0009-abstraction-layers-and-dependency-injection.md)
+    Decision 2), guaranteeing that repository host API clients (`packages/repohost`)
+    are never present inside the `cm` sandbox image.
+  - **Eliminates Orchestration Duplication:** Placing the multi-step `find`,
+    `verify`, and `fix` workflow methods on `Launcher` and the inside-container
+    task execution harness on `Worker` (`cm-worker`) in `packages/launcher`
+    means GitHub (`repohost/github`) and GitLab (`repohost/gitlab`) share one
+    pipeline engine instead of re-implementing workflow orchestration per repo
+    host.
+  - **Scoped Installation:** Isolating `[cloudrun]` in `packages/launcher`
+    (with lazy `gs://` imports in `open_artifact_cache`) and `[github]` /
+    `[gitlab]` in `packages/repohost` keeps dependencies strictly scoped.
 
 - **Alternatives Rejected:**
 
   - *A single monolithic package for sandbox code, launcher, and repo hosts:*
     Blurs the boundary between code that runs inside the untrusted `cm` sandbox
-    (`codemender`) and code that runs on the trusted CI host (`launcher`,
-    `repohost`).
+    and code that talks to repository hosting APIs (`repohost`).
   - *Splitting every target into 6+ micro-packages immediately
     (`launcher-local`, `launcher-cloudrun`, `repohost-github`,
     `repohost-gitlab`):* Multiplies `pyproject.toml` boilerplate before
@@ -385,13 +392,19 @@ ______________________________________________________________________
   - *Separate `tests/` directory trees:* Requires maintaining parallel directory
     hierarchies across every package.
 
-### Decision 5: Explicit Per-Target Dockerfiles (`docker/*.Dockerfile`) & Root `Makefile` Targets
+### Decision 5: Per-Target Dockerfiles (`docker/*.Dockerfile`) & Root `Makefile` Targets (Two-Way Door)
 
-- **Design:** Place explicit per-target Dockerfiles in `docker/` (such as
-  `docker/runner.Dockerfile`, `docker/cloudrun.Dockerfile`, and
-  `docker/gitlab.Dockerfile`), build all images using the repository root (`.`)
-  as the Docker build context, and provide root `Makefile` targets for common
-  build and test workflows.
+- **Design:** Place target Dockerfiles in `docker/` (`docker/runner.Dockerfile`
+  for the unified sandbox container across local gVisor and Cloud Run, and
+  `docker/gitlab.Dockerfile` for the outer GitLab CI job container), build all
+  images using the repository root (`.`) as the Docker build context, and
+  provide root `Makefile` targets (`make test`, `make build-runner`,
+  `make build-cloudrun`, `make build-gitlab`). Per
+  [ADR-0009](ADR-0009-abstraction-layers-and-dependency-injection.md)
+  Decision 2, `make build-runner` and `make build-cloudrun` initially build the
+  same unified `docker/runner.Dockerfile` image as a **two-way door**, preserving
+  the ability to split `docker/cloudrun.Dockerfile` later with zero changes to
+  Python code or CI callers.
 - **Why:** Using the repository root (`.`) as the build context gives every
   Dockerfile direct access to `packages/codemender`, `packages/launcher`, and
   `packages/repohost` so each image installs strictly the package(s) and extras
@@ -400,8 +413,9 @@ ______________________________________________________________________
   developers and CI pipelines simple, memorable commands without typing long
   `docker build -f ...` or multi-package test discovery invocations.
 - **Alternatives Rejected:**
-  - *Single root multi-stage `Dockerfile`:* Couples unrelated base images,
-    packages, and entrypoints into a single file.
+  - *Single root multi-stage `Dockerfile`:* Couples unrelated outer-CI and
+    inner-sandbox images (`gitlab.Dockerfile` vs. `runner.Dockerfile`) into a
+    single file.
   - *Subdirectory Docker build contexts:* Cannot access workspace packages under
     `packages/` cleanly.
 
@@ -419,14 +433,20 @@ ______________________________________________________________________
     `codemender.runner.__main__:main`) that wraps `cm` with structured
     [ADR-0001](ADR-0001-machine-readable-output-contract.md) output and
     pre-flight checks.
-  - Inside containers, `packages/codemender` is installed into an isolated
-    virtualenv (`/opt/codemender/venv` on `$PATH`) so target repositories
-    installing their own dependencies cannot conflict with the runner.
+  - Inside containers, `packages/codemender` and `packages/launcher[cloudrun]`
+    are installed into an isolated virtualenv (`/opt/codemender/venv` on
+    `$PATH`) so target repositories installing their own dependencies cannot
+    conflict with the runner.
 - **Lean Base Runner Container (`docker/runner.Dockerfile`):** Packages only OS
   essentials (`git`, `curl`, `tar`, `gzip`, `ca-certificates`), Python 3.11,
-  `cm`, and `packages/codemender` (`ENTRYPOINT ["cm-runner"]`), omitting heavy
-  multi-language compiler suites (see
-  [SPEC-0003](../openspec/specs/runner-container-packaging/spec.md)).
+  `cm`, `packages/codemender` (`cm-runner`), and `packages/launcher[cloudrun]`
+  (`cm-worker`, with `ENTRYPOINT ["cm-worker"]` as the default container
+  entrypoint so `Launcher.run_worker()` only passes `--cache-uri` and
+  `--task-id` arguments across Cloud Run Jobs and local Docker, while standalone
+  local callers can invoke `docker run --entrypoint cm-runner`; see
+  [ADR-0009](ADR-0009-abstraction-layers-and-dependency-injection.md)
+  Decision 2), omitting `packages/repohost` and heavy multi-language compiler
+  suites (see [SPEC-0003](../openspec/specs/runner-container-packaging/spec.md)).
 - **Infrastructure Automation (`terraform/`):** HashiCorp Terraform `>= 1.5`
   with a root configuration at `terraform/` and composable child modules under
   `terraform/modules/`.

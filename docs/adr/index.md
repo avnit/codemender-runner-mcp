@@ -1,6 +1,7 @@
 # Architecture Decision Records (ADRs)
 
-This directory contains the Architecture Decision Records (ADRs) governing the CodeMender Orchestrator and its deployment scenarios.
+This directory contains the Architecture Decision Records (ADRs) governing the
+CodeMender Orchestrator and its deployment scenarios.
 
 | ADR | Title | Status | Date |
 | :--- | :--- | :--- | :--- |
@@ -12,3 +13,4 @@ This directory contains the Architecture Decision Records (ADRs) governing the C
 | [ADR-0006](ADR-0006-pr-remediation-routing-and-security-gate.md) | Pull Request Remediation Routing & Security Quality Gate | Proposed | 2026-09-26 |
 | [ADR-0007](ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md) | Cloud Run Job Invocation Interface: CLI vs. Python Library | Proposed | 2026-10-02 |
 | [ADR-0008](ADR-0008-repository-layout-and-package-structure.md) | Repository Layout, Three-Package Workspace, and Runtime Architecture | Proposed | 2026-10-08 |
+| [ADR-0009](ADR-0009-abstraction-layers-and-dependency-injection.md) | Abstraction Layers, Dependency Injection, and Asynchronous Workflows | Proposed | 2026-10-09 |
