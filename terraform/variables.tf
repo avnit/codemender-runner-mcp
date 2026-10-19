@@ -102,6 +102,12 @@ variable "runner_memory" {
   description = "Memory limit for Cloud Run Job worker tasks (e.g. '2Gi', '4Gi', '8Gi')."
 }
 
+variable "runner_timeout" {
+  type        = string
+  default     = "3600s"
+  description = "Task timeout for Cloud Run Job worker tasks (e.g. '600s', '1800s', '3600s')."
+}
+
 variable "create_vpc_and_nat" {
   type        = bool
   default     = false

@@ -79,5 +79,10 @@ run "cloud_run_mode_composition" {
     condition     = var.runner_memory == "8Gi"
     error_message = "Expected default runner_memory in root module to be '8Gi'."
   }
+
+  assert {
+    condition     = var.runner_timeout == "3600s"
+    error_message = "Expected default runner_timeout in root module to be '3600s'."
+  }
 }
 

@@ -83,6 +83,10 @@ execution_mode = "local" # or "cloud_run"
 # Default: "8Gi"
 # runner_memory = "8Gi"
 
+# Task timeout allocated to Cloud Run worker tasks (e.g., "600s", "1800s", "3600s").
+# Default: "3600s"
+# runner_timeout = "3600s"
+
 # Whether to provision a dedicated VPC network, subnets, and Cloud NAT gateway.
 # Default: false
 # create_vpc_and_nat = false

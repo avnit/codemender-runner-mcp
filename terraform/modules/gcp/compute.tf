@@ -28,6 +28,8 @@ resource "google_cloud_run_v2_job" "runner" {
 
   template {
     template {
+      timeout               = var.runner_timeout
+      max_retries           = 0
       execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
       service_account       = google_service_account.runner_sa.email
 

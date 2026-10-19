@@ -48,6 +48,12 @@ variable "runner_memory" {
   default     = "8Gi"
 }
 
+variable "runner_timeout" {
+  type        = string
+  description = "Task timeout for Cloud Run Job worker tasks (e.g. '600s', '1800s', '3600s')."
+  default     = "3600s"
+}
+
 variable "create_vpc_and_nat" {
   type        = bool
   description = "Whether to create a dedicated VPC network, subnet, connector, and Cloud NAT for private egress."

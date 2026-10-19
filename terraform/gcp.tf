@@ -24,6 +24,7 @@ module "gcp" {
   reports_bucket_name         = var.reports_bucket_name
   runner_cpu                  = var.runner_cpu
   runner_memory               = var.runner_memory
+  runner_timeout              = var.runner_timeout
   create_vpc_and_nat          = var.create_vpc_and_nat
   existing_vpc_connector_id   = var.existing_vpc_connector_id
   vpc_connector_cidr          = var.vpc_connector_cidr

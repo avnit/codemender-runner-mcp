@@ -45,6 +45,16 @@ run "compute_resources_created_correctly" {
   }
 
   assert {
+    condition     = google_cloud_run_v2_job.runner.template[0].template[0].timeout == "3600s"
+    error_message = "Runner Cloud Run Job must default to 3600s task timeout."
+  }
+
+  assert {
+    condition     = google_cloud_run_v2_job.runner.template[0].template[0].max_retries == 0
+    error_message = "Runner Cloud Run Job must set max_retries = 0 to prevent retrying timed-out or unfixable tasks."
+  }
+
+  assert {
     condition     = google_cloud_run_v2_job.runner.template[0].template[0].containers[0].resources[0].limits["memory"] == "8Gi"
     error_message = "Runner Cloud Run Job must default to 8Gi memory limit to prevent OOM (exit 137)."
   }
