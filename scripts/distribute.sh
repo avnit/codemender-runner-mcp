@@ -300,35 +300,24 @@ stage_distribution_tree() {
     fi
   fi
 
-  # 2. Live GitHub Actions Configuration (.github/actions/ & .github/workflows/)
-  if [[ -d "$src_dir/github-actions/actions/codemender" ]]; then
-    mkdir -p "$out_dir/.github/actions/codemender"
-    cp -R "$src_dir/github-actions/actions/codemender/." "$out_dir/.github/actions/codemender/"
-  elif [[ -d "$src_dir/.github/actions/codemender" ]]; then
+  # 2. Composite Action & Workflows (.github/)
+  if [[ -d "$src_dir/.github/actions/codemender" ]]; then
     mkdir -p "$out_dir/.github/actions/codemender"
     cp -R "$src_dir/.github/actions/codemender/." "$out_dir/.github/actions/codemender/"
   fi
 
-  if [[ -d "$src_dir/github-actions/actions/codemender-local" ]]; then
-    mkdir -p "$out_dir/.github/actions/codemender-local"
-    cp -R "$src_dir/github-actions/actions/codemender-local/." "$out_dir/.github/actions/codemender-local/"
-  elif [[ -d "$src_dir/.github/actions/codemender-local" ]]; then
+  if [[ -d "$src_dir/.github/actions/codemender-local" ]]; then
     mkdir -p "$out_dir/.github/actions/codemender-local"
     cp -R "$src_dir/.github/actions/codemender-local/." "$out_dir/.github/actions/codemender-local/"
   fi
 
   mkdir -p "$out_dir/.github/workflows"
-  if [[ -d "$src_dir/github-actions/workflows" ]]; then
-    for wf in "$src_dir/github-actions/workflows"/*.yml; do
-      [[ -f "$wf" ]] || continue
-      cp "$wf" "$out_dir/.github/workflows/$(basename "$wf")"
-    done
-  elif [[ -d "$src_dir/.github/workflows" ]]; then
+  if [[ -d "$src_dir/.github/workflows" ]]; then
     for wf in "$src_dir/.github/workflows"/*.yml; do
       [[ -f "$wf" ]] || continue
       local wf_name
       wf_name="$(basename "$wf")"
-      if [[ "$wf_name" != "codemender_parallel.yml" && "$wf_name" != "build_runner_image.yml" ]]; then
+      if [[ "$wf_name" != "build_runner_image.yml" ]]; then
         cp "$wf" "$out_dir/.github/workflows/$wf_name"
       fi
     done
@@ -347,7 +336,6 @@ stage_distribution_tree() {
       "$src_dir/.github/workflows/build_runner_image.yml" \
       >"$out_dir/.github/workflows/build_runner_image.yml"
   fi
-  rm -f "$out_dir/.github/workflows/codemender_parallel.yml"
 
   # 3. Stripped codemender-runner/ Package (.github/codemender-runner/)
   local runner_src=""

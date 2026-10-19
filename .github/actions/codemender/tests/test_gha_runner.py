@@ -781,5 +781,69 @@ class TestM2FixConfigAndOrchestration(unittest.TestCase):
       self.assertIn("**Fixes:** ✅ 1 suggested · ❌ 1 no fix.", final_body)
 
 
+class TestWorkflowConfigGuard(unittest.TestCase):
+
+  def test_cm_merge_scan_workflow_has_check_config_guard_and_conditions(self):
+    workflow_path = os.path.normpath(
+        os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..",
+            "..",
+            "..",
+            "workflows",
+            "cm-merge-scan.yml",
+        )
+    )
+    self.assertTrue(
+        os.path.isfile(workflow_path),
+        f"Expected workflow file at {workflow_path}",
+    )
+    with open(workflow_path, "r", encoding="utf-8") as f:
+      content = f.read()
+
+    self.assertIn("- name: Check CodeMender configuration", content)
+    self.assertIn("id: check-config", content)
+    self.assertIn("shell: bash", content)
+    self.assertIn("GCP_PROJECT_ID: ${{ vars.CODEMENDER_GCP_PROJECT_ID }}", content)
+    self.assertIn(
+        "GCP_WIF_PROVIDER: ${{ secrets.CODEMENDER_WORKLOAD_IDENTITY_PROVIDER }}",
+        content,
+    )
+    self.assertIn(
+        "GCP_SERVICE_ACCOUNT: ${{ secrets.CODEMENDER_SERVICE_ACCOUNT }}",
+        content,
+    )
+    self.assertIn(
+        'if [[ -z "${GCP_PROJECT_ID// }" || -z "${GCP_WIF_PROVIDER// }" || -z "${GCP_SERVICE_ACCOUNT// }" ]]; then',
+        content,
+    )
+    self.assertIn(
+        'echo "::notice::CodeMender is not configured for this repository (missing CODEMENDER_GCP_PROJECT_ID, CODEMENDER_WORKLOAD_IDENTITY_PROVIDER, or CODEMENDER_SERVICE_ACCOUNT); skipping scan."',
+        content,
+    )
+    self.assertIn('echo "configured=false" >> "$GITHUB_OUTPUT"', content)
+    self.assertIn('echo "configured=true" >> "$GITHUB_OUTPUT"', content)
+    self.assertIn(
+        "- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        content,
+    )
+
+    check_idx = content.index("- name: Check CodeMender configuration")
+    checkout_idx = content.index("- uses: actions/checkout@")
+    action_idx = content.index("- uses: ./.github/actions/codemender")
+    self.assertLess(check_idx, checkout_idx)
+    self.assertLess(checkout_idx, action_idx)
+
+    check_step_block = content[check_idx:checkout_idx]
+    run_section = check_step_block.split("run: |", 1)[1]
+    self.assertNotIn("${{", run_section)
+
+    cond = "if: steps.check-config.outputs.configured == 'true'"
+    checkout_step_block = content[checkout_idx:action_idx]
+    action_step_block = content[action_idx:]
+    self.assertIn(cond, checkout_step_block)
+    self.assertIn(cond, action_step_block)
+
+
 if __name__ == "__main__":
   unittest.main()

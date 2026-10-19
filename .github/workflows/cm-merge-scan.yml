@@ -1,10 +1,10 @@
-# Workflow template: copy this file to `.github/workflows/cm-merge-scan.yml` in
-# the repository you want CodeMender to run on.
+# Workflow template: runs in `.github/workflows/cm-merge-scan.yml` (or copy
+# this file to `.github/workflows/cm-merge-scan.yml` in the repository you want
+# CodeMender to run on).
 #
-# Prerequisite: the package's `actions/codemender/` directory has been copied
-# into this repository at `.github/actions/codemender/` (see README.md in the package → "Using it in a
-# repository"). The workflow runs that local copy; it does not reference the
-# codemender-runner repository.
+# Prerequisite: `.github/actions/codemender/` is present in this repository
+# (see `.github/README.md` → "Using it in a repository"). The workflow runs
+# that local copy; it does not reference the codemender-runner repository.
 #
 # M1 (differential PR scan): every pull request runs `cm-runner init` +
 # `cm-runner find-diff` in a gVisor container, uploads `report.sarif` and
@@ -41,11 +41,30 @@ jobs:
     # The scan, plus the slowest fix: cm-runner stops a fix after 30 minutes.
     timeout-minutes: 60
     steps:
+      - name: Check CodeMender configuration
+        id: check-config
+        shell: bash
+        env:
+          GCP_PROJECT_ID: ${{ vars.CODEMENDER_GCP_PROJECT_ID }}
+          GCP_WIF_PROVIDER: ${{ secrets.CODEMENDER_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.CODEMENDER_SERVICE_ACCOUNT }}
+        run: |
+          if [[ -z "${GCP_PROJECT_ID// }" || -z "${GCP_WIF_PROVIDER// }" || -z "${GCP_SERVICE_ACCOUNT// }" ]]; then
+            echo "::notice::CodeMender is not configured for this repository (missing CODEMENDER_GCP_PROJECT_ID, CODEMENDER_WORKLOAD_IDENTITY_PROVIDER, or CODEMENDER_SERVICE_ACCOUNT); skipping scan."
+            # `exit 0` inside `run:` only exits this step's subshell (the runner still executes
+            # later steps), non-zero exit codes fail the PR check, and `secrets.*` cannot be
+            # referenced in job-level `if:` expressions, so subsequent steps gate on this output.
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
       # Required: the action lives in this repository, so it must be checked
       # out first. `fetch-depth: 0` ensures the PR base commit is present locally
       # for `cm-runner find-diff`, and `persist-credentials: false` keeps the
       # GitHub token out of .git/config (ADR-0003).
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.check-config.outputs.configured == 'true'
         with:
           # Check out the PR head commit. By default, checkout puts a temporary
           # merge commit on disk, so line numbers would not match the PR's
@@ -58,6 +77,7 @@ jobs:
       # In Cloud Run mode, all GCP infrastructure details are managed internally
       # by the canonical Cloud Run client. No runner images or local gVisor required.
       - uses: ./.github/actions/codemender
+        if: steps.check-config.outputs.configured == 'true'
         with:
           gcp_project_id: ${{ vars.CODEMENDER_GCP_PROJECT_ID }}
           gcp_workload_identity_provider: ${{ secrets.CODEMENDER_WORKLOAD_IDENTITY_PROVIDER }}

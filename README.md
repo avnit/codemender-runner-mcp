@@ -36,7 +36,7 @@ We organize this repo using the following folders and meanings:
   (`launcher.base`). Install with `pip install -e ./packages/launcher`.
 - `codemender-runner/`: Legacy GitHub/Cloud Run batch pipeline modules and
   compatibility shims (`python3 codemender-runner`, `bin/cm-runner`).
-- `github-actions/`: Deployment for running CM directly inside github action
+- `.github/`: Deployment for running CM directly inside github action
   runners.
 - `cloud-run-jobs/`: Runs codemender inside cloud run jobs. Implements
   architecture from

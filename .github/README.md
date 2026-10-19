@@ -40,7 +40,7 @@ action's source lives with the action, while shared workspace packages live
 under `packages/{codemender,launcher}/` (ADR-0008).
 
 ```text
-github-actions/
+.github/
 ├── actions/
 │   └── codemender/
 │       ├── action.yml             # Composite action: installs gVisor, pulls the image, runs src/gha_runner.py
@@ -73,7 +73,7 @@ Build the package from a committed ref so only tracked files and the shared
 ```bash
 # From the root of codemender-runner
 STAGE=$(mktemp -d)
-git archive HEAD:github-actions | tar -x -C "$STAGE"
+git archive HEAD:.github | tar -x -C "$STAGE"
 mkdir -p "$STAGE/actions/codemender/packages/codemender/src/codemender"/{sarif,vcs}
 cp packages/codemender/pyproject.toml "$STAGE/actions/codemender/packages/codemender/"
 cp packages/codemender/src/codemender/{__init__.py,cm.py} "$STAGE/actions/codemender/packages/codemender/src/codemender/"
@@ -383,7 +383,7 @@ Without these settings, the job fails and the log names the setting to enable.
 
 ```bash
 pip install ./packages/*
-cd github-actions/actions/codemender
+cd .github/actions/codemender
 python3 -m unittest discover -s tests -v
 ```
 

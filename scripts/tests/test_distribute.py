@@ -59,6 +59,7 @@ class TestDistributeScript(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     super().setUpClass()
+    os.environ["GIT_CONFIG_GLOBAL"] = "/dev/null"
     cls._class_tmp = tempfile.TemporaryDirectory()
     cls.base_source_repo = os.path.join(cls._class_tmp.name, "source_repo")
     shutil.copytree(
@@ -339,6 +340,7 @@ class TestDistributeScript(unittest.TestCase):
         ".github/actions/codemender/src/gha_runner.py",
         ".github/actions/codemender/tests/test_gha_runner.py",
         ".github/workflows/cm-merge-scan.yml",
+        ".github/workflows/ci.yml",
         ".github/workflows/build_runner_image.yml",
         ".github/terraform/main.tf",
         ".github/terraform/variables.tf",
@@ -503,7 +505,6 @@ class TestDistributeScript(unittest.TestCase):
         ".github/codemender-runner/packages/launcher/src/launcher/local/test_launcher.py",
         "workflows/gcp_parallel_workflow.yaml",
         "cloudbuild.yaml",
-        ".github/workflows/codemender_parallel.yml",
     ]
     for rel_path in excluded_paths:
       with self.subTest(excluded_path=rel_path):
@@ -545,6 +546,11 @@ class TestDistributeScript(unittest.TestCase):
         0,
         msg=f"GHA action tests failed:\n{gha_tests.stderr}",
     )
+
+    with open(_DISTRIBUTE_SCRIPT, "r", encoding="utf-8") as f:
+      distribute_script_content = f.read()
+    self.assertNotIn("github-actions", distribute_script_content)
+    self.assertNotIn("codemender_parallel.yml", distribute_script_content)
 
   def test_distributed_documentation_links_resolve_validly(self):
     """Verify all relative links and unified Terraform instructions in distributed README.md (REQ-0006)."""
@@ -861,16 +867,16 @@ class TestDistributeScript(unittest.TestCase):
     _run_git(target, "add", ".github/workflows/cm-merge-scan.yml")
     _run_git(target, "commit", "-q", "-m", "Target edit to line 1")
 
-    # Modify line 1 of github-actions/workflows/cm-merge-scan.yml in source to a conflicting value
+    # Modify line 1 of .github/workflows/cm-merge-scan.yml in source to a conflicting value
     src_wf = os.path.join(
-        src_clone, "github-actions", "workflows", "cm-merge-scan.yml"
+        src_clone, ".github", "workflows", "cm-merge-scan.yml"
     )
     with open(src_wf, "r", encoding="utf-8") as f:
       src_wf_lines = f.readlines()
     src_wf_lines[0] = "# UPSTREAM_CONFLICTING_HEADER_LINE_1\n"
     with open(src_wf, "w", encoding="utf-8") as f:
       f.writelines(src_wf_lines)
-    _run_git(src_clone, "add", "github-actions/workflows/cm-merge-scan.yml")
+    _run_git(src_clone, "add", ".github/workflows/cm-merge-scan.yml")
     _run_git(src_clone, "commit", "-q", "-m", "Upstream conflicting edit")
     c2_sha = _run_git(src_clone, "rev-parse", "HEAD").stdout.strip()
 
