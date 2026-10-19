@@ -47,5 +47,9 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+
 !terraform/gcp_override.tf
 !.github/terraform/gcp_override.tf
+
+# Castor task file
+tasks.md

@@ -14,6 +14,7 @@
 
 """Unit tests for the gha_runner entry point (M1 find-diff + M2 parallel fixes)."""
 
+import io
 import json
 import os
 import shutil
@@ -28,6 +29,22 @@ sys.path.insert(
 
 import gha_runner  # pylint: disable=g-import-not-at-top
 from launcher.base import LauncherError, ParallelResult, RunResult  # pylint: disable=g-import-not-at-top
+from launcher.cloud_run import CloudRunLauncher  # pylint: disable=g-import-not-at-top
+from launcher.local_docker import LocalDockerLauncher  # pylint: disable=g-import-not-at-top
+
+_VERSION_EVENT = {
+    "event": "version",
+    "orchestrator": "0.1.0",
+    "cm": {"found": True, "version": "0.9.0", "path": "/usr/local/bin/cm"},
+    "contract": "cm-0.9.x",
+}
+
+_INIT_OK_EVENTS = [
+    {"event": "check", "name": "cm_binary", "status": "pass", "message": "ok"},
+    {"event": "check", "name": "cm_workspace", "status": "recovered", "message": "created"},
+    {"event": "check", "name": "cm_config", "status": "pass", "message": "ok"},
+    {"event": "check", "name": "cm_verify", "status": "pass", "message": "ok"},
+]
 
 _SARIF_CLEAN = {
     "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
@@ -90,6 +107,7 @@ _ENV = {
     "GITHUB_TOKEN": "tok",
     "GITHUB_SERVER_URL": "https://github.com",
     "GITHUB_RUN_ID": "123",
+    "CODEMENDER_BACKEND": "local",
     "CODEMENDER_RUNNER_IMAGE": "img:sha",
     "GOOGLE_CLOUD_PROJECT": "my-gcp-project",
     "GOOGLE_GHA_CREDS_PATH": "/tmp/adc.json",
@@ -228,6 +246,26 @@ class TestRunPr(unittest.TestCase):
     printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
     self.assertIn("Send write tokens to workflows from pull requests", printed)
 
+  def test_scan_signal_interruption_stops_launcher_and_updates_sticky(
+      self, mock_post
+  ):
+    launcher = _launcher()
+    launcher.run.side_effect = KeyboardInterrupt
+
+    self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 1)
+    launcher.stop.assert_called()
+    body = mock_post.call_args.args[3]
+    self.assertIn("❌ **CodeMender scan failed.**", body)
+    self.assertIn("The run was cancelled or timed out.", body)
+
+  def test_stop_on_signal_invokes_stop_and_raises(self, mock_post):
+    launcher = MagicMock()
+    with self.assertRaises(KeyboardInterrupt):
+      with gha_runner._stop_on_signal(launcher):
+        import signal
+        signal.raise_signal(signal.SIGTERM)
+    launcher.stop.assert_called_once()
+
   def test_find_diff_and_launcher_failures_post_error_and_exit_1(self, mock_post):
     launcher = _launcher(scan_result=_scan_result(exit_code=3, raw=b""))
     self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 1)
@@ -244,6 +282,125 @@ class TestRunPr(unittest.TestCase):
         "did not emit a valid SARIF 2.1.0 document", mock_post.call_args.args[3]
     )
 
+  def test_comment_failure_exits_1(self, mock_post):
+    mock_post.return_value = None
+    launcher = _launcher()
+
+    self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 1)
+
+  def test_cloudrun_consolidated_find_diff(self, mock_post):
+    launcher = MagicMock()
+    scan_res = _scan_result()
+    launcher.run.return_value = scan_res
+
+    env = dict(_ENV, CODEMENDER_BACKEND="cloudrun")
+    rc = gha_runner.run_pr(_pr_event(), env, launcher)
+
+    self.assertEqual(rc, 0)
+    launcher.run.assert_called_once_with(
+        "find-diff",
+        [
+            "--repo",
+            "/workspace",
+            "--base",
+            "1111222233334444",
+            "--out",
+            "/out",
+            "--diff-workers",
+            "8",
+        ],
+    )
+    mock_post.assert_called_once()
+    body = mock_post.call_args.args[3]
+    self.assertIn("✅ **No vulnerabilities found**", body)
+
+  def test_cloudrun_comment_generation_with_no_init(self, mock_post):
+    # Success scenario: format_find_diff_comment with init_result is None
+    scan_ok = _scan_result()
+    comment_ok = gha_runner.format_find_diff_comment(
+        scan_result=scan_ok,
+        image="",
+        run_url="https://run",
+        base_sha="1111222233334444",
+        init_result=None,
+        backend="cloudrun",
+    )
+    self.assertIn("✅ **No vulnerabilities found**", comment_ok)
+    self.assertIn("`111122223333`", comment_ok)
+
+    # Failure scenario: format_find_diff_comment with init_result is None
+    scan_fail = RunResult(2, b"")
+    comment_fail = gha_runner.format_find_diff_comment(
+        scan_result=scan_fail,
+        image="",
+        run_url="https://run",
+        base_sha="1111222233334444",
+        init_result=None,
+        backend="cloudrun",
+    )
+    self.assertIn("❌ **CodeMender scan failed.**", comment_fail)
+    self.assertIn("`2`", comment_fail)
+    self.assertIn("Backend: `Cloudrun`", comment_fail)
+
+    # run_pr execution when scan fails with init_result is None:
+    launcher_fail = MagicMock()
+    launcher_fail.run.return_value = scan_fail
+    env = dict(_ENV, CODEMENDER_BACKEND="cloudrun")
+    rc_fail = gha_runner.run_pr(_pr_event(), env, launcher_fail)
+    self.assertEqual(rc_fail, 1)
+    body_posted = mock_post.call_args.args[3]
+    self.assertIn("❌ **CodeMender scan failed.**", body_posted)
+    self.assertIn("Backend: `Cloudrun`", body_posted)
+
+    # run_pr execution when scan succeeds with init_result is None:
+    launcher_ok = MagicMock()
+    launcher_ok.run.return_value = scan_ok
+    rc_ok = gha_runner.run_pr(_pr_event(), env, launcher_ok)
+    self.assertEqual(rc_ok, 0)
+    body_posted_ok = mock_post.call_args.args[3]
+    self.assertIn("✅ **No vulnerabilities found**", body_posted_ok)
+
+  def test_cloudrun_fixes_skipped_without_workspace_warning(self, mock_post):
+    launcher = MagicMock()
+    sarif = {
+        "version": "2.1.0",
+        "runs": [
+            {
+                "results": [
+                    {
+                        "ruleId": "CWE-89",
+                        "level": "error",
+                        "message": {"text": "SQL Injection"},
+                        "locations": [{
+                            "physicalLocation": {
+                                "artifactLocation": {"uri": "src/db.py"},
+                                "region": {"startLine": 10},
+                            }
+                        }],
+                    }
+                ]
+            }
+        ],
+    }
+    launcher.run.return_value = _scan_result(sarif)
+    env = dict(
+        _ENV,
+        CODEMENDER_BACKEND="cloudrun",
+        CODEMENDER_FIX="true",
+        GITHUB_WORKSPACE="/workspace",
+    )
+
+    with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+      rc = gha_runner.run_pr(_pr_event(), env, launcher)
+
+    self.assertEqual(rc, 0)
+    stdout_val = mock_stdout.getvalue()
+    self.assertIn(
+        "::notice::Automatic fixes in Cloud Run mode are not yet supported;"
+        " skipping.",
+        stdout_val,
+    )
+    self.assertNotIn("GITHUB_WORKSPACE is not set", stdout_val)
 
 class TestFormatting(unittest.TestCase):
 
@@ -278,6 +435,27 @@ class TestFormatting(unittest.TestCase):
     self.assertNotIn("</details><script>", body)
     self.assertIn("&lt;/details&gt;&lt;script&gt;", body)
 
+  def test_cm_not_found_is_flagged(self):
+    event = dict(_VERSION_EVENT, cm={"found": False})
+    body = gha_runner.format_version_comment(
+        RunResult(0, [event]), "img", "https://run"
+    )
+    self.assertIn("⚠️", body)
+
+  def test_format_version_comment_cloudrun_displays_backend(self):
+    event = dict(_VERSION_EVENT)
+    body = gha_runner.format_version_comment(
+        RunResult(0, [event]), "", "https://run", backend="cloudrun"
+    )
+    self.assertIn("| Backend |", body)
+    self.assertIn("Cloud", body)
+    self.assertNotIn("| Image |", body)
+
+    fail_body = gha_runner.format_version_comment(
+        RunResult(1, []), "", "https://run", backend="cloudrun"
+    )
+    self.assertIn("Backend:", fail_body)
+    self.assertNotIn("Image:", fail_body)
 
 class TestMain(unittest.TestCase):
 
@@ -346,6 +524,174 @@ class TestMain(unittest.TestCase):
         gha_runner.main(self._env(CODEMENDER_DIFF_WORKERS="99")), 1
     )
     mock_run_pr.assert_not_called()
+
+  @patch.object(gha_runner, "run_pr", return_value=0)
+  def test_launcher_factory_cloudrun_default(self, mock_run_pr):
+    env = self._env()
+    env.pop("CODEMENDER_BACKEND", None)
+    self.assertEqual(gha_runner.main(env), 0)
+
+    launcher = mock_run_pr.call_args.args[2]
+    self.assertIsInstance(launcher, CloudRunLauncher)
+
+  @patch.object(gha_runner, "run_pr", return_value=0)
+  def test_launcher_factory_local_explicit(self, mock_run_pr):
+    env = self._env(CODEMENDER_BACKEND="local")
+    self.assertEqual(gha_runner.main(env), 0)
+
+    launcher = mock_run_pr.call_args.args[2]
+    self.assertIsInstance(launcher, LocalDockerLauncher)
+    self.assertEqual(launcher.image, "img:sha")
+
+  @patch.object(gha_runner, "run_pr")
+  def test_launcher_factory_missing_runner_image_in_local_mode_fails(
+      self, mock_run_pr
+  ):
+    env = dict(_ENV)
+    del env["CODEMENDER_RUNNER_IMAGE"]
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+      json.dump(_pr_event(), f)
+    try:
+      env["GITHUB_EVENT_PATH"] = f.name
+      with patch("builtins.print") as mock_print:
+        rc = gha_runner.main(env)
+    finally:
+      os.unlink(f.name)
+
+    self.assertEqual(rc, 1)
+    mock_run_pr.assert_not_called()
+    printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+    self.assertIn(
+        "Missing required environment variable CODEMENDER_RUNNER_IMAGE", printed
+    )
+
+  @patch.object(gha_runner, "run_pr", return_value=0)
+  def test_launcher_factory_cloudrun(self, mock_run_pr):
+    mock_client_module = MagicMock()
+    mock_cloud_run_client_cls = MagicMock(name="CloudRunClient")
+    mock_cloud_run_config_cls = MagicMock(name="CloudRunConfig")
+    mock_client_module.CloudRunClient = mock_cloud_run_client_cls
+    mock_client_module.CloudRunConfig = mock_cloud_run_config_cls
+
+    env = dict(
+        _ENV,
+        CODEMENDER_BACKEND="cloudrun",
+        GOOGLE_CLOUD_PROJECT="my-gcp-project",
+        GCS_TRANSIT_BUCKET="my-transit-bucket",
+        CLOUD_RUN_JOB_NAME="codemender-runner",
+        CLOUD_RUN_REGION="us-central1",
+    )
+    env.pop("CODEMENDER_RUNNER_IMAGE", None)
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+      json.dump(_pr_event(), f)
+    try:
+      env["GITHUB_EVENT_PATH"] = f.name
+      with patch.dict(
+          "sys.modules",
+          {
+              "gcp_sandboxing": MagicMock(),
+              "gcp_sandboxing.client": mock_client_module,
+          },
+      ):
+        rc = gha_runner.main(env)
+    finally:
+      os.unlink(f.name)
+
+    self.assertEqual(rc, 0)
+    mock_run_pr.assert_called_once()
+    launcher = mock_run_pr.call_args.args[2]
+    self.assertIsInstance(launcher, CloudRunLauncher)
+    self.assertEqual(launcher.client, mock_cloud_run_client_cls.return_value)
+    mock_cloud_run_config_cls.assert_called_once_with(
+        project="my-gcp-project",
+        bucket="my-transit-bucket",
+        job_name="codemender-runner",
+        region="us-central1",
+        workspace_dir="",
+        out_dir="",
+        run_id="123",
+        run_attempt="1",
+        diff_workers="8",
+        base_sha="",
+    )
+    mock_cloud_run_client_cls.assert_called_once_with(
+        mock_cloud_run_config_cls.return_value
+    )
+
+  @patch.object(gha_runner, "run_pr", return_value=0)
+  def test_launcher_factory_cloud_run_alias(self, mock_run_pr):
+    mock_client_module = MagicMock()
+    mock_cloud_run_client_cls = MagicMock(name="CloudRunClient")
+    mock_cloud_run_config_cls = MagicMock(name="CloudRunConfig")
+    mock_client_module.CloudRunClient = mock_cloud_run_client_cls
+    mock_client_module.CloudRunConfig = mock_cloud_run_config_cls
+
+    env = dict(
+        _ENV,
+        CODEMENDER_BACKEND="cloud_run",
+        GOOGLE_CLOUD_PROJECT="my-gcp-project",
+        GCS_TRANSIT_BUCKET="my-transit-bucket",
+    )
+    env.pop("CODEMENDER_RUNNER_IMAGE", None)
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+      json.dump(_pr_event(), f)
+    try:
+      env["GITHUB_EVENT_PATH"] = f.name
+      with patch.dict(
+          "sys.modules",
+          {
+              "gcp_sandboxing": MagicMock(),
+              "gcp_sandboxing.client": mock_client_module,
+          },
+      ):
+        rc = gha_runner.main(env)
+    finally:
+      os.unlink(f.name)
+
+    self.assertEqual(rc, 0)
+    mock_run_pr.assert_called_once()
+    launcher = mock_run_pr.call_args.args[2]
+    self.assertIsInstance(launcher, CloudRunLauncher)
+    self.assertEqual(launcher.client, mock_cloud_run_client_cls.return_value)
+
+  @patch.object(gha_runner, "run_pr")
+  def test_launcher_factory_unsupported_backend_fails(self, mock_run_pr):
+    env = dict(_ENV, CODEMENDER_BACKEND="unsupported_engine")
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+      json.dump(_pr_event(), f)
+    try:
+      env["GITHUB_EVENT_PATH"] = f.name
+      with patch("builtins.print") as mock_print:
+        rc = gha_runner.main(env)
+    finally:
+      os.unlink(f.name)
+
+    self.assertEqual(rc, 1)
+    mock_run_pr.assert_not_called()
+    printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+    self.assertIn("Unsupported CODEMENDER_BACKEND: 'unsupported_engine'", printed)
+
+  def test_create_launcher_cloudrun_explicit_config(self):
+    env = {
+        "CODEMENDER_BACKEND": "cloudrun",
+        "GOOGLE_CLOUD_PROJECT": "p",
+        "GCS_TRANSIT_BUCKET": "b",
+        "GITHUB_WORKSPACE": "/ws",
+        "CODEMENDER_OUT_DIR": "/out",
+        "GITHUB_RUN_ID": "100",
+        "GITHUB_RUN_ATTEMPT": "3",
+        "CODEMENDER_DIFF_WORKERS": "4",
+        "BASE_SHA": "base123",
+        "CODEMENDER_LOG_LEVEL": "debug",
+    }
+    launcher = gha_runner.create_launcher(env)
+    self.assertIsInstance(launcher, CloudRunLauncher)
+    self.assertEqual(launcher.client.config.workspace_dir, "/ws")
+    self.assertEqual(launcher.client.config.out_dir, "/out")
+    self.assertEqual(launcher.client.config.run_id, "100")
+    self.assertEqual(launcher.client.config.run_attempt, "3")
+    self.assertEqual(launcher.client.config.diff_workers, "4")
+    self.assertEqual(launcher.client.config.base_sha, "base123")
 
 
 class TestM2FixConfigAndOrchestration(unittest.TestCase):

@@ -1,0 +1,228 @@
+# CodeMender Local GitHub Action (composite)
+#
+# Used as a single step from a repository's own workflow:
+#
+#   - uses: actions/checkout@v4
+#   - uses: ./.github/actions/codemender-local
+#
+# Runs CodeMender (cm-runner) locally in Docker containers under gVisor on the
+# GitHub Actions runner VM.
+#
+# Security boundary: GitHub tokens are used only by host steps below (pulling
+# the image and posting PR comments). They are never passed into a cm-runner
+# container (ADR-0003).
+
+name: CodeMender (Local Runner)
+description: Run CodeMender (cm-runner) on pull requests using Docker and gVisor on the GitHub Actions runner VM.
+
+inputs:
+  backend:
+    description: >-
+      Target execution backend: 'local' (default).
+    required: false
+    default: 'local'
+  runner_image:
+    description: >-
+      Universal cm-runner container image (pre-baked with Python 3.11, Node 22,
+      Java 17, Go 1.22, C/C++) or a custom Bring-Your-Own-Image (BYOI) built
+      `FROM codemender-runner` with your project's dependencies pre-installed.
+      Pin to a commit SHA tag (not :latest). Required.
+    required: true
+  gcp_project_id:
+    description: >-
+      Google Cloud project ID used by CodeMender (`GOOGLE_CLOUD_PROJECT`).
+    required: true
+  gcp_workload_identity_provider:
+    description: >-
+      Full Google Cloud Workload Identity Provider resource name
+      (`projects/<num>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`).
+    required: true
+  gcp_service_account:
+    description: >-
+      Google Cloud service account email for Workload Identity Federation.
+    required: true
+  registry_token:
+    description: >-
+      Optional. Token used only to pull `runner_image` from GHCR. Defaults to
+      the workflow's automatic token. Only needed when the image is in a
+      registry this repository's token cannot read (e.g. another org).
+    required: false
+    default: ''
+  log_level:
+    description: cm-runner log level (debug, info, warning, error). Logs go to the job log.
+    required: false
+    default: info
+  container_runtime:
+    description: >-
+      Container runtime for cm-runner. `runsc` (default) installs gVisor and
+      runs the container under it, which cm's sandbox needs. `runc` is an
+      explicit opt-out: plain Docker, where cm's sandbox can't start.
+    required: false
+    default: runsc
+  gvisor_release:
+    description: >-
+      gVisor release to install when `container_runtime` is `runsc`, as
+      `yyyymmdd` or a point release `yyyymmdd.N`
+      (https://gvisor.dev/docs/user_guide/install/#versions). Pinned so every
+      run uses the same build.
+    required: false
+    default: '20260921.0'
+  fix:
+    description: >-
+      Whether CodeMender tries a fix for each finding and posts it on the PR.
+      On by default. Set to `false` to only scan. Each fix usually takes 10
+      minutes or more; fixes run in parallel up to `max_parallel_fixes`.
+    required: false
+    default: 'true'
+  max_parallel_fixes:
+    description: >-
+      Maximum number of `cm-runner fix` containers to run in parallel. Defaults
+      to `4` to bound CPU, memory and disk usage on standard GitHub-hosted
+      runners.
+    required: false
+    default: '4'
+  diff_workers:
+    description: >-
+      Number of concurrent workers for `cm-runner find-diff` (1..16).
+    required: false
+    default: '8'
+  artifact_retention_days:
+    description: >-
+      Number of days to retain the uploaded workflow artifacts: `report.sarif`,
+      `report.md`, one SARIF file per finding and one patch per fix.
+    required: false
+    default: '3'
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install action dependencies
+      shell: bash
+      run: |
+        REQ_PATH="${{ github.action_path }}/requirements.txt"
+        if [[ ! -f "$REQ_PATH" ]]; then
+          REQ_PATH="${{ github.action_path }}/../codemender/requirements.txt"
+        fi
+        python -m pip install --quiet -r "$REQ_PATH"
+
+    - name: Verify PR base commit is present
+      shell: bash
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${BASE_SHA}" ]]; then
+          exit 0
+        fi
+        if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+          echo "Base commit ${BASE_SHA} not in shallow clone; attempting git fetch..."
+          git fetch --no-tags --depth=1 origin "${BASE_SHA}" || {
+            echo "::error::Base commit ${BASE_SHA} is not present in the local checkout. Set 'fetch-depth: 0' on actions/checkout."
+            exit 1
+          }
+        fi
+
+    - name: Authenticate to Google Cloud (WIF)
+      id: gcp_auth
+      uses: google-github-actions/auth@v2
+      with:
+        project_id: ${{ inputs.gcp_project_id }}
+        workload_identity_provider: ${{ inputs.gcp_workload_identity_provider }}
+        service_account: ${{ inputs.gcp_service_account }}
+        create_credentials_file: true
+
+    - name: Install gVisor
+      if: inputs.container_runtime == 'runsc'
+      shell: bash
+      env:
+        GVISOR_RELEASE: ${{ inputs.gvisor_release }}
+      run: |
+        set -euo pipefail
+        START=$SECONDS
+        if [[ ! "$GVISOR_RELEASE" =~ ^[0-9]{8}(\.[0-9]+)?$ ]]; then
+          echo "::error::Invalid 'gvisor_release' (expected yyyymmdd or yyyymmdd.N)."
+          exit 1
+        fi
+        ARCH=$(uname -m)
+        URL="https://storage.googleapis.com/gvisor/releases/release/${GVISOR_RELEASE}/${ARCH}"
+        WORK=$(mktemp -d)
+        cd "$WORK"
+        curl -fsSLO "${URL}/gvisor.tar.zstd"
+        curl -fsSLO "${URL}/gvisor.tar.zstd.sha512"
+        sha512sum -c gvisor.tar.zstd.sha512
+        sudo tar --zstd -xf gvisor.tar.zstd -C /usr/local/bin
+        cd /
+        rm -rf "$WORK"
+        sudo /usr/local/bin/runsc install
+        sudo systemctl reload docker
+        /usr/local/bin/runsc --version
+        docker info --format '{{json .Runtimes}}' | grep -q '"runsc"' \
+          || { echo "::error::Docker did not register the runsc runtime."; exit 1; }
+        echo "::notice::gVisor ${GVISOR_RELEASE} (${ARCH}) installed in $((SECONDS - START))s."
+
+    - name: Pull cm-runner image
+      id: pull-image
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.runner_image }}
+        TOKEN: ${{ inputs.registry_token || github.token }}
+        ACTOR: ${{ github.actor }}
+      run: |
+        if [[ -z "$IMAGE" ]]; then
+          echo "::error::The 'runner_image' input is required for codemender-local."
+          exit 1
+        fi
+        if [[ "$IMAGE" == ghcr.io/* ]]; then
+          repo_part="${IMAGE%:*}"
+          tag_part="${IMAGE##*:}"
+          if [[ "${repo_part}" == "${IMAGE}" ]]; then
+            IMAGE="${IMAGE,,}:latest"
+          else
+            IMAGE="${repo_part,,}:${tag_part}"
+          fi
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+        fi
+        docker pull "$IMAGE"
+        echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+    - name: Run CodeMender
+      shell: bash
+      env:
+        CODEMENDER_BACKEND: ${{ inputs.backend || 'local' }}
+        CODEMENDER_RUNNER_IMAGE: ${{ steps.pull-image.outputs.image || inputs.runner_image }}
+        CODEMENDER_LOG_LEVEL: ${{ inputs.log_level }}
+        CODEMENDER_CONTAINER_RUNTIME: ${{ inputs.container_runtime }}
+        CODEMENDER_DIFF_WORKERS: ${{ inputs.diff_workers }}
+        CODEMENDER_FIX: ${{ inputs.fix }}
+        CODEMENDER_MAX_PARALLEL_FIXES: ${{ inputs.max_parallel_fixes }}
+        CODEMENDER_OUT_DIR: ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}
+        GOOGLE_CLOUD_PROJECT: ${{ inputs.gcp_project_id }}
+        GOOGLE_GHA_CREDS_PATH: ${{ steps.gcp_auth.outputs.credentials_file_path }}
+        GITHUB_TOKEN: ${{ github.token }}
+        PYTHONDONTWRITEBYTECODE: '1'
+      run: |
+        chmod a+r "${GOOGLE_GHA_CREDS_PATH}"
+        SCRIPT_PATH="${{ github.action_path }}/src/gha_runner.py"
+        if [[ ! -f "$SCRIPT_PATH" ]]; then
+          SCRIPT_PATH="${{ github.action_path }}/../codemender/src/gha_runner.py"
+        fi
+        exec python "$SCRIPT_PATH"
+
+    - name: Upload CodeMender report artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: codemender-report-pr-${{ github.event.pull_request.number || github.run_id }}
+        path: |
+          ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}/report.sarif
+          ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}/report.md
+          ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}/findings/*.sarif
+          ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}/fixes/*.diff
+        if-no-files-found: ignore
+        retention-days: ${{ inputs.artifact_retention_days }}

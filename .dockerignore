@@ -3,6 +3,7 @@
 .github/
 docs/
 cloud-run-jobs/
+!cloud-run-jobs/entrypoint.py
 github-actions/
 codemender-runner/
 scripts/

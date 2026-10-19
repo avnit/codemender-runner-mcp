@@ -309,6 +309,14 @@ stage_distribution_tree() {
     cp -R "$src_dir/.github/actions/codemender/." "$out_dir/.github/actions/codemender/"
   fi
 
+  if [[ -d "$src_dir/github-actions/actions/codemender-local" ]]; then
+    mkdir -p "$out_dir/.github/actions/codemender-local"
+    cp -R "$src_dir/github-actions/actions/codemender-local/." "$out_dir/.github/actions/codemender-local/"
+  elif [[ -d "$src_dir/.github/actions/codemender-local" ]]; then
+    mkdir -p "$out_dir/.github/actions/codemender-local"
+    cp -R "$src_dir/.github/actions/codemender-local/." "$out_dir/.github/actions/codemender-local/"
+  fi
+
   mkdir -p "$out_dir/.github/workflows"
   if [[ -d "$src_dir/github-actions/workflows" ]]; then
     for wf in "$src_dir/github-actions/workflows"/*.yml; do

@@ -27,7 +27,8 @@ Flow:
      comment as it completes, and update the sticky comment's Fix column.
 
 Configuration comes from environment variables set by `action.yml`:
-  CODEMENDER_RUNNER_IMAGE        cm-runner image (pinned SHA tag). Required.
+  CODEMENDER_BACKEND             `cloudrun` (default) or `local`.
+  CODEMENDER_RUNNER_IMAGE        cm-runner image (pinned SHA tag). Required for local.
   CODEMENDER_LOG_LEVEL           cm-runner --log-level. Default: info.
   CODEMENDER_CONTAINER_RUNTIME   `runsc` (gVisor, default) or `runc`.
   CODEMENDER_DIFF_WORKERS        Number of concurrent diff workers (1..16).
@@ -40,6 +41,9 @@ Configuration comes from environment variables set by `action.yml`:
   GOOGLE_CLOUD_PROJECT           GCP project ID for Vertex AI / CodeMender API.
   GOOGLE_GHA_CREDS_PATH          Host path to WIF ADC JSON file (or
                                  GOOGLE_APPLICATION_CREDENTIALS).
+  GCS_TRANSIT_BUCKET             GCS bucket for Cloud Run transit storage.
+  CLOUD_RUN_JOB_NAME             Cloud Run Job name (default: codemender-runner).
+  CLOUD_RUN_REGION               Cloud Run region (default: us-central1).
   GITHUB_WORKSPACE               Checked-out repository on the runner host.
   GITHUB_TOKEN                   Token used only here, to post PR comments.
   GITHUB_EVENT_NAME, GITHUB_EVENT_PATH, GITHUB_REPOSITORY,
@@ -60,6 +64,23 @@ import threading
 from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, TextIO, Tuple
 from urllib.parse import quote
 
+# Configure sys.path so 'codemender' and local action subpackages are importable
+# in both the monorepo source layout and customer standalone .github/actions/codemender/ layout.
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ACTIONS_DIR = os.path.dirname(_CURRENT_DIR) if os.path.basename(_CURRENT_DIR) in ("src", "vcs") else _CURRENT_DIR
+
+for _candidate in (
+    _CURRENT_DIR,
+    os.path.join(_ACTIONS_DIR, "src"),
+    os.path.join(_ACTIONS_DIR, "packages", "codemender", "src"),
+    os.path.normpath(os.path.join(_ACTIONS_DIR, "../codemender-runner/packages/codemender/src")),
+    os.path.normpath(os.path.join(_ACTIONS_DIR, "../../packages/codemender/src")),
+    os.path.normpath(os.path.join(_ACTIONS_DIR, "../../../packages/codemender/src")),
+    os.path.normpath(os.path.join(_ACTIONS_DIR, "../../../../packages/codemender/src")),
+):
+  if os.path.isdir(_candidate) and _candidate not in sys.path:
+    sys.path.insert(0, _candidate)
+
 from vcs.github import list_finding_comments, post_or_update_sticky_comment
 from codemender.sarif import SarifDocument
 from codemender.cm import Finding
@@ -73,6 +94,7 @@ from launcher.base import (
     ParallelTask,
     RunResult,
 )
+from launcher.cloud_run import CloudRunLauncher
 from launcher.local_docker import (
     CONTAINER_OUT_DIR,
     CONTAINER_WORKSPACE_DIR,
@@ -143,6 +165,77 @@ _OUTCOME_LABELS = {
 # ---------------------------------------------------------------------------
 
 
+def create_launcher(
+    env: Mapping[str, str],
+    *,
+    workspace_dir: Optional[str] = None,
+    cm_home_dir: Optional[str] = None,
+    out_dir: Optional[str] = None,
+    creds_file: Optional[str] = None,
+) -> Launcher:
+  """Launcher factory selecting between LocalDockerLauncher and CloudRunLauncher."""
+  backend = (env.get("CODEMENDER_BACKEND") or "cloudrun").strip().lower()
+  if backend == "cloud_run":
+    backend = "cloudrun"
+
+  if backend == "cloudrun":
+    from gcp_sandboxing.client import CloudRunClient, CloudRunConfig  # type: ignore
+
+    project = env.get("GOOGLE_CLOUD_PROJECT", "").strip()
+    bucket = (
+        env.get("GCS_TRANSIT_BUCKET", "").strip()
+        or env.get("CODEMENDER_GCS_TRANSIT_BUCKET", "").strip()
+    )
+    if not bucket and project:
+      bucket = f"codemender-reports-{project}"
+
+    diff_workers = ""
+    try:
+      diff_workers = str(_parse_diff_workers(env))
+    except ValueError:
+      pass
+
+    config = CloudRunConfig(
+        project=project,
+        bucket=bucket,
+        job_name=(
+            env.get("CLOUD_RUN_JOB_NAME", "").strip()
+            or env.get("CODEMENDER_CLOUD_RUN_JOB_NAME", "").strip()
+            or "codemender-runner"
+        ),
+        region=(
+            env.get("CLOUD_RUN_REGION", "").strip()
+            or env.get("CODEMENDER_GCP_REGION", "").strip()
+            or "us-central1"
+        ),
+        workspace_dir=workspace_dir or env.get("GITHUB_WORKSPACE", "").strip(),
+        out_dir=out_dir or env.get("CODEMENDER_OUT_DIR", "").strip(),
+        run_id=env.get("GITHUB_RUN_ID", "manual").strip(),
+        run_attempt=env.get("GITHUB_RUN_ATTEMPT", "1").strip(),
+        diff_workers=diff_workers,
+        base_sha=env.get("BASE_SHA", "").strip(),
+    )
+    client = CloudRunClient(config)
+    return CloudRunLauncher(
+        client=client,
+        log_level=env.get("CODEMENDER_LOG_LEVEL", "info"),
+    )
+
+  if backend == "local":
+    return LocalDockerLauncher(
+        image=env.get("CODEMENDER_RUNNER_IMAGE", ""),
+        log_level=env.get("CODEMENDER_LOG_LEVEL", "info"),
+        runtime=env.get("CODEMENDER_CONTAINER_RUNTIME") or RUNTIME_GVISOR,
+        workspace_dir=workspace_dir or "",
+        cm_home_dir=cm_home_dir or "",
+        out_dir=out_dir or "",
+        gcp_credentials_file=creds_file or "",
+        gcp_project=env.get("GOOGLE_CLOUD_PROJECT", ""),
+    )
+
+  raise ValueError(f"Unsupported CODEMENDER_BACKEND: {backend!r}.")
+
+
 def main(env: Mapping[str, str] = os.environ) -> int:
   """CLI entry point invoked by `action.yml`."""
   logging.basicConfig(
@@ -154,66 +247,94 @@ def main(env: Mapping[str, str] = os.environ) -> int:
     print(f"::notice::CodeMender: event {event_name!r} is not handled yet; skipping.")
     return 0
 
-  for required in (
-      "GITHUB_EVENT_PATH",
-      "GITHUB_REPOSITORY",
-      "GITHUB_TOKEN",
-      "CODEMENDER_RUNNER_IMAGE",
-      "GITHUB_WORKSPACE",
-      "GOOGLE_CLOUD_PROJECT",
-  ):
+  for required in ("GITHUB_EVENT_PATH", "GITHUB_REPOSITORY", "GITHUB_TOKEN"):
     if not env.get(required):
       print(f"::error::Missing required environment variable {required}.")
       return 1
 
-  creds_file = (
-      env.get("GOOGLE_GHA_CREDS_PATH")
-      or env.get("GOOGLE_APPLICATION_CREDENTIALS")
-      or ""
-  )
-  if not creds_file:
-    print(
-        "::error::Missing GCP credentials file"
-        " (GOOGLE_GHA_CREDS_PATH or GOOGLE_APPLICATION_CREDENTIALS)."
+  backend = (env.get("CODEMENDER_BACKEND") or "cloudrun").strip().lower()
+  if backend == "cloud_run":
+    backend = "cloudrun"
+
+  if backend == "local":
+    for required in (
+        "CODEMENDER_RUNNER_IMAGE",
+        "GITHUB_WORKSPACE",
+        "GOOGLE_CLOUD_PROJECT",
+    ):
+      if not env.get(required):
+        print(f"::error::Missing required environment variable {required}.")
+        return 1
+
+    creds_file = (
+        env.get("GOOGLE_GHA_CREDS_PATH")
+        or env.get("GOOGLE_APPLICATION_CREDENTIALS")
+        or ""
     )
-    return 1
+    if not creds_file:
+      print(
+          "::error::Missing GCP credentials file"
+          " (GOOGLE_GHA_CREDS_PATH or GOOGLE_APPLICATION_CREDENTIALS)."
+      )
+      return 1
 
-  src_workspace = env["GITHUB_WORKSPACE"]
-  if not os.path.isdir(src_workspace):
-    print(
-        f"::error::GITHUB_WORKSPACE {src_workspace!r} does not exist or is not"
-        " a directory."
+    src_workspace = env["GITHUB_WORKSPACE"]
+    if not os.path.isdir(src_workspace):
+      print(
+          f"::error::GITHUB_WORKSPACE {src_workspace!r} does not exist or is not"
+          " a directory."
+      )
+      return 1
+
+    with open(env["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
+      event = json.load(f)
+
+    staging_root, workspace_copy, cm_home_dir, out_dir = _stage_host_directories(
+        src_workspace=src_workspace,
+        temp_root=env.get("RUNNER_TEMP"),
+        out_dir_override=env.get("CODEMENDER_OUT_DIR"),
     )
-    return 1
+    try:
+      try:
+        _parse_diff_workers(env)
+        launcher = create_launcher(
+            env,
+            workspace_dir=workspace_copy,
+            cm_home_dir=cm_home_dir,
+            out_dir=out_dir,
+            creds_file=creds_file,
+        )
+      except ValueError as e:
+        print(f"::error::{e}")
+        return 1
+      print(f"::notice::cm-runner container runtime: {launcher.runtime}")
+      return run_pr(event, env, launcher, out_dir=out_dir)
+    finally:
+      shutil.rmtree(staging_root, ignore_errors=True)
 
-  with open(env["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
-    event = json.load(f)
-
-  staging_root, workspace_copy, cm_home_dir, out_dir = _stage_host_directories(
-      src_workspace=src_workspace,
-      temp_root=env.get("RUNNER_TEMP"),
-      out_dir_override=env.get("CODEMENDER_OUT_DIR"),
-  )
-  try:
+  elif backend == "cloudrun":
+    # Cloud Run Backend (REQ-0004)
+    # Governing: docs/openspec/specs/github-actions/spec.md#req-0004
     try:
       _parse_diff_workers(env)
-      launcher = LocalDockerLauncher(
-          image=env["CODEMENDER_RUNNER_IMAGE"],
-          log_level=env.get("CODEMENDER_LOG_LEVEL", "info"),
-          runtime=env.get("CODEMENDER_CONTAINER_RUNTIME") or RUNTIME_GVISOR,
-          workspace_dir=workspace_copy,
-          cm_home_dir=cm_home_dir,
-          out_dir=out_dir,
-          gcp_credentials_file=creds_file,
-          gcp_project=env["GOOGLE_CLOUD_PROJECT"],
-      )
     except ValueError as e:
       print(f"::error::{e}")
       return 1
-    print(f"::notice::cm-runner container runtime: {launcher.runtime}")
-    return run_pr(event, env, launcher, out_dir=out_dir)
-  finally:
-    shutil.rmtree(staging_root, ignore_errors=True)
+
+    with open(env["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
+      event = json.load(f)
+
+    try:
+      launcher = create_launcher(env)
+    except (ImportError, ValueError) as e:
+      print(f"::error::{e}")
+      return 1
+    return run_pr(event, env, launcher, out_dir=env.get("CODEMENDER_OUT_DIR"))
+    return run_pr(event, env, launcher, out_dir=env.get("CODEMENDER_OUT_DIR"))
+
+  else:
+    print(f"::error::Unsupported CODEMENDER_BACKEND: {backend!r}.")
+    return 1
 
 
 def run_pr(
@@ -243,7 +364,10 @@ def run_pr(
   if fork:
     print("::notice::Fork PR: running with the repository's fork-PR settings.")
 
-  image = env.get("CODEMENDER_RUNNER_IMAGE", "")
+  backend = (env.get("CODEMENDER_BACKEND") or "cloudrun").strip().lower()
+  if backend == "cloud_run":
+    backend = "cloudrun"
+  image = env.get("CODEMENDER_RUNNER_IMAGE", "") if backend == "local" else ""
   scan_result: Optional[RunResult] = None
   error: Optional[str] = None
   try:
@@ -253,22 +377,33 @@ def run_pr(
     diff_workers = DEFAULT_DIFF_WORKERS
 
   if error is None:
-    try:
-      scan_result = launcher.run(
-          "find-diff",
-          [
-              "--repo",
-              CONTAINER_WORKSPACE_DIR,
-              "--base",
-              base_sha,
-              "--out",
-              CONTAINER_OUT_DIR,
-              "--diff-workers",
-              str(diff_workers),
-          ],
-      )
-    except LauncherError as e:
-      error = str(e)
+    with _stop_on_signal(launcher):
+      try:
+        scan_result = launcher.run(
+            "find-diff",
+            [
+                "--repo",
+                CONTAINER_WORKSPACE_DIR,
+                "--base",
+                base_sha,
+                "--out",
+                CONTAINER_OUT_DIR,
+                "--diff-workers",
+                str(diff_workers),
+            ],
+        )
+      except KeyboardInterrupt:
+        launcher.stop()
+        error = "The run was cancelled or timed out."
+        print(
+            "::warning::The run was cancelled or timed out. CodeMender stopped"
+            " the scan that was still running."
+        )
+      except LauncherError as e:
+        error = str(e)
+      except Exception:
+        launcher.stop()
+        raise
 
   findings = _parse_scan_findings(scan_result)
   runner_ok = (
@@ -298,10 +433,13 @@ def run_pr(
             else {index: _fix_cell(cell) for index, cell in fix_cells.items()}
         ),
         fix_status=fix_status,
+        backend=backend,
     )
 
   if runner_ok and findings and fix_enabled(env):
-    if env.get("GITHUB_WORKSPACE"):
+    if backend == "cloudrun":
+      print("::notice::Automatic fixes in Cloud Run mode are not yet supported; skipping.")
+    elif env.get("GITHUB_WORKSPACE"):
       return _run_fixes(
           findings,
           env,
@@ -312,9 +450,10 @@ def run_pr(
           out_dir=out_dir,
           render=sticky_body,
       )
-    print(
-        "::warning::GITHUB_WORKSPACE is not set, so CodeMender can't fix the findings."
-    )
+    else:
+      print(
+          "::warning::GITHUB_WORKSPACE is not set, so CodeMender can't fix the findings."
+      )
 
   if not _post_sticky_comment(env, int(pr_number), sticky_body(), fork):
     return 1
@@ -414,7 +553,7 @@ def _run_fixes(
     return post_or_update_sticky_comment(token, repo, pr_number, body) is not None
 
   stopped = False
-  with _stop_fixes_on_signal(launcher):
+  with _stop_on_signal(launcher):
     try:
       with contextlib.closing(
           launcher.run_parallel(
@@ -471,6 +610,8 @@ def format_find_diff_comment(
     error: Optional[str] = None,
     fix_cells: Optional[Mapping[int, str]] = None,
     fix_status: str = "",
+    backend: str = "local",
+    init_result: Optional[RunResult] = None,
 ) -> str:
   """Builds the sticky PR comment body for a `cm-runner find-diff` run."""
   lines = ["### CodeMender Security Scan", ""]
@@ -550,7 +691,11 @@ def format_find_diff_comment(
     lines.append(
         "`cm-runner find-diff` did not emit a valid SARIF 2.1.0 document."
     )
-  lines.append(f"Image: {_inline(image)}")
+  if image:
+    lines.append(f"Image: {_inline(image)}")
+  else:
+    backend_name = backend.capitalize() if backend else "Cloud Run"
+    lines.append(f"Backend: {_inline(backend_name)}")
   lines += ["", f"[Workflow run logs]({run_url})"]
   return "\n".join(lines)
 
@@ -562,7 +707,12 @@ def format_find_diff_comment(
 
 def _parse_scan_findings(scan_result: Optional[RunResult]) -> Optional[List[Finding]]:
   """Parses `scan_result.stdout` into `Finding` objects, or None if invalid SARIF."""
-  if scan_result is None or not scan_result.ok or not (scan_result.stdout or b"").strip():
+  if scan_result is None or not scan_result.ok:
+    return None
+  raw_bytes = scan_result.stdout or b""
+  if not raw_bytes and scan_result.events:
+    raw_bytes = json.dumps(scan_result.events[0]).encode("utf-8")
+  if not (raw_bytes or b"").strip():
     return None
   try:
     text = (
@@ -657,8 +807,8 @@ def _print_fix_log(
 
 
 @contextlib.contextmanager
-def _stop_fixes_on_signal(launcher: Launcher) -> Iterator[None]:
-  """Stops running fix containers on SIGINT/SIGTERM and raises KeyboardInterrupt once."""
+def _stop_on_signal(launcher: Launcher) -> Iterator[None]:
+  """Stops running containers or remote jobs on SIGINT/SIGTERM and raises KeyboardInterrupt once."""
   if threading.current_thread() is not threading.main_thread():
     yield
     return
@@ -680,6 +830,9 @@ def _stop_fixes_on_signal(launcher: Launcher) -> Iterator[None]:
     for sig, handler in previous.items():
       if handler is not None:
         signal.signal(sig, handler)
+
+
+_stop_fixes_on_signal = _stop_on_signal
 
 
 def _stage_host_directories(
@@ -858,6 +1011,59 @@ def _run_url(env: Mapping[str, str]) -> str:
   repo = env.get("GITHUB_REPOSITORY", "")
   run_id = env.get("GITHUB_RUN_ID", "")
   return f"{server}/{repo}/actions/runs/{run_id}"
+
+
+def format_version_comment(
+    result: Optional[RunResult],
+    image: str,
+    run_url: str,
+    error: Optional[str] = None,
+    backend: str = "local",
+) -> str:
+  """Builds the PR comment body for the M0 `cm-runner version` check."""
+  lines = ["### CodeMender", ""]
+  version = result.find_event("version") if result else None
+
+  backend_name = backend.capitalize() if backend else "Cloud Run"
+  target_row = (
+      f"| Image | {_inline(image)} |"
+      if image
+      else f"| Backend | {_inline(backend_name)} |"
+  )
+
+  if result is not None and result.ok and version:
+    cm = version.get("cm") or {}
+    cm_ok = bool(cm.get("found"))
+    lines.append(
+        "✅ cm-runner is reachable."
+        if cm_ok
+        else "⚠️ cm-runner is reachable, but the `cm` binary was not found."
+    )
+    lines += [
+        "",
+        "| | |",
+        "| :--- | :--- |",
+        f"| cm-runner | {_inline(version.get('orchestrator', 'unknown'))} |",
+        f"| cm | {_inline(cm.get('version', 'not found'))} |",
+        f"| Contract | {_inline(version.get('contract', 'unknown'))} |",
+        target_row,
+    ]
+  else:
+    lines.append("❌ cm-runner check failed.")
+    lines.append("")
+    if error:
+      lines.append(f"Reason: {_inline(error)}")
+    elif result is not None and not result.ok:
+      lines.append(f"cm-runner exited with code {_inline(result.exit_code)}.")
+    else:
+      lines.append("cm-runner did not emit a `version` event.")
+    if image:
+      lines.append(f"Image: {_inline(image)}")
+    else:
+      lines.append(f"Backend: {_inline(backend_name)}")
+
+  lines += ["", f"[Workflow run logs]({run_url})"]
+  return "\n".join(lines)
 
 
 if __name__ == "__main__":

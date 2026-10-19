@@ -18,7 +18,7 @@ import abc
 import concurrent.futures
 from dataclasses import dataclass, field
 import logging
-from typing import Any, Callable, Dict, Iterator, Optional, Sequence
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
 
 logger = logging.getLogger("codemender-github-actions")
 
@@ -42,14 +42,29 @@ class RunResult:
     exit_code: cm-runner's exit code (0 ok, 2 usage error, 3 failure).
     stdout: cm-runner's stdout, byte for byte (e.g. SARIF JSON from `find-diff`
       or unified diff from `fix`).
+    events: Optional parsed NDJSON events from stdout.
   """
 
   exit_code: int
   stdout: bytes = field(default=b"", repr=False)
+  events: List[Dict[str, Any]] = field(default_factory=list)
+
+  def __post_init__(self):
+    if isinstance(self.stdout, list):
+      if not self.events:
+        self.events = self.stdout
+      self.stdout = b""
 
   @property
   def ok(self) -> bool:
     return self.exit_code == EXIT_OK
+
+  def find_event(self, event_type: str) -> Optional[Dict[str, Any]]:
+    """Returns the first stdout event whose `event` field is `event_type`."""
+    for event in self.events:
+      if event.get("event") == event_type:
+        return event
+    return None
 
 
 @dataclass(frozen=True)

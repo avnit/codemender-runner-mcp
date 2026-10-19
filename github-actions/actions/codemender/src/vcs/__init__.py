@@ -31,6 +31,8 @@ if _SRC_DIR not in sys.path:
   sys.path.insert(0, _SRC_DIR)
 
 for _rel in (
+    "../packages/codemender/src",
+    "../../packages/codemender/src",
     "../../../../packages/codemender/src",
     "../../../codemender-runner/packages/codemender/src",
     "../../../packages/codemender/src",
@@ -44,6 +46,8 @@ for _rel in (
 
 __path__ = pkgutil.extend_path(__path__, __name__)
 for _pkg_rel in (
+    "../packages/codemender/src/codemender/vcs",
+    "../../packages/codemender/src/codemender/vcs",
     "../../../../packages/codemender/src/codemender/vcs",
     "../../../codemender-runner/packages/codemender/src/codemender/vcs",
     "../../../packages/codemender/src/codemender/vcs",

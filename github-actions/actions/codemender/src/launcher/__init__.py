@@ -21,3 +21,15 @@ same image and CLI everywhere; only the launcher differs per environment.
 M0 ships `LocalDockerLauncher` (docker run on the GitHub Actions VM).
 Cloud Run / GKE launchers will implement the same `Launcher` interface.
 """
+
+from launcher.base import Launcher, LauncherError, RunResult
+from launcher.cloud_run import CloudRunLauncher
+from launcher.local_docker import LocalDockerLauncher
+
+__all__ = [
+    "CloudRunLauncher",
+    "Launcher",
+    "LauncherError",
+    "LocalDockerLauncher",
+    "RunResult",
+]

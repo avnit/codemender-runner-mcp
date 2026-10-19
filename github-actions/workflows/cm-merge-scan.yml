@@ -54,28 +54,32 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # Mode 1: Cloud Run execution (default)
+      # In Cloud Run mode, all GCP infrastructure details are managed internally
+      # by the canonical Cloud Run client. No runner images or local gVisor required.
       - uses: ./.github/actions/codemender
         with:
-          # Defaults to the Universal cm-runner image published by
-          # build_runner_image.yml in this org/user's GHCR (pre-baked with
-          # Python, Node, Java, Go, C/C++). Override by setting the
-          # CODEMENDER_RUNNER_IMAGE repository or organization variable (e.g.
-          # to pin a specific commit SHA tag, use Artifact Registry, or point
-          # to a Bring-Your-Own-Image built `FROM codemender-runner` with your
-          # project's dependencies pre-installed so `cm fix` can build/test
-          # offline without opening the sandbox network).
-          runner_image: ${{ vars.CODEMENDER_RUNNER_IMAGE || format('ghcr.io/{0}/codemender-runner:latest', github.repository_owner) }}
-          # Required: Google Cloud Workload Identity Federation settings for the
-          # CodeMender API (provisioned by .github/terraform/).
           gcp_project_id: ${{ vars.CODEMENDER_GCP_PROJECT_ID }}
           gcp_workload_identity_provider: ${{ secrets.CODEMENDER_WORKLOAD_IDENTITY_PROVIDER }}
           gcp_service_account: ${{ secrets.CODEMENDER_SERVICE_ACCOUNT }}
+          gcs_transit_bucket: ${{ vars.CODEMENDER_GCS_TRANSIT_BUCKET }}
+          cloud_run_job_name: ${{ vars.CODEMENDER_CLOUD_RUN_JOB_NAME }}
+          cloud_run_region: ${{ vars.CODEMENDER_GCP_REGION }}
           # log_level: debug
           # diff_workers: '8'
-          # Fixes are on by default. Each fix takes 10 minutes or more.
-          # fix: false
-          # max_parallel_fixes: '4'
-          # Defaults: run cm-runner under gVisor (needed for cm's sandbox),
-          # pinned to a tested release. See README.md → "Inputs".
-          # container_runtime: runsc
-          # gvisor_release: '20260921.0'
+
+      # Mode 2: Local Docker execution (alternative)
+      # Uncomment to run locally on the Actions runner VM under gVisor.
+      # - uses: ./.github/actions/codemender-local
+      #   with:
+      #     runner_image: ${{ vars.CODEMENDER_RUNNER_IMAGE || format('ghcr.io/{0}/codemender-runner:latest', github.repository_owner) }}
+      #     gcp_project_id: ${{ vars.CODEMENDER_GCP_PROJECT_ID }}
+      #     gcp_workload_identity_provider: ${{ secrets.CODEMENDER_WORKLOAD_IDENTITY_PROVIDER }}
+      #     gcp_service_account: ${{ secrets.CODEMENDER_SERVICE_ACCOUNT }}
+      #     # log_level: debug
+      #     # diff_workers: '8'
+      #     # Fixes are on by default. Each fix takes 10 minutes or more.
+      #     # fix: false
+      #     # max_parallel_fixes: '4'
+      #     # container_runtime: runsc
+      #     # gvisor_release: '20260921.0'

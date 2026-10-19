@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for the launcher interface and LocalDockerLauncher."""
+"""Unit tests for launcher interface, LocalDockerLauncher, and CloudRunLauncher."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -28,9 +29,21 @@ sys.path.insert(
 )
 
 from launcher.base import LauncherError, ParallelTask, RunResult  # pylint: disable=g-import-not-at-top
+from launcher.cloud_run import (  # pylint: disable=g-import-not-at-top
+    CloudRunError,
+    CloudRunLauncher,
+    CloudRunTimeoutError,
+)
 from launcher.local_docker import LocalDockerLauncher  # pylint: disable=g-import-not-at-top
 
 _WAIT_SECONDS = 5
+
+_VERSION_EVENT = {
+    "event": "version",
+    "orchestrator": "0.1.0",
+    "cm": {"found": True, "version": "0.9.0", "path": "/usr/local/bin/cm"},
+    "contract": "cm-0.9.x",
+}
 
 
 def _name_flag(argv):
@@ -271,6 +284,113 @@ class TestLocalDockerLauncher(unittest.TestCase):
         self.assertEqual(r.log, "fix log\n")
     finally:
       shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+class TestCloudRunLauncher(unittest.TestCase):
+
+  def test_requires_client(self):
+    for falsey_client in (None, False, "", 0):
+      with self.subTest(client=falsey_client):
+        with self.assertRaises(ValueError):
+          CloudRunLauncher(client=falsey_client)
+
+  def test_run_success(self):
+    mock_client = MagicMock()
+    mock_receipt = MagicMock(exit_code=0, events=[_VERSION_EVENT])
+    mock_client.run.return_value = mock_receipt
+
+    launcher = CloudRunLauncher(client=mock_client)
+    result = launcher.run("version")
+
+    self.assertTrue(result.ok)
+    self.assertEqual(result.exit_code, 0)
+    self.assertEqual(result.events, [_VERSION_EVENT])
+    mock_client.run.assert_called_once_with(
+        command="version",
+        args=[],
+        log_level="info",
+        timeout_seconds=3600,
+    )
+
+  def test_client_error_raises_launcher_error(self):
+    mock_client = MagicMock()
+    mock_client.run.side_effect = CloudRunError("API failure")
+
+    launcher = CloudRunLauncher(client=mock_client)
+    with self.assertRaises(LauncherError) as ctx:
+      launcher.run("find-diff", ["--repo", "/workspace"])
+    self.assertIn("API failure", str(ctx.exception))
+
+  def test_timeout_raises_launcher_error(self):
+    mock_client = MagicMock()
+    mock_client.run.side_effect = CloudRunTimeoutError("Timed out")
+
+    launcher = CloudRunLauncher(client=mock_client, timeout_seconds=3600)
+    with self.assertRaises(LauncherError) as ctx:
+      launcher.run("find-diff", ["--repo", "/workspace"])
+    self.assertIn("timed out", str(ctx.exception).lower())
+
+  def test_run_propagates_failure_exit_code(self):
+    mock_client = MagicMock()
+    mock_receipt = MagicMock(exit_code=2, events=[])
+    mock_client.run.return_value = mock_receipt
+
+    launcher = CloudRunLauncher(client=mock_client)
+    result = launcher.run("find-diff", ["--repo", "/workspace"])
+
+    self.assertFalse(result.ok)
+    self.assertEqual(result.exit_code, 2)
+    self.assertEqual(result.events, [])
+
+  def test_run_success_with_bootstrapper_receipt(self):
+    mock_client = MagicMock()
+    sarif_bytes = b'{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "CodeMender"}}, "results": []}]}'
+    test_file_path = "/tmp/test_report.sarif"
+    with open(test_file_path, "wb") as f:
+      f.write(sarif_bytes)
+    self.addCleanup(
+        lambda: os.remove(test_file_path)
+        if os.path.exists(test_file_path)
+        else None
+    )
+
+    from gcp_sandboxing.client import ExecutionReceipt  # pylint: disable=g-import-not-at-top
+    mock_receipt = ExecutionReceipt(
+        status="SUCCESS",
+        exit_code=0,
+        command="find-diff",
+        finding_count=0,
+        artifacts={"sarif": f"file://{test_file_path}"},
+    )
+    mock_client.run.return_value = mock_receipt
+
+    launcher = CloudRunLauncher(client=mock_client)
+    result = launcher.run("find-diff")
+
+    self.assertTrue(result.ok)
+    self.assertEqual(result.exit_code, 0)
+    self.assertEqual(result.stdout, sarif_bytes)
+
+  def test_run_bootstrapper_failure_exit_code(self):
+    mock_client = MagicMock()
+    mock_receipt = MagicMock(
+        status="FAILURE",
+        exit_code=2,
+        error="Extraction failed",
+    )
+    mock_client.run.return_value = mock_receipt
+
+    launcher = CloudRunLauncher(client=mock_client)
+    result = launcher.run("find-diff")
+
+    self.assertFalse(result.ok)
+    self.assertEqual(result.exit_code, 2)
+
+  def test_stop_invokes_client_cancel(self):
+    mock_client = MagicMock()
+    launcher = CloudRunLauncher(client=mock_client)
+    launcher.stop()
+    mock_client.cancel.assert_called_once()
 
 
 if __name__ == "__main__":

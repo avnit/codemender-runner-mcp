@@ -1,43 +1,28 @@
 # CodeMender GitHub Action (composite)
 #
-# Used as a single step from a repository's own workflow, after copying this
-# directory into that repository (see README.md → "Using it in a repository"):
+# Used as a single step from a repository's own workflow:
 #
 #   - uses: actions/checkout@v4
 #   - uses: ./.github/actions/codemender
 #
-# M1 (differential PR scan): on a pull request, authenticate to Google Cloud via
-# Workload Identity Federation, run `cm-runner init` + `cm-runner find-diff` in
-# a `docker run` container under gVisor, upload `report.sarif` and `report.md`
-# as workflow artifacts, and post/update the sticky PR summary comment.
+# Executes CodeMender (cm-runner) remotely in Google Cloud Run Jobs:
+# 1. Authenticates to Google Cloud via Workload Identity Federation (WIF).
+# 2. Packages repository snapshot and dispatches to Cloud Run Job.
+# 3. Stages findings report and posts/updates sticky PR summary comment.
+# 4. Uploads report.sarif, report.md, and finding SARIF artifacts.
 #
-# M2 (fixes, on unless `fix: false`): run `cm-runner fix` for every finding at
-# once, one gVisor container each, and post each fix on the PR next to the
-# code it changes: a one-click suggestion when GitHub allows it, otherwise a
-# patch comment. The sticky comment gets a Fix column.
-#
-# Security boundary: GitHub tokens are used only by host steps below (pulling
-# the image and posting PR comments). They are never passed into a cm-runner
-# container (ADR-0003).
-#
-# Container runtime: by default the container runs under gVisor (`runsc`)
-# with `--cap-add SYS_ADMIN`, so cm's own sandbox can start. That capability
-# is granted only by gVisor's user-space kernel, not by the runner VM's
-# kernel. See README.md → "Security model".
+# Security boundary: GitHub tokens are used only by host steps below (posting
+# PR comments). They are never passed into a cm-runner container (ADR-0003).
 
 name: CodeMender
-description: Run CodeMender (cm-runner) on pull requests and report back on the PR.
+description: Run CodeMender (cm-runner) on pull requests via Cloud Run and report back on the PR.
 
 inputs:
-  runner_image:
+  backend:
     description: >-
-      Universal cm-runner container image (pre-baked with Python 3.11, Node 22,
-      Java 17, Go 1.22, C/C++) or a custom Bring-Your-Own-Image (BYOI) built
-      `FROM codemender-runner` with your project's dependencies pre-installed so
-      `cm fix` can build/test offline without opening the sandbox network or
-      pre-installing dependencies on the GHA host. Pin to a commit SHA tag (not
-      :latest).
-    required: true
+      Target execution backend: 'cloudrun' (default).
+    required: false
+    default: 'cloudrun'
   gcp_project_id:
     description: >-
       Google Cloud project ID used by CodeMender (`GOOGLE_CLOUD_PROJECT`).
@@ -51,57 +36,43 @@ inputs:
     description: >-
       Google Cloud service account email for Workload Identity Federation.
     required: true
-  registry_token:
+  gcs_transit_bucket:
     description: >-
-      Optional. Token used only to pull `runner_image` from GHCR. Defaults to
-      the workflow's automatic token. Only needed when the image is in a
-      registry this repository's token cannot read (e.g. another org).
+      GCS bucket used for transit storage and report staging in Cloud Run mode.
+      If not provided, defaults to CODEMENDER_GCS_TRANSIT_BUCKET repo variable
+      or codemender-reports-<project>.
     required: false
     default: ''
+  cloud_run_job_name:
+    description: >-
+      Name of the Cloud Run Job to execute in Cloud Run mode. Defaults to 'codemender-runner'.
+    required: false
+    default: 'codemender-runner'
+  cloud_run_region:
+    description: >-
+      GCP region for Cloud Run Job. Defaults to 'us-central1'.
+    required: false
+    default: 'us-central1'
+  diff_workers:
+    description: >-
+      Number of concurrent workers for `cm-runner find-diff` (1..16).
+    required: false
+    default: '8'
   log_level:
     description: cm-runner log level (debug, info, warning, error). Logs go to the job log.
     required: false
     default: info
-  container_runtime:
-    description: >-
-      Container runtime for cm-runner. `runsc` (default) installs gVisor and
-      runs the container under it, which cm's sandbox needs. `runc` is an
-      explicit opt-out: plain Docker, where cm's sandbox can't start.
-    required: false
-    default: runsc
-  gvisor_release:
-    description: >-
-      gVisor release to install when `container_runtime` is `runsc`, as
-      `yyyymmdd` or a point release `yyyymmdd.N`
-      (https://gvisor.dev/docs/user_guide/install/#versions). Pinned so every
-      run uses the same build.
-    required: false
-    default: '20260921.0'
   fix:
     description: >-
       Whether CodeMender tries a fix for each finding and posts it on the PR.
-      On by default. Set to `false` to only scan, as in M1. Each fix usually
-      takes 10 minutes or more; fixes run in parallel up to `max_parallel_fixes`.
     required: false
     default: 'true'
-  max_parallel_fixes:
-    description: >-
-      Maximum number of `cm-runner fix` containers to run in parallel. Defaults
-      to `4` to bound CPU, memory and disk usage on standard GitHub-hosted
-      runners.
-    required: false
-    default: '4'
   artifact_retention_days:
     description: >-
       Number of days to retain the uploaded workflow artifacts: `report.sarif`,
       `report.md`, one SARIF file per finding and one patch per fix.
     required: false
     default: '3'
-  diff_workers:
-    description: >-
-      Number of concurrent workers for `cm-runner find-diff` (1..16).
-    required: false
-    default: '8'
 
 runs:
   using: composite
@@ -141,91 +112,21 @@ runs:
         service_account: ${{ inputs.gcp_service_account }}
         create_credentials_file: true
 
-    # Download the pinned release, check its sha512, and register `runsc` as
-    # a Docker runtime. Inputs are passed through env and validated, never
-    # interpolated into the script.
-    - name: Install gVisor
-      if: inputs.container_runtime == 'runsc'
-      shell: bash
-      env:
-        GVISOR_RELEASE: ${{ inputs.gvisor_release }}
-      run: |
-        set -euo pipefail
-        START=$SECONDS
-        if [[ ! "$GVISOR_RELEASE" =~ ^[0-9]{8}(\.[0-9]+)?$ ]]; then
-          echo "::error::Invalid 'gvisor_release' (expected yyyymmdd or yyyymmdd.N)."
-          exit 1
-        fi
-        ARCH=$(uname -m)
-        URL="https://storage.googleapis.com/gvisor/releases/release/${GVISOR_RELEASE}/${ARCH}"
-        WORK=$(mktemp -d)
-        cd "$WORK"
-        curl -fsSLO "${URL}/gvisor.tar.zstd"
-        curl -fsSLO "${URL}/gvisor.tar.zstd.sha512"
-        sha512sum -c gvisor.tar.zstd.sha512
-        # runsc, containerd-shim-runsc-v1 and gvisor-bin/ (runsc looks for it
-        # next to its own binary). /usr/local/bin is readable by all users,
-        # which runsc needs to re-exec itself unprivileged.
-        sudo tar --zstd -xf gvisor.tar.zstd -C /usr/local/bin
-        cd /
-        rm -rf "$WORK"
-        sudo /usr/local/bin/runsc install
-        sudo systemctl reload docker
-        /usr/local/bin/runsc --version
-        docker info --format '{{json .Runtimes}}' | grep -q '"runsc"' \
-          || { echo "::error::Docker did not register the runsc runtime."; exit 1; }
-        echo "::notice::gVisor ${GVISOR_RELEASE} (${ARCH}) installed in $((SECONDS - START))s."
-
-    # Pull on the host, then always log out (even if the pull fails) so the
-    # credential isn't left in ~/.docker/config.json. The container never
-    # sees it either way.
-    - name: Pull cm-runner image
-      id: pull-image
-      shell: bash
-      env:
-        IMAGE: ${{ inputs.runner_image }}
-        TOKEN: ${{ inputs.registry_token || github.token }}
-        ACTOR: ${{ github.actor }}
-      run: |
-        # GitHub does not enforce `required: true` for composite action inputs.
-        if [[ -z "$IMAGE" ]]; then
-          echo "::error::The 'runner_image' input is required (a cm-runner image this repository can pull)."
-          exit 1
-        fi
-        if [[ "$IMAGE" == ghcr.io/* ]]; then
-          repo_part="${IMAGE%:*}"
-          tag_part="${IMAGE##*:}"
-          if [[ "${repo_part}" == "${IMAGE}" ]]; then
-            IMAGE="${IMAGE,,}:latest"
-          else
-            IMAGE="${repo_part,,}:${tag_part}"
-          fi
-          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-          echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-        fi
-        docker pull "$IMAGE"
-        echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
-
     - name: Run CodeMender
       shell: bash
       env:
-        CODEMENDER_RUNNER_IMAGE: ${{ steps.pull-image.outputs.image }}
+        CODEMENDER_BACKEND: ${{ inputs.backend || 'cloudrun' }}
         CODEMENDER_LOG_LEVEL: ${{ inputs.log_level }}
-        CODEMENDER_CONTAINER_RUNTIME: ${{ inputs.container_runtime }}
         CODEMENDER_DIFF_WORKERS: ${{ inputs.diff_workers }}
         CODEMENDER_FIX: ${{ inputs.fix }}
-        CODEMENDER_MAX_PARALLEL_FIXES: ${{ inputs.max_parallel_fixes }}
         CODEMENDER_OUT_DIR: ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}
         GOOGLE_CLOUD_PROJECT: ${{ inputs.gcp_project_id }}
         GOOGLE_GHA_CREDS_PATH: ${{ steps.gcp_auth.outputs.credentials_file_path }}
+        GCS_TRANSIT_BUCKET: ${{ inputs.gcs_transit_bucket }}
+        CLOUD_RUN_JOB_NAME: ${{ inputs.cloud_run_job_name }}
+        CLOUD_RUN_REGION: ${{ inputs.cloud_run_region }}
         GITHUB_TOKEN: ${{ github.token }}
-        # When this action is copied into the repository, Python would write
-        # __pycache__ folders into the checkout. `cm-runner fix` refuses to
-        # run on a checkout with untracked files.
         PYTHONDONTWRITEBYTECODE: '1'
-      # `exec` makes Python the step's process, so it receives the signals
-      # GitHub sends when the run is cancelled or times out, and can stop the
-      # fix containers and update the PR comment.
       run: |
         chmod a+r "${GOOGLE_GHA_CREDS_PATH}"
         exec python "${{ github.action_path }}/src/gha_runner.py"

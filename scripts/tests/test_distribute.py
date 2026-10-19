@@ -334,6 +334,7 @@ class TestDistributeScript(unittest.TestCase):
         ".gitignore",
         "README.md",
         ".github/actions/codemender/action.yml",
+        ".github/actions/codemender-local/action.yml",
         ".github/actions/codemender/requirements.txt",
         ".github/actions/codemender/src/gha_runner.py",
         ".github/actions/codemender/tests/test_gha_runner.py",
@@ -425,8 +426,17 @@ class TestDistributeScript(unittest.TestCase):
     )
     self.assertIn("secrets.CODEMENDER_SERVICE_ACCOUNT", merge_scan_wf_content)
 
+    local_action_path = (
+        os.path.join(target, ".github", "actions", "codemender-local", "action.yml")
+        if os.path.exists(
+            os.path.join(
+                target, ".github", "actions", "codemender-local", "action.yml"
+            )
+        )
+        else os.path.join(target, ".github", "actions", "codemender", "action.yml")
+    )
     with open(
-        os.path.join(target, ".github", "actions", "codemender", "action.yml"),
+        local_action_path,
         "r",
         encoding="utf-8",
     ) as f:
