@@ -1,0 +1,28 @@
+# Governing: ADR-0008, SPEC-GHA/REQ-0004
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codemender-launcher"
+version = "0.1.0"
+description = "CodeMender sandbox execution backends and pipeline coordinator"
+requires-python = ">=3.11"
+dependencies = ["codemender"]
+
+[project.optional-dependencies]
+cloudrun = [
+    "google-cloud-storage>=2.14.0",
+    "google-cloud-run>=0.10.0",
+]
+
+[tool.uv.sources]
+codemender = { workspace = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["launcher*"]
+exclude = ["test_*", "*_test", "testdata*", "*test_*", "*testdata*"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["**/test_*.py", "**/*_test.py", "**/testdata/**", "test_*.py", "*_test.py", "testdata/**"]

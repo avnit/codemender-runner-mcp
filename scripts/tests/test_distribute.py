@@ -376,6 +376,13 @@ class TestDistributeScript(unittest.TestCase):
         ".github/codemender-runner/packages/codemender/src/codemender/runner/commands/find_diff.py",
         ".github/codemender-runner/packages/codemender/src/codemender/runner/commands/fix.py",
         ".github/codemender-runner/packages/codemender/src/codemender/runner/commands/verify.py",
+        ".github/codemender-runner/packages/launcher/pyproject.toml",
+        ".github/codemender-runner/packages/launcher/src/launcher/__init__.py",
+        ".github/codemender-runner/packages/launcher/src/launcher/base.py",
+        ".github/codemender-runner/packages/launcher/src/launcher/local/__init__.py",
+        ".github/codemender-runner/packages/launcher/src/launcher/local/local_docker.py",
+        ".github/codemender-runner/packages/launcher/src/launcher/cloudrun/__init__.py",
+        ".github/codemender-runner/packages/launcher/src/launcher/cloudrun/cloud_run.py",
     ]
     for rel_path in required_paths:
       with self.subTest(required_path=rel_path):
@@ -481,6 +488,8 @@ class TestDistributeScript(unittest.TestCase):
         ".github/codemender-runner/codemender/db.py",
         ".github/codemender-runner/vcs/github.py",
         ".github/codemender-runner/README.md",
+        ".github/actions/codemender/src/launcher",
+        ".github/actions/codemender/tests/test_launcher.py",
         ".github/codemender-runner/packages/codemender/src/codemender/test_cm.py",
         ".github/codemender-runner/packages/codemender/src/codemender/runner/test_cli.py",
         ".github/codemender-runner/packages/codemender/src/codemender/runner/test_config.py",
@@ -491,6 +500,7 @@ class TestDistributeScript(unittest.TestCase):
         ".github/codemender-runner/packages/codemender/src/codemender/runner/commands/testdata",
         ".github/codemender-runner/packages/codemender/src/codemender/sarif/test_sarif.py",
         ".github/codemender-runner/packages/codemender/src/codemender/vcs/test_git.py",
+        ".github/codemender-runner/packages/launcher/src/launcher/local/test_launcher.py",
         "workflows/gcp_parallel_workflow.yaml",
         "cloudbuild.yaml",
         ".github/workflows/codemender_parallel.yml",

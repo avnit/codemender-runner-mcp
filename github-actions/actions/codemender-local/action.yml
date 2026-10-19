@@ -101,14 +101,31 @@ runs:
       with:
         python-version: '3.11'
 
+    # Governing: ADR-0008, SPEC-GHA/REQ-0004
     - name: Install action dependencies
       shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        REQ_PATH="${{ github.action_path }}/requirements.txt"
+        set -euo pipefail
+        REQ_PATH="${ACTION_PATH}/requirements.txt"
         if [[ ! -f "$REQ_PATH" ]]; then
-          REQ_PATH="${{ github.action_path }}/../codemender/requirements.txt"
+          REQ_PATH="${ACTION_PATH}/../codemender/requirements.txt"
         fi
-        python -m pip install --quiet -r "$REQ_PATH"
+        PKG_DIR="${ACTION_PATH}/../../../packages"
+        if [[ ! -d "${PKG_DIR}/launcher" ]]; then
+          PKG_DIR="${ACTION_PATH}/../../codemender-runner/packages"
+        fi
+        if [[ ! -d "${PKG_DIR}/launcher" ]]; then
+          PKG_DIR="${ACTION_PATH}/packages"
+        fi
+        if [[ ! -d "${PKG_DIR}/launcher" ]]; then
+          PKG_DIR="${ACTION_PATH}/../codemender/packages"
+        fi
+        python -m pip install --quiet \
+          -r "$REQ_PATH" \
+          "${PKG_DIR}/codemender" \
+          "${PKG_DIR}/launcher"
 
     - name: Verify PR base commit is present
       shell: bash

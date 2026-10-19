@@ -12,29 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Governing: ADR-0008, SPEC-GHA/REQ-0006
 """Unit tests for launcher interface, LocalDockerLauncher, and CloudRunLauncher."""
 
-import json
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(
-    0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
-)
-
-from launcher.base import LauncherError, ParallelTask, RunResult  # pylint: disable=g-import-not-at-top
-from launcher.cloud_run import (  # pylint: disable=g-import-not-at-top
+from launcher.base import LauncherError, ParallelTask, RunResult
+from launcher.cloudrun.cloud_run import (
     CloudRunError,
     CloudRunLauncher,
     CloudRunTimeoutError,
 )
-from launcher.local_docker import LocalDockerLauncher  # pylint: disable=g-import-not-at-top
+from launcher.local.local_docker import LocalDockerLauncher
 
 _WAIT_SECONDS = 5
 
@@ -136,7 +131,7 @@ class TestLocalDockerLauncher(unittest.TestCase):
     self.assertIn("/tmp/creds/adc.json:/creds/adc.json:ro", argv)
     self.assert_no_host_env_or_escalation(argv)
 
-  @patch("launcher.local_docker.subprocess.run")
+  @patch("launcher.local.local_docker.subprocess.run")
   def test_run_returns_raw_stdout_bytes_without_parsing(self, mock_run):
     diff = (
         b"diff --git a/app.py b/app.py\r\n"
@@ -154,7 +149,7 @@ class TestLocalDockerLauncher(unittest.TestCase):
     for text_mode in ("text", "universal_newlines", "encoding", "errors"):
       self.assertNotIn(text_mode, kwargs)
 
-  @patch("launcher.local_docker.subprocess.run")
+  @patch("launcher.local.local_docker.subprocess.run")
   def test_log_path_receives_stderr_and_unopenable_raises(self, mock_run):
     def _fake_run(argv, **kwargs):
       del argv
@@ -172,7 +167,7 @@ class TestLocalDockerLauncher(unittest.TestCase):
       with self.assertRaisesRegex(LauncherError, "log file"):
         LocalDockerLauncher(image="img:sha").run("fix", log_path=bad_log)
 
-  @patch("launcher.local_docker.subprocess.run")
+  @patch("launcher.local.local_docker.subprocess.run")
   def test_timeout_kills_the_container(self, mock_run):
     mock_run.side_effect = [
         subprocess.TimeoutExpired(cmd="docker", timeout=1),
@@ -186,7 +181,7 @@ class TestLocalDockerLauncher(unittest.TestCase):
         kill_call.args[0], ["docker", "kill", _name_flag(run_call.args[0])]
     )
 
-  @patch("launcher.local_docker.subprocess.run")
+  @patch("launcher.local.local_docker.subprocess.run")
   def test_stop_kills_running_containers_including_with_dirs_children(
       self, mock_run
   ):
@@ -228,7 +223,7 @@ class TestLocalDockerLauncher(unittest.TestCase):
         [["docker", "kill", *run_names]],
     )
 
-  @patch("launcher.local_docker.subprocess.run")
+  @patch("launcher.local.local_docker.subprocess.run")
   def test_run_parallel_stages_isolated_folders_and_runs_tasks(self, mock_run):
     staged_workspaces = []
 
@@ -345,22 +340,13 @@ class TestCloudRunLauncher(unittest.TestCase):
   def test_run_success_with_bootstrapper_receipt(self):
     mock_client = MagicMock()
     sarif_bytes = b'{"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "CodeMender"}}, "results": []}]}'
-    test_file_path = "/tmp/test_report.sarif"
-    with open(test_file_path, "wb") as f:
-      f.write(sarif_bytes)
-    self.addCleanup(
-        lambda: os.remove(test_file_path)
-        if os.path.exists(test_file_path)
-        else None
-    )
-
-    from gcp_sandboxing.client import ExecutionReceipt  # pylint: disable=g-import-not-at-top
-    mock_receipt = ExecutionReceipt(
+    mock_receipt = MagicMock(
         status="SUCCESS",
         exit_code=0,
         command="find-diff",
         finding_count=0,
-        artifacts={"sarif": f"file://{test_file_path}"},
+        stdout=sarif_bytes,
+        events=[],
     )
     mock_client.run.return_value = mock_receipt
 

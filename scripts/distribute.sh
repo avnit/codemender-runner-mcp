@@ -388,17 +388,20 @@ stage_distribution_tree() {
       chmod +x "$runner_out/bin/cm-runner"
     fi
 
-    if [[ -d "$src_dir/packages/codemender" ]]; then
-      mkdir -p "$runner_out/packages/codemender"
-      cp -R "$src_dir/packages/codemender/." "$runner_out/packages/codemender/"
-    elif [[ -n "$runner_src" && -d "$runner_src/packages/codemender" ]]; then
-      mkdir -p "$runner_out/packages/codemender"
-      cp -R "$runner_src/packages/codemender/." "$runner_out/packages/codemender/"
-    fi
-    if [[ -d "$runner_out/packages/codemender" ]]; then
-      find "$runner_out/packages/codemender" \( -name 'test_*.py' -o -name '*_test.py' \) -type f -delete
-      find "$runner_out/packages/codemender" \( -name 'testdata' -o -name '__pycache__' \) -type d -prune -exec rm -rf {} +
-    fi
+    # Governing: ADR-0008, SPEC-DIST/REQ-0003
+    for pkg in codemender launcher; do
+      if [[ -d "$src_dir/packages/$pkg" ]]; then
+        mkdir -p "$runner_out/packages/$pkg"
+        cp -R "$src_dir/packages/$pkg/." "$runner_out/packages/$pkg/"
+      elif [[ -n "$runner_src" && -d "$runner_src/packages/$pkg" ]]; then
+        mkdir -p "$runner_out/packages/$pkg"
+        cp -R "$runner_src/packages/$pkg/." "$runner_out/packages/$pkg/"
+      fi
+      if [[ -d "$runner_out/packages/$pkg" ]]; then
+        find "$runner_out/packages/$pkg" \( -name 'test_*.py' -o -name '*_test.py' \) -type f -delete
+        find "$runner_out/packages/$pkg" \( -name 'testdata' -o -name '__pycache__' \) -type d -prune -exec rm -rf {} +
+      fi
+    done
   fi
 
   # 4. GCP Workload Identity Federation Terraform Configuration (.github/terraform/ & .github/terraform/modules/wif/)

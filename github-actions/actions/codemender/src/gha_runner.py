@@ -86,6 +86,7 @@ from codemender.sarif import SarifDocument
 from codemender.cm import Finding
 import fix_comments
 from fix_comments import FixCell
+# Governing: ADR-0008, SPEC-GHA/REQ-0004
 from launcher.base import (
     DEFAULT_MAX_PARALLEL,
     Launcher,
@@ -94,8 +95,8 @@ from launcher.base import (
     ParallelTask,
     RunResult,
 )
-from launcher.cloud_run import CloudRunLauncher
-from launcher.local_docker import (
+from launcher.cloudrun import CloudRunLauncher
+from launcher.local import (
     CONTAINER_OUT_DIR,
     CONTAINER_WORKSPACE_DIR,
     RUNTIME_GVISOR,

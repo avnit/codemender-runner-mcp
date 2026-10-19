@@ -4,12 +4,18 @@ RUNNER_IMAGE ?= codemender-runner:local
 CLOUDRUN_IMAGE ?= codemender-cloudrun:local
 GITLAB_IMAGE ?= codemender-gitlab:local
 
-test:
-	GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 PYTHONPATH=packages/codemender/src pytest
+empty :=
+space := $(empty) $(empty)
+# Governing: ADR-0008, SPEC-GHA/REQ-0004
+PACKAGE_SRCS := $(subst $(space),:,$(wildcard packages/*/src))
+COV_FLAGS := $(foreach pkg,$(notdir $(patsubst %/__init__.py,%,$(wildcard packages/*/src/*/__init__.py))),--cov=$(pkg))
 
-# Requires: pip install -e "./packages/codemender[dev]"
+test:
+	GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 PYTHONPATH="$(PACKAGE_SRCS)" pytest
+
+# Requires: pip install ./packages/* pytest pytest-cov
 test-cov:
-	GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 PYTHONPATH=packages/codemender/src pytest --cov=codemender --cov-report=term-missing
+	GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 PYTHONPATH="$(PACKAGE_SRCS)" pytest $(COV_FLAGS) --cov-report=term-missing
 
 build-runner:
 	docker build -f docker/runner.Dockerfile -t $(RUNNER_IMAGE) .

@@ -29,8 +29,8 @@ sys.path.insert(
 
 import gha_runner  # pylint: disable=g-import-not-at-top
 from launcher.base import LauncherError, ParallelResult, RunResult  # pylint: disable=g-import-not-at-top
-from launcher.cloud_run import CloudRunLauncher  # pylint: disable=g-import-not-at-top
-from launcher.local_docker import LocalDockerLauncher  # pylint: disable=g-import-not-at-top
+from launcher.cloudrun import CloudRunLauncher  # pylint: disable=g-import-not-at-top
+from launcher.local import LocalDockerLauncher  # pylint: disable=g-import-not-at-top
 
 _VERSION_EVENT = {
     "event": "version",

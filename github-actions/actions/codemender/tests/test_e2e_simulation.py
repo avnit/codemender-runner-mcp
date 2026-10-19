@@ -29,7 +29,7 @@ sys.path.insert(
 )
 
 import gha_runner  # pylint: disable=g-import-not-at-top
-from launcher.cloud_run import (  # pylint: disable=g-import-not-at-top
+from launcher.cloudrun import (  # pylint: disable=g-import-not-at-top
     CloudRunError,
     CloudRunLauncher,
     CloudRunTimeoutError,
