@@ -64,28 +64,8 @@ import threading
 from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, TextIO, Tuple
 from urllib.parse import quote
 
-# Configure sys.path so 'codemender' and local action subpackages are importable
-# in both the monorepo source layout and customer standalone .github/actions/codemender/ layout.
-_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-_ACTIONS_DIR = os.path.dirname(_CURRENT_DIR) if os.path.basename(_CURRENT_DIR) in ("src", "vcs") else _CURRENT_DIR
-
-for _candidate in (
-    _CURRENT_DIR,
-    os.path.join(_ACTIONS_DIR, "src"),
-    os.path.join(_ACTIONS_DIR, "packages", "codemender", "src"),
-    os.path.normpath(os.path.join(_ACTIONS_DIR, "../codemender-runner/packages/codemender/src")),
-    os.path.normpath(os.path.join(_ACTIONS_DIR, "../../packages/codemender/src")),
-    os.path.normpath(os.path.join(_ACTIONS_DIR, "../../../packages/codemender/src")),
-    os.path.normpath(os.path.join(_ACTIONS_DIR, "../../../../packages/codemender/src")),
-):
-  if os.path.isdir(_candidate) and _candidate not in sys.path:
-    sys.path.insert(0, _candidate)
-
-from vcs.github import list_finding_comments, post_or_update_sticky_comment
-from codemender.sarif import SarifDocument
 from codemender.cm import Finding
-import fix_comments
-from fix_comments import FixCell
+from codemender.sarif import SarifDocument
 # Governing: ADR-0008, SPEC-GHA/REQ-0004
 from launcher.base import (
     DEFAULT_MAX_PARALLEL,
@@ -103,6 +83,13 @@ from launcher.local import (
     LocalDockerLauncher,
     make_world_writable,
 )
+# Governing: ADR-0008, SPEC-GHA, SPEC-GHA-FIX
+from repohost.github import (
+    fix_comments,
+    list_finding_comments,
+    post_or_update_sticky_comment,
+)
+from repohost.github.fix_comments import FixCell
 
 logger = logging.getLogger("codemender-github-actions")
 

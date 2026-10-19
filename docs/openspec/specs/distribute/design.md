@@ -180,7 +180,9 @@ Governed by [SPEC-DIST](spec.md), [SPEC-WIF](../wif/spec.md),
 
 - **Choice:** Stage `docker/runner.Dockerfile` as
   `.github/codemender-runner/Dockerfile`, copy `packages/codemender/` into
-  `.github/codemender-runner/packages/codemender/` (stripping `test_*.py`,
+  `.github/codemender-runner/packages/codemender/`, `packages/launcher/` into
+  `.github/codemender-runner/packages/launcher/`, and `packages/repohost/` into
+  `.github/codemender-runner/packages/repohost/` (stripping `test_*.py`,
   `*_test.py`, `testdata/`, and `__pycache__/`), copy
   `codemender-runner/__main__.py` (rewritten to dispatch directly to
   `codemender.runner.__main__`) and `codemender-runner/bin/cm-runner`, and
@@ -194,11 +196,16 @@ Governed by [SPEC-DIST](spec.md), [SPEC-WIF](../wif/spec.md),
   `.github/codemender-runner/packages/codemender/` makes
   `.github/codemender-runner` a self-contained Docker build context in the
   distributed repository (`docker build .github/codemender-runner`). In
-  addition, extending `sys.path` and `vcs.__path__` in
-  `github-actions/actions/codemender/src/vcs/__init__.py` allows the GitHub
-  Action's unit tests to resolve `codemender.*` and `vcs.*` in both the source
-  repository (`packages/codemender/src`) and the distributed repository
-  (`.github/codemender-runner/packages/codemender/src`) per
+  addition, staging `packages/launcher/` and `packages/repohost/` at
+  `.github/codemender-runner/packages/{launcher,repohost}/` allows
+  `.github/actions/codemender/action.yml` and
+  `.github/actions/codemender-local/action.yml` to `pip install` those packages
+  at runtime in the distributed repository
+  (`.github/codemender-runner/packages/{codemender,launcher,repohost}`) and
+  allows `.github/actions/codemender/tests` to resolve `codemender.*`,
+  `launcher.*`, and `repohost.github.*` in both the source repository
+  (`packages/{codemender,launcher,repohost}/src`) and the distributed repository
+  (`.github/codemender-runner/packages/{codemender,launcher,repohost}/src`) per
   [ADR-0008](../../adr/ADR-0008-repository-layout-and-package-structure.md).
 
 ### Decision 5: No Profiles — Evolving the Distribution Set Over Time {#decision-5}
@@ -216,7 +223,8 @@ Governed by [SPEC-DIST](spec.md), [SPEC-WIF](../wif/spec.md),
 - **Rationale:**
   - For the initial sync, `scripts/distribute.sh` includes the GitHub Actions
     layout, stripped `.github/codemender-runner/` self-contained build context
-    (`Dockerfile` from `docker/runner.Dockerfile` and `packages/codemender/`),
+    (`Dockerfile` from `docker/runner.Dockerfile`, `packages/codemender/`,
+    `packages/launcher/`, and `packages/repohost/`),
     the root `terraform/` files (`main.tf`, `variables.tf`, `outputs.tf`,
     `provider.tf`, `terraform.tfvars.example`, `.terraform.lock.hcl`,
     `tests/root_test.tftest.hcl`) plus `terraform/modules/wif/` mapped to
@@ -256,7 +264,7 @@ Find latest 'Codemender-Source-Commit: <prev_sha>'"]
 -> git write-tree -> $base_tree"]
     stageNew["git archive <source_ref> -> filter (REQ-0002, REQ-0003, REQ-0005)
 - github-actions/ -> .github/
-- docker/runner.Dockerfile + packages/codemender/ -> .github/codemender-runner/
+- docker/runner.Dockerfile + packages/{codemender,launcher,repohost}/ -> .github/codemender-runner/
 - terraform/ + terraform/modules/wif/ -> .github/terraform/ (modules/gcp/, gcp.tf, gcp_override.tf & root_gcp_test stripped)
 - LICENSE, .gitignore, dist/README.md -> root (ONLY if --include-top-level)
 -> git write-tree -> $new_tree"]
@@ -288,7 +296,7 @@ flowchart LR
         s_gha["github-actions/actions/codemender/"]
         s_wf["github-actions/workflows/*.yml"]
         s_build[".github/workflows/build_runner_image.yml"]
-        s_cmr["docker/runner.Dockerfile + packages/codemender/\n+ codemender-runner/{__main__.py,bin/cm-runner}"]
+        s_cmr["docker/runner.Dockerfile + packages/{codemender,launcher,repohost}/\n+ codemender-runner/{__main__.py,bin/cm-runner}"]
         s_wif["terraform/ + terraform/modules/wif/\n(modules/gcp/, gcp.tf, gcp_override.tf & root_gcp_test stripped)"]
         s_top["LICENSE, .gitignore, dist/README.md"]
     end
@@ -297,7 +305,7 @@ flowchart LR
         t_gha[".github/actions/codemender/"]
         t_wf[".github/workflows/*.yml"]
         t_build[".github/workflows/build_runner_image.yml"]
-        t_cmr[".github/codemender-runner/\n(Dockerfile + packages/codemender/, legacy stripped)"]
+        t_cmr[".github/codemender-runner/\n(Dockerfile + packages/{codemender,launcher,repohost}/, legacy stripped)"]
         t_wif[".github/terraform/ + .github/terraform/modules/wif/"]
         t_top["LICENSE, .gitignore, README.md"]
     end
@@ -319,7 +327,7 @@ flowchart LR
 | `github-actions/actions/codemender/`                                                                                                             | `.github/actions/codemender/`                                             | Composite GitHub Action (normalizing `ghcr.io/` references to lowercase across pull and execution) and unit tests.                                                                                                   |
 | `github-actions/workflows/*.yml`                                                                                                                 | `.github/workflows/*.yml`                                                 | GitHub Actions workflow templates (e.g. `cm-merge-scan.yml`, defaulting `runner_image` to `${{ vars.CODEMENDER_RUNNER_IMAGE || format('ghcr.io/{0}/codemender-runner:latest', github.repository_owner) }}`).          |
 | `.github/workflows/build_runner_image.yml`                                                                                                       | `.github/workflows/build_runner_image.yml`                                | Builds `.github/codemender-runner/Dockerfile` and publishes the image to GHCR (`ghcr.io/${OWNER,,}/codemender-runner:latest`, `:${SHA}`, and any `ghcr.io/*` `vars.CODEMENDER_RUNNER_IMAGE` override).                |
-| `docker/runner.Dockerfile`, `packages/codemender/`, `codemender-runner/{.dockerignore,requirements.txt,__main__.py,bin/cm-runner}`               | `.github/codemender-runner/...`                                           | Self-contained Docker build context with `Dockerfile` and `packages/codemender` (`codemender.runner` CLI including `version`, `init`, `find-diff`, `verify`, and `fix`).                                            |
+| `docker/runner.Dockerfile`, `packages/{codemender,launcher,repohost}/`, `codemender-runner/{.dockerignore,requirements.txt,__main__.py,bin/cm-runner}`    | `.github/codemender-runner/...`                                           | Self-contained Docker build context with `Dockerfile`, `packages/codemender` (`codemender.runner` CLI including `version`, `init`, `find-diff`, `verify`, and `fix`), `packages/launcher`, and `packages/repohost` (`repohost.github`).  |
 | `terraform/{main.tf,variables.tf,outputs.tf,provider.tf,terraform.tfvars.example,.terraform.lock.hcl,tests/root_test.tftest.hcl,modules/wif/}`   | `.github/terraform/...`                                                   | Root Terraform configuration and `.github/terraform/modules/wif/` child module for GCP Workload Identity Federation (with `terraform/modules/gcp/`, `gcp.tf`, `gcp_override.tf`, and `root_gcp_test` stripped).     |
 
 ## Risks / Trade-offs

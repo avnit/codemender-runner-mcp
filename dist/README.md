@@ -15,11 +15,11 @@ this repository or set it up in additional repositories.
 ├── README.md
 └── .github/
     ├── actions/
-    │   └── codemender/                         # Composite GitHub Action
+    │   └── codemender/                         # Composite GitHub Action (bundles packages/codemender, packages/launcher, packages/repohost)
     ├── workflows/
     │   ├── build_runner_image.yml              # Builds & pushes cm-runner image
     │   └── cm-merge-scan.yml                   # Runs CodeMender on Pull Requests
-    ├── codemender-runner/                      # Self-contained cm-runner build context (Dockerfile + packages/codemender)
+    ├── codemender-runner/                      # Self-contained cm-runner build context (Dockerfile + packages/{codemender,launcher,repohost})
     └── terraform/                              # Root Terraform configuration
 ```
 

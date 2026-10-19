@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Governing: ADR-0008, SPEC-GHA-FIX REQ-0006, REQ-0007, REQ-0008, REQ-0009, REQ-0010
+
 """Plans and posts Pull Request fix comments (SPEC-GHA-FIX REQ-0006 to REQ-0010).
 
 Public entry points:
@@ -28,9 +30,9 @@ import re
 import subprocess
 from typing import Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
-from vcs import github
-from codemender.vcs.git import SuggestionHunk, normalize_repo_relative_path, parse_patch_to_suggestions
 from codemender.cm import Finding
+from codemender.vcs.git import SuggestionHunk, normalize_repo_relative_path, parse_patch_to_suggestions
+from repohost.github import client as github
 
 logger = logging.getLogger("codemender-github-actions")
 

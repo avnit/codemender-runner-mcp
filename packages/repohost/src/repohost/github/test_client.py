@@ -12,28 +12,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for github-actions vcs.github."""
+# Governing: ADR-0008, SPEC-GHA, SPEC-GHA-FIX
 
-import os
-import sys
+"""Unit tests for repohost.github.client."""
+
 import unittest
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(
-    0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
-)
-
-from vcs import github  # pylint: disable=g-import-not-at-top
-from codemender.vcs.git import SuggestionHunk  # pylint: disable=g-import-not-at-top
-from vcs.github import (  # pylint: disable=g-import-not-at-top
+from codemender.vcs.git import SuggestionHunk
+import repohost.github as github_pkg
+from repohost.github import client as github
+from repohost.github.client import (
+    FINDING_TAG_RE,
+    FindingComment,
+    GITHUB_API_URL,
     MAX_COMMENT_BODY_CHARS,
+    ReviewResult,
     STICKY_SUMMARY_MARKER,
+    code_fence,
     create_review_with_suggestions,
+    finding_tag,
     format_patch_comment,
     get_pr_diff_line_ranges,
     list_finding_comments,
     post_or_update_sticky_comment,
     post_patch_comment,
+    reply_to_comment,
+    retry_on_exception,
     truncate_comment_body,
 )
 
@@ -45,6 +50,33 @@ def _response(json_body, status_code=200, links=None):
   resp.links = links or {}
   resp.raise_for_status.return_value = None
   return resp
+
+
+class TestReExports(unittest.TestCase):
+
+  def test_github_package_reexports_client_symbols(self):
+    expected_symbols = {
+        "FINDING_TAG_RE": FINDING_TAG_RE,
+        "FindingComment": FindingComment,
+        "GITHUB_API_URL": GITHUB_API_URL,
+        "MAX_COMMENT_BODY_CHARS": MAX_COMMENT_BODY_CHARS,
+        "ReviewResult": ReviewResult,
+        "STICKY_SUMMARY_MARKER": STICKY_SUMMARY_MARKER,
+        "code_fence": code_fence,
+        "create_review_with_suggestions": create_review_with_suggestions,
+        "finding_tag": finding_tag,
+        "format_patch_comment": format_patch_comment,
+        "get_pr_diff_line_ranges": get_pr_diff_line_ranges,
+        "list_finding_comments": list_finding_comments,
+        "post_or_update_sticky_comment": post_or_update_sticky_comment,
+        "post_patch_comment": post_patch_comment,
+        "reply_to_comment": reply_to_comment,
+        "retry_on_exception": retry_on_exception,
+        "truncate_comment_body": truncate_comment_body,
+    }
+    for name, obj in expected_symbols.items():
+      self.assertIs(getattr(github_pkg, name), obj)
+      self.assertIn(name, github_pkg.__all__)
 
 
 class TestTruncateAndFormatting(unittest.TestCase):

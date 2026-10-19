@@ -317,7 +317,7 @@ stage_distribution_tree() {
       [[ -f "$wf" ]] || continue
       local wf_name
       wf_name="$(basename "$wf")"
-      if [[ "$wf_name" != "build_runner_image.yml" ]]; then
+      if [[ "$wf_name" != "build_runner_image.yml" && "$wf_name" != "ci.yml" ]]; then
         cp "$wf" "$out_dir/.github/workflows/$wf_name"
       fi
     done
@@ -328,10 +328,11 @@ stage_distribution_tree() {
         -e "s|'docker/runner.Dockerfile'|'.github/codemender-runner/Dockerfile'|g" \
         -e "s|'\.dockerignore'|'.github/codemender-runner/.dockerignore'|g" \
         -e "s|'codemender-runner/\*\*'|'.github/codemender-runner/**'|g" \
+        -e "s|'codemender-runner/Dockerfile'|'.github/codemender-runner/Dockerfile'|g" \
         -e 's|context: \.|context: .github/codemender-runner|g' \
         -e 's|file: docker/runner\.Dockerfile|file: .github/codemender-runner/Dockerfile|g' \
         -e 's|context: codemender-runner|context: .github/codemender-runner|g' \
-        -e 's|codemender-runner/Dockerfile|.github/codemender-runner/Dockerfile|g' \
+        -e 's|file: codemender-runner/Dockerfile|file: .github/codemender-runner/Dockerfile|g' \
         -e 's/\["legacy"\]/["version"]/g' \
       "$src_dir/.github/workflows/build_runner_image.yml" \
       >"$out_dir/.github/workflows/build_runner_image.yml"
@@ -377,7 +378,7 @@ stage_distribution_tree() {
     fi
 
     # Governing: ADR-0008, SPEC-DIST/REQ-0003
-    for pkg in codemender launcher; do
+    for pkg in codemender launcher repohost; do
       if [[ -d "$src_dir/packages/$pkg" ]]; then
         mkdir -p "$runner_out/packages/$pkg"
         cp -R "$src_dir/packages/$pkg/." "$runner_out/packages/$pkg/"

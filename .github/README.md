@@ -21,7 +21,7 @@ flowchart LR
     action --> runner["src/gha_runner.py"]
     runner -->|"launcher: docker run under gVisor (init + find-diff), no GitHub token"| cm["cm-runner container"]
     cm -->|"SARIF JSON on stdout + /out/report.{sarif,md}"| runner
-    runner -->|"vcs/github.py"| pr["PR comment"]
+    runner -->|"packages/repohost (repohost.github)"| pr["PR comment"]
 ```
 
 - **cm-runner** (`packages/codemender/`) is environment-agnostic. It runs
@@ -29,15 +29,19 @@ flowchart LR
 - **launcher** (`packages/launcher/`) owns the outer container/sandbox boundary
   (`launcher.local`, `launcher.cloudrun`) and never passes the GitHub token into
   `cm-runner`.
+- **repohost** (`packages/repohost/`) owns repository host API integrations
+  (`repohost.github`), including sticky comments, inline review suggestions,
+  and fix comment planning.
 - **This action** orchestrates the PR scan and fixes via `packages/launcher/`,
-  and it's the only part that holds the GitHub token and posts to the PR.
+  and it's the only part that holds the GitHub token and posts to the PR via
+  `packages/repohost/` (`repohost.github`).
 
 ## Directory structure
 
 Follows the `.github/` convention: workflows in `workflows/`, actions in
 `actions/<name>/` (GitHub requires the file to be named `action.yml`). The
 action's source lives with the action, while shared workspace packages live
-under `packages/{codemender,launcher}/` (ADR-0008).
+under `packages/{codemender,launcher,repohost}/` (ADR-0008).
 
 ```text
 .github/
@@ -46,10 +50,7 @@ under `packages/{codemender,launcher}/` (ADR-0008).
 │       ├── action.yml             # Composite action: installs gVisor, pulls the image, runs src/gha_runner.py
 │       ├── requirements.txt       # Dependencies of this action (not of cm-runner)
 │       ├── src/
-│       │   ├── gha_runner.py      # Entry point: reads the GitHub event, runs cm-runner scan + parallel fixes, posts results
-│       │   ├── fix_comments.py    # Deduplicates findings and routes patches to PR suggestions or fallback patch comments
-│       │   └── vcs/
-│       │       └── github.py      # GitHub REST API: sticky comment, PR reviews, inline/file patch comments
+│       │   └── gha_runner.py      # Entry point: reads the GitHub event, runs cm-runner scan + parallel fixes, posts results
 │       └── tests/                 # Unit tests (no network, no Docker needed)
 └── workflows/
     └── cm-merge-scan.yml          # Workflow template to copy into a repo's .github/workflows/
@@ -68,7 +69,8 @@ A published, versioned action may follow later (see [Roadmap](#roadmap)).
 ## Packaging for a customer (maintainers)
 
 Build the package from a committed ref so only tracked files and the shared
-`packages/codemender` and `packages/launcher` libraries are included:
+`packages/codemender`, `packages/launcher`, and `packages/repohost` libraries
+are included:
 
 ```bash
 # From the root of codemender-runner
@@ -84,18 +86,22 @@ cp packages/launcher/pyproject.toml "$STAGE/actions/codemender/packages/launcher
 cp packages/launcher/src/launcher/{__init__.py,base.py} "$STAGE/actions/codemender/packages/launcher/src/launcher/"
 cp packages/launcher/src/launcher/local/{__init__.py,local_docker.py} "$STAGE/actions/codemender/packages/launcher/src/launcher/local/"
 cp packages/launcher/src/launcher/cloudrun/{__init__.py,cloud_run.py} "$STAGE/actions/codemender/packages/launcher/src/launcher/cloudrun/"
+mkdir -p "$STAGE/actions/codemender/packages/repohost/src/repohost/github"
+cp packages/repohost/pyproject.toml "$STAGE/actions/codemender/packages/repohost/"
+cp packages/repohost/src/repohost/__init__.py "$STAGE/actions/codemender/packages/repohost/src/repohost/"
+cp packages/repohost/src/repohost/github/{__init__.py,client.py,fix_comments.py,branches.py} "$STAGE/actions/codemender/packages/repohost/src/repohost/github/"
 tar -czf codemender-action.tar.gz -C "$STAGE" --transform='s,^\.,codemender-action,' .
 rm -rf "$STAGE"
 ```
 
 The package mirrors a repository's `.github/` directory:
 
-| Path                                                                                                           | Copy to                               | Needed at runtime?                      |
-| :------------------------------------------------------------------------------------------------------------- | :------------------------------------ | :-------------------------------------- |
-| `actions/codemender/` (`action.yml`, `requirements.txt`, `src/`, `packages/codemender/`, `packages/launcher/`) | `.github/actions/codemender/`         | Yes: this is the action                 |
-| `actions/codemender/tests/`                                                                                    | —                                     | No: included for transparency           |
-| `workflows/cm-merge-scan.yml`                                                                                  | `.github/workflows/cm-merge-scan.yml` | Yes: the workflow that calls the action |
-| `README.md`                                                                                                    | —                                     | Setup only: these instructions          |
+| Path                                                                                                                               | Copy to                               | Needed at runtime?                      |
+| :--------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------ | :-------------------------------------- |
+| `actions/codemender/` (`action.yml`, `requirements.txt`, `src/`, `packages/codemender/`, `packages/launcher/`, `packages/repohost/`) | `.github/actions/codemender/`         | Yes: this is the action                 |
+| `actions/codemender/tests/`                                                                                                        | —                                     | No: included for transparency           |
+| `workflows/cm-merge-scan.yml`                                                                                                      | `.github/workflows/cm-merge-scan.yml` | Yes: the workflow that calls the action |
+| `README.md`                                                                                                                        | —                                     | Setup only: these instructions          |
 
 The customer also needs a **cm-runner image they can pull** (see step 3 below).
 The image is not part of the tarball.
@@ -126,21 +132,24 @@ Result:
 │   │   ├── cm.py
 │   │   ├── sarif/__init__.py
 │   │   └── vcs/git.py
-│   └── launcher/src/launcher/
+│   ├── launcher/src/launcher/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── cloudrun/
+│   │   │   ├── __init__.py
+│   │   │   └── cloud_run.py
+│   │   └── local/
+│   │       ├── __init__.py
+│   │       └── local_docker.py
+│   └── repohost/src/repohost/
 │       ├── __init__.py
-│       ├── base.py
-│       ├── cloudrun/
-│       │   ├── __init__.py
-│       │   └── cloud_run.py
-│       └── local/
+│       └── github/
 │           ├── __init__.py
-│           └── local_docker.py
+│           ├── branches.py
+│           ├── client.py
+│           └── fix_comments.py
 └── src/
-    ├── gha_runner.py
-    ├── fix_comments.py
-    └── vcs/
-        ├── __init__.py
-        └── github.py
+    └── gha_runner.py
 ```
 
 To upgrade, extract the new package, re-run the same command, and commit.

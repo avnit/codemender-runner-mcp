@@ -384,7 +384,7 @@ To ensure seamless interchangeability between local and remote execution, intera
 ## Security Model
 
 1. **Host-Only GitHub Token Boundary**:
-   - `GITHUB_TOKEN` is used strictly on the host runner by `vcs/github.py` to create/update PR comments.
+   - `GITHUB_TOKEN` is used strictly on the host runner by `packages/repohost` (`repohost/github/client.py`) to create/update PR comments.
    - Per ADR-0003, no denylist environment scrubbing is performed by `cm-runner` or launchers.
 2. **Client-Managed Authentication & Cloud Config**:
    - The Cloud Run client manages all GCP authentication (ambient ADC/WIF) and cloud resource resolution internally without exposing cloud parameters to the action interface.

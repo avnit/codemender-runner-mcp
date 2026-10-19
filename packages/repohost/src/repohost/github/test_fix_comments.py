@@ -12,24 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for fix_comments (SPEC-GHA-FIX REQ-0006 to REQ-0010)."""
+# Governing: ADR-0008, SPEC-GHA-FIX REQ-0006, REQ-0007, REQ-0008, REQ-0009, REQ-0010
+
+"""Unit tests for repohost.github.fix_comments."""
 
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from unittest import mock
 
-sys.path.insert(
-    0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
-)
-
-import fix_comments  # pylint: disable=g-import-not-at-top
-from codemender.cm import Finding  # pylint: disable=g-import-not-at-top
-from codemender.vcs.git import SuggestionHunk  # pylint: disable=g-import-not-at-top
-from vcs import github  # pylint: disable=g-import-not-at-top
+from codemender.cm import Finding
+from codemender.vcs.git import SuggestionHunk
+import repohost.github as github_pkg
+from repohost.github import client as github
+from repohost.github import fix_comments
 
 _APP = b"line1\nline2\nline3\nline4\nline5\n"
 _ARTIFACTS = "https://github.com/o/r/actions/runs/123#artifacts"
@@ -89,6 +87,29 @@ def _make_repo(files):
       env=env,
   ).stdout.strip()
   return repo, head
+
+
+class TestReExports(unittest.TestCase):
+
+  def test_github_package_reexports_fix_comments_symbols(self):
+    expected_names = (
+        "FAILED",
+        "FIXED",
+        "FixCell",
+        "FixPlan",
+        "FixPoster",
+        "NO_FIX",
+        "PATCH",
+        "SUGGESTED",
+        "UNTESTED_NOTE",
+        "WORKING",
+        "checked_out_commit",
+        "plan_fixes",
+        "same_lines_note",
+    )
+    for name in expected_names:
+      self.assertIs(getattr(github_pkg, name), getattr(fix_comments, name))
+      self.assertIn(name, github_pkg.__all__)
 
 
 class TestPlanFixes(unittest.TestCase):

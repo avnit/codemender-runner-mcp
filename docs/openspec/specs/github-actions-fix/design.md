@@ -323,10 +323,10 @@ Findings and failed fixes never fail the job, the same as findings in M1.
 
 | File | Change |
 | :--- | :--- |
-| `codemender-runner/codemender/cm.py`, `cli/sarif.py`, `vcs/git.py` | Shared `Finding` model, `SarifDocument.to_findings()`, and `parse_patch_to_suggestions`. |
-| `src/launcher/base.py`, `src/launcher/local_docker.py` | Raw stdout, `run_parallel()`, per-run log file, container names, `docker kill` on timeout, `stop()`, and `with_dirs()`. |
-| `src/fix_comments.py` | Deduplicating findings (`plan_fixes`) and posting review suggestions or fallback patch comments (`FixPoster`). |
-| `src/vcs/github.py` | Reviews, patch comments, the PR diff's line ranges, and reading earlier tags. |
+| `packages/codemender/src/codemender/cm.py`, `sarif/__init__.py`, `vcs/git.py` | Shared `Finding` model, `SarifDocument.to_findings()`, and `parse_patch_to_suggestions`. |
+| `packages/launcher/src/launcher/base.py`, `packages/launcher/src/launcher/local/local_docker.py` | Raw stdout, `run_parallel()`, per-run log file, container names, `docker kill` on timeout, `stop()`, and `with_dirs()`. |
+| `packages/repohost/src/repohost/github/fix_comments.py` | Deduplicating findings (`plan_fixes`) and posting review suggestions or fallback patch comments (`FixPoster`). |
+| `packages/repohost/src/repohost/github/client.py` | Reviews, patch comments, the PR diff's line ranges, and reading earlier tags. |
 | `src/gha_runner.py` | The `fix` input, the parallel runs, posting, and the Fix column. |
 | `action.yml`, `workflows/cm-merge-scan.yml`, `README.md` | The input, the head checkout, the 60-minute timeout, the artifacts and the documentation. |
 

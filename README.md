@@ -34,6 +34,10 @@ We organize this repo using the following folders and meanings:
 - `packages/launcher/`: Sandbox execution backends (`launcher.local`,
   `launcher.cloudrun`) and parallel container execution interface
   (`launcher.base`). Install with `pip install -e ./packages/launcher`.
+- `packages/repohost/`: Repository hosting platform integrations
+  (`repohost.github`, `repohost.gitlab`) for PR sticky comments, review
+  suggestions, fix routing, and remote branch helpers. Install with
+  `pip install -e "./packages/repohost[github,gitlab]"`.
 - `codemender-runner/`: Legacy GitHub/Cloud Run batch pipeline modules and
   compatibility shims (`python3 codemender-runner`, `bin/cm-runner`).
 - `.github/`: Deployment for running CM directly inside github action

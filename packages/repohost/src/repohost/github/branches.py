@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Governing: ADR-0008
+
 """GitHub REST API integration for CodeMender Agent."""
 
 from functools import wraps

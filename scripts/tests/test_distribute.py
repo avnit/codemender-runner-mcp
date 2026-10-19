@@ -340,7 +340,6 @@ class TestDistributeScript(unittest.TestCase):
         ".github/actions/codemender/src/gha_runner.py",
         ".github/actions/codemender/tests/test_gha_runner.py",
         ".github/workflows/cm-merge-scan.yml",
-        ".github/workflows/ci.yml",
         ".github/workflows/build_runner_image.yml",
         ".github/terraform/main.tf",
         ".github/terraform/variables.tf",
@@ -385,6 +384,13 @@ class TestDistributeScript(unittest.TestCase):
         ".github/codemender-runner/packages/launcher/src/launcher/local/local_docker.py",
         ".github/codemender-runner/packages/launcher/src/launcher/cloudrun/__init__.py",
         ".github/codemender-runner/packages/launcher/src/launcher/cloudrun/cloud_run.py",
+        ".github/codemender-runner/packages/repohost/pyproject.toml",
+        ".github/codemender-runner/packages/repohost/src/repohost/__init__.py",
+        ".github/codemender-runner/packages/repohost/src/repohost/github/__init__.py",
+        ".github/codemender-runner/packages/repohost/src/repohost/github/client.py",
+        ".github/codemender-runner/packages/repohost/src/repohost/github/fix_comments.py",
+        ".github/codemender-runner/packages/repohost/src/repohost/github/branches.py",
+        ".github/codemender-runner/packages/repohost/src/repohost/gitlab/__init__.py",
     ]
     for rel_path in required_paths:
       with self.subTest(required_path=rel_path):
@@ -412,7 +418,9 @@ class TestDistributeScript(unittest.TestCase):
       build_wf_content = f.read()
     self.assertIn('["version"]', build_wf_content)
     self.assertNotIn('["legacy"]', build_wf_content)
-    self.assertIn(".github/codemender-runner", build_wf_content)
+    self.assertIn("context: .github/codemender-runner", build_wf_content)
+    self.assertIn("file: .github/codemender-runner/Dockerfile", build_wf_content)
+    self.assertNotIn(".github/.github/", build_wf_content)
     self.assertNotIn("context: codemender-runner", build_wf_content)
     self.assertIn("vars.CODEMENDER_RUNNER_IMAGE", build_wf_content)
     self.assertIn("ghcr.io/${OWNER,,}/codemender-runner", build_wf_content)
@@ -468,6 +476,7 @@ class TestDistributeScript(unittest.TestCase):
         "scripts",
         ".github/scripts",
         ".github/codemender",
+        ".github/workflows/ci.yml",
         "codemender-runner",
         "packages",
         "docker",
@@ -503,6 +512,9 @@ class TestDistributeScript(unittest.TestCase):
         ".github/codemender-runner/packages/codemender/src/codemender/sarif/test_sarif.py",
         ".github/codemender-runner/packages/codemender/src/codemender/vcs/test_git.py",
         ".github/codemender-runner/packages/launcher/src/launcher/local/test_launcher.py",
+        ".github/codemender-runner/packages/repohost/src/repohost/github/test_client.py",
+        ".github/codemender-runner/packages/repohost/src/repohost/github/test_fix_comments.py",
+        ".github/codemender-runner/packages/repohost/src/repohost/github/test_branches.py",
         "workflows/gcp_parallel_workflow.yaml",
         "cloudbuild.yaml",
     ]
@@ -527,6 +539,18 @@ class TestDistributeScript(unittest.TestCase):
         msg=f"python .github/codemender-runner --help failed:\n{cmr_help.stderr}",
     )
 
+    gha_env = os.environ.copy()
+    gha_env.pop("GITHUB_WORKSPACE", None)
+    staged_pkg_srcs = [
+        os.path.join(
+            target, ".github", "codemender-runner", "packages", pkg, "src"
+        )
+        for pkg in ("codemender", "launcher", "repohost")
+    ]
+    existing_pythonpath = gha_env.get("PYTHONPATH", "")
+    gha_env["PYTHONPATH"] = os.pathsep.join(
+        staged_pkg_srcs + ([existing_pythonpath] if existing_pythonpath else [])
+    )
     gha_tests = subprocess.run(
         [
             sys.executable,
@@ -537,6 +561,7 @@ class TestDistributeScript(unittest.TestCase):
             ".github/actions/codemender/tests",
         ],
         cwd=target,
+        env=gha_env,
         capture_output=True,
         text=True,
         check=False,

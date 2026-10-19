@@ -23,9 +23,19 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, call, patch
 
-sys.path.insert(
-    0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
-)
+_ACTION_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_GITHUB_DIR = os.path.dirname(os.path.dirname(_ACTION_DIR))
+_REPO_ROOT = os.path.dirname(_GITHUB_DIR)
+sys.path.insert(0, os.path.join(_ACTION_DIR, "src"))
+for _pkg_root in (
+    os.path.join(_REPO_ROOT, "packages"),
+    os.path.join(_GITHUB_DIR, "codemender-runner", "packages"),
+    os.path.join(_ACTION_DIR, "packages"),
+):
+  for _pkg in ("codemender", "launcher", "repohost"):
+    _pkg_src = os.path.join(_pkg_root, _pkg, "src")
+    if os.path.isdir(_pkg_src) and _pkg_src not in sys.path:
+      sys.path.append(_pkg_src)
 
 import gha_runner  # pylint: disable=g-import-not-at-top
 from launcher.base import LauncherError, ParallelResult, RunResult  # pylint: disable=g-import-not-at-top

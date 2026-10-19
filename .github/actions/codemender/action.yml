@@ -82,7 +82,7 @@ runs:
       with:
         python-version: '3.11'
 
-    # Governing: ADR-0008, SPEC-GHA/REQ-0004
+    # Governing: ADR-0008, SPEC-GHA, SPEC-GHA-FIX
     - name: Install action dependencies
       shell: bash
       env:
@@ -90,16 +90,17 @@ runs:
       run: |
         set -euo pipefail
         PKG_DIR="${ACTION_PATH}/../../../packages"
-        if [[ ! -d "${PKG_DIR}/launcher" ]]; then
+        if [[ ! -d "${PKG_DIR}/repohost" ]]; then
           PKG_DIR="${ACTION_PATH}/../../codemender-runner/packages"
         fi
-        if [[ ! -d "${PKG_DIR}/launcher" ]]; then
+        if [[ ! -d "${PKG_DIR}/repohost" ]]; then
           PKG_DIR="${ACTION_PATH}/packages"
         fi
         python -m pip install --quiet \
           -r "${ACTION_PATH}/requirements.txt" \
           "${PKG_DIR}/codemender" \
-          "${PKG_DIR}/launcher"
+          "${PKG_DIR}/launcher" \
+          "${PKG_DIR}/repohost[github]"
 
     - name: Verify PR base commit is present
       shell: bash

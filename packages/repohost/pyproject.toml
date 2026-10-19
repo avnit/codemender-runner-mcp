@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codemender-repohost"
+version = "0.1.0"
+description = "CodeMender repository hosting platform integrations (GitHub, GitLab)"
+requires-python = ">=3.11"
+dependencies = [
+    "codemender",
+]
+
+[project.optional-dependencies]
+github = [
+    "requests>=2.31.0,<3",
+]
+gitlab = [
+    "requests>=2.31.0,<3",
+]
+
+[tool.uv.sources]
+codemender = { workspace = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["repohost*"]
+exclude = ["test_*", "*_test", "testdata*", "*test_*", "*testdata*"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["**/test_*.py", "**/*_test.py", "**/testdata/**", "test_*.py", "*_test.py", "testdata/**"]

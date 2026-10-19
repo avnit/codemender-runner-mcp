@@ -12,10 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""GitHub REST API client and PR comment formatters for the CodeMender Action.
+# Governing: ADR-0008, SPEC-GHA, SPEC-GHA-FIX
 
-Posting to the repo host is the CI job's responsibility (ADR-0002); cm-runner
-never receives a GitHub token.
+"""GitHub REST API client and PR comment formatters for CodeMender.
+
+Posting to the repo host is the CI job's responsibility (ADR-0008, SPEC-GHA,
+SPEC-GHA-FIX); cm-runner never receives a GitHub token.
 
 Public entry points are at the top of this module; internal HTTP and Markdown
 helpers follow below.

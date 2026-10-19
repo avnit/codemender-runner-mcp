@@ -1,18 +1,12 @@
-# Copyright 2026 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-# Governing: docs/openspec/specs/wif/spec.md#req-0001, docs/openspec/specs/wif/spec.md#req-0006
+# ==============================================================================
+# Instructions
+# ==============================================================================
+# 1. Copy this file to terraform.tfvars
+# 2. Configure all required variables. Required variables are marked
+#    with a "Required" comment and have "TODO" as their value.
+# 3. Review optional configurations to ensure you are happy with their
+#    default values.
+# 4. You are now ready to apply the terraform configuration.
 
 # ==============================================================================
 # SECTION 1: GCP Project & Identity Naming
@@ -23,7 +17,7 @@
 
 # Required: The Google Cloud Project ID where WIF resources and/or Cloud Run
 # infrastructure will be deployed.
-gcp_project_id = "my-gcp-project-id"
+gcp_project_id = "TODO"
 
 # The Google Cloud region for regional resources (e.g. Cloud Run Jobs, Serverless
 # VPC Access Connectors, and repository configuration variables).
@@ -105,21 +99,26 @@ execution_mode = "local" # or "cloud_run"
 # Defines the GitHub identity perimeter allowed to authenticate through GCP WIF,
 # and specifies target repositories to configure.
 
-# Scoping model for WIF authentication:
+# Required: Scoping model for WIF authentication:
 # - "org": WIF trusts the entire organization (assertion.repository_owner == github_owner).
 #          github_repositories lists repos to bootstrap (or empty [] to skip GitHub API calls).
 # - "user": WIF trusts all repos owned by the user (assertion.repository_owner == github_owner).
 #           github_repositories lists repos to bootstrap (or empty [] to skip GitHub API calls).
 # - "repositories": WIF trust is strictly constrained to the repositories explicitly enumerated
 #                   in github_repositories. At least one repository is required.
-github_scope_type = "org" # or "user", "repositories"
+github_scope_type = "TODO"
 
 
-# GitHub organization name (e.g., "my-github-org") or personal account username.
-# Required if github_scope_type is "org" or "user".
-github_owner = "my-github-org"
+# Required: Name of the owner.
+# Value is based on what the value of "github_scope_type" is:
+# - org": Must be the name of the organization. E.g. if org is
+#   github.com/acme-corp, the github_owner = "acme-corp"
+# - "user": Must be the name of the user. E.g. for user
+#   github.com/myusername, github_owner = "myusername"
+# - "repositories": Set to empty string.
+github_owner = "TODO"
 
-# Target repositories list:
+# Required: Target repositories to configure.:
 # - Accepts either short names ("repo") or full repository names ("owner/repo").
 # - Both formats are automatically normalized by the module.
 # - When github_scope_type = "repositories", at least one repository is required and defines
@@ -131,8 +130,8 @@ github_owner = "my-github-org"
 github_repositories = [
   # "my-repo",
   # "my-github-org/another-repo",
+  "TODO"
 ]
-
 
 # ==============================================================================
 # SECTION 4: Optional GitHub Repository Bootstrap & Provider Auth

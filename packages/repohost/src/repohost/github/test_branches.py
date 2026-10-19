@@ -12,34 +12,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for vcs.github module."""
+# Governing: ADR-0008
 
-import os
+"""Unit tests for repohost.github.branches module."""
+
 import re
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-_CODEMENDER_SRC = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "packages", "codemender", "src")
-)
-if _CODEMENDER_SRC not in sys.path:
-  sys.path.insert(0, _CODEMENDER_SRC)
-
-from vcs.github import (
+import repohost.github as github_pkg
+from repohost.github import branches
+from repohost.github import client
+from repohost.github.branches import (
     FINDING_MARKER_PREFIX,
     MAX_COMMENT_BODY_CHARS,
     STICKY_SUMMARY_MARKER,
     build_review_comment,
     check_remote_branch_exists,
+    create_pr_comment,
     create_pr_review_with_suggestions,
     create_pull_request,
+    delete_remote_branch,
     finding_marker,
     format_suggestion_body,
     get_default_branch,
     get_pr_diff_line_ranges,
+    is_duplicate_pr,
     list_reviewed_finding_ids,
+    post_commit_status,
     post_or_update_sticky_comment,
     truncate_comment_body,
 )
@@ -81,9 +81,39 @@ def _fence_left_open(markdown: str) -> bool:
   return open_len != 0
 
 
+class TestReExports(unittest.TestCase):
+
+  def test_github_package_reexports_branch_symbols_and_keeps_client_bindings(self):
+    expected_branch_names = (
+        "build_review_comment",
+        "check_remote_branch_exists",
+        "create_pr_comment",
+        "create_pr_review_with_suggestions",
+        "create_pull_request",
+        "delete_remote_branch",
+        "format_suggestion_body",
+        "get_default_branch",
+        "is_duplicate_pr",
+        "list_reviewed_finding_ids",
+        "post_commit_status",
+    )
+    for name in expected_branch_names:
+      self.assertIs(getattr(github_pkg, name), getattr(branches, name))
+      self.assertIn(name, github_pkg.__all__)
+
+    for client_name in (
+        "post_or_update_sticky_comment",
+        "get_pr_diff_line_ranges",
+        "truncate_comment_body",
+        "retry_on_exception",
+    ):
+      self.assertIs(getattr(github_pkg, client_name), getattr(client, client_name))
+
+
+@patch.object(branches.time, "sleep", lambda _: None)
 class TestVcsGithub(unittest.TestCase):
 
-  @patch("vcs.github._get_branch_via_api")
+  @patch("repohost.github.branches._get_branch_via_api")
   def test_check_remote_branch_exists_true(self, mock_api):
     """Verify branch check returns True when GitHub API finds the branch."""
     mock_api.return_value = True
@@ -130,7 +160,7 @@ class TestVcsGithub(unittest.TestCase):
   @patch("requests.post")
   def test_create_pr_comment_success(self, mock_post):
     """Verify posting review comment on PRs."""
-    from vcs.github import create_pr_comment
+    from repohost.github.branches import create_pr_comment
 
     mock_resp = MagicMock()
     mock_resp.status_code = 201
@@ -154,7 +184,7 @@ class TestVcsGithub(unittest.TestCase):
   @patch("requests.get")
   def test_is_duplicate_pr_with_head_branch(self, mock_get):
     """Verify targeted O(1) duplicate PR lookup with head_branch parameter."""
-    from vcs.github import is_duplicate_pr
+    from repohost.github.branches import is_duplicate_pr
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -179,7 +209,7 @@ class TestVcsGithub(unittest.TestCase):
   @patch("requests.post")
   def test_post_commit_status_success(self, mock_post):
     """Verify posting a commit status check on a PR commit SHA."""
-    from vcs.github import post_commit_status
+    from repohost.github.branches import post_commit_status
 
     mock_resp = MagicMock()
     mock_resp.status_code = 201
@@ -207,7 +237,7 @@ class TestVcsGithub(unittest.TestCase):
 
   def test_post_commit_status_fake_token(self):
     """Verify post_commit_status handles fake-token gracefully in unit tests."""
-    from vcs.github import post_commit_status
+    from repohost.github.branches import post_commit_status
 
     success = post_commit_status(
         token="fake-token",
@@ -223,7 +253,7 @@ class TestVcsGithub(unittest.TestCase):
   def test_post_commit_status_api_error_returns_false(self, mock_post):
     """Verify post_commit_status returns False on network error without throwing."""
     import requests
-    from vcs.github import post_commit_status
+    from repohost.github.branches import post_commit_status
 
     mock_post.side_effect = requests.exceptions.RequestException("Connection error")
 
@@ -239,7 +269,7 @@ class TestVcsGithub(unittest.TestCase):
 
   def test_delete_remote_branch_safety_guard_rejects_main(self):
     """Verify delete_remote_branch strictly rejects non-codemender branches."""
-    from vcs.github import delete_remote_branch
+    from repohost.github.branches import delete_remote_branch
 
     # Refuse to delete protected or non-codemender branches
     self.assertFalse(
@@ -255,7 +285,7 @@ class TestVcsGithub(unittest.TestCase):
   @patch("requests.delete")
   def test_delete_remote_branch_api_success(self, mock_delete):
     """Verify deleting branch via GitHub REST API with 204 status."""
-    from vcs.github import delete_remote_branch
+    from repohost.github.branches import delete_remote_branch
 
     mock_resp = MagicMock()
     mock_resp.status_code = 204
@@ -276,7 +306,7 @@ class TestVcsGithub(unittest.TestCase):
   @patch("requests.delete")
   def test_delete_remote_branch_api_404_idempotent(self, mock_delete):
     """Verify deleting already-deleted branch returns True idempotently on 404/422."""
-    from vcs.github import delete_remote_branch
+    from repohost.github.branches import delete_remote_branch
 
     mock_resp = MagicMock()
     mock_resp.status_code = 404
@@ -289,14 +319,14 @@ class TestVcsGithub(unittest.TestCase):
     )
     self.assertTrue(success)
 
-  @patch("vcs.github.run_command")
+  @patch("repohost.github.branches.run_command")
   @patch("requests.delete")
   def test_delete_remote_branch_api_fail_falls_back_to_cli(
       self, mock_delete, mock_run_command
   ):
     """Verify falling back to Git CLI push --delete if REST API raises error."""
     import requests
-    from vcs.github import delete_remote_branch
+    from repohost.github.branches import delete_remote_branch
 
     mock_delete.side_effect = requests.exceptions.RequestException("API error")
     mock_cli_res = MagicMock()
@@ -363,7 +393,7 @@ class TestSuggestionBodyFormatting(unittest.TestCase):
 class TestPrDiffLineRanges(unittest.TestCase):
   """Validates discovery of the lines GitHub will accept as review anchors."""
 
-  @patch("vcs.github._fetch_pr_files")
+  @patch("repohost.github.branches._fetch_pr_files")
   def test_expands_hunk_headers_into_line_numbers(self, mock_fetch):
     mock_fetch.return_value = [{
         "filename": "app/views.py",
@@ -372,13 +402,13 @@ class TestPrDiffLineRanges(unittest.TestCase):
     ranges = get_pr_diff_line_ranges("t", "org", "repo", 7)
     self.assertEqual(ranges["app/views.py"], {1, 2, 3, 4, 30, 31})
 
-  @patch("vcs.github._fetch_pr_files")
+  @patch("repohost.github.branches._fetch_pr_files")
   def test_file_without_patch_is_not_addressable(self, mock_fetch):
     """Binary or oversized files have no patch, so nothing can anchor to them."""
     mock_fetch.return_value = [{"filename": "logo.png", "status": "added"}]
     self.assertEqual(get_pr_diff_line_ranges("t", "org", "repo", 7), {})
 
-  @patch("vcs.github._fetch_pr_files")
+  @patch("repohost.github.branches._fetch_pr_files")
   def test_fetch_failure_yields_empty_map(self, mock_fetch):
     mock_fetch.side_effect = RuntimeError("boom")
     self.assertEqual(get_pr_diff_line_ranges("t", "org", "repo", 7), {})

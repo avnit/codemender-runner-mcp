@@ -208,7 +208,8 @@ transform the archive into the target repository layout:
      `Push Runner Image` step honoring `vars.CODEMENDER_RUNNER_IMAGE` while
      publishing lowercase `ghcr.io/${OWNER,,}/codemender-runner:latest` and
      `:${SHA}`).
-   - Explicitly exclude `.github/workflows/codemender_parallel.yml`.
+   - Explicitly exclude `.github/workflows/ci.yml` and
+     `.github/workflows/codemender_parallel.yml`.
 1. **Stripped `.github/codemender-runner/` Self-Contained Build Context:**
    - Map `docker/runner.Dockerfile` to `.github/codemender-runner/Dockerfile`
      (with the legacy `main.py` symlink removed and default `CMD ["version"]`),
@@ -217,11 +218,14 @@ transform the archive into the target repository layout:
      `codemender.runner.__main__`) and `codemender-runner/bin/cm-runner` into
      `.github/codemender-runner/`.
    - Map `packages/codemender/` into
-     `.github/codemender-runner/packages/codemender/`, stripping co-located
+     `.github/codemender-runner/packages/codemender/`, `packages/launcher/`
+     into `.github/codemender-runner/packages/launcher/`, and `packages/repohost/`
+     into `.github/codemender-runner/packages/repohost/`, stripping co-located
      test files (`test_*.py`, `*_test.py`), `testdata/`, and `__pycache__/`
      directories so `.github/codemender-runner` acts as a self-contained Docker
      build context (`COPY packages/codemender/ ...` and
-     `/opt/codemender/venv/bin/pip install --no-cache-dir ./packages/codemender`).
+     `/opt/codemender/venv/bin/pip install --no-cache-dir ./packages/codemender`)
+     and provides `launcher` and `repohost.github` to `.github/actions/codemender/`.
    - **Explicitly exclude all legacy pipeline files:**
      - `main.py`, `runners/`, `storage.py`, `utils.py`, `codemender/db.py`,
        `vcs/github.py`, `codemender-runner/README.md`, and all legacy test files

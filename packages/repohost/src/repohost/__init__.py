@@ -12,4 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""VCS and GitHub integration subpackage."""
+# Governing: ADR-0008
+
+"""CodeMender repository hosting platform integrations (GitHub, GitLab)."""
+
+__all__: list[str] = []
