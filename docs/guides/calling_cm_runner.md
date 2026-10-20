@@ -3,7 +3,8 @@
 How to run the CodeMender runner from CI, Cloud Run, or your own machine, and
 what it gives back. The design reasoning is in
 [ADR-0001](../adr/ADR-0001-machine-readable-output-contract.md) (output) and
-[ADR-0008](../adr/ADR-0008-repository-layout-and-package-structure.md) (layout and build).
+[ADR-0008](../adr/ADR-0008-repository-layout-and-package-structure.md) (layout
+and build).
 
 > **Status:** `version`, `init`, `find-diff`, `fix`, and `verify` work today.
 
@@ -19,7 +20,7 @@ cm-runner [--cm-binary PATH] [--log-level LEVEL] [--no-init] <command> [flags]
 | `init`      | Sets up `cm` for a repository and checks the result. See [`init`](#init).                    | Available |
 | `find-diff` | Scans a pull request's changes and outputs SARIF v2.1.0 JSON. See [`find-diff`](#find-diff). | Available |
 | `fix`       | Produces a patch for one finding, as a unified diff. See [`fix`](#fix).                      | Available |
-| `verify`    | Verifies a finding with `cm verify` and emits updated SARIF 2.1.0. See [`verify`](#verify).   | Available |
+| `verify`    | Verifies a finding with `cm verify` and emits updated SARIF 2.1.0. See [`verify`](#verify).  | Available |
 
 ## Where to run it
 
@@ -31,6 +32,12 @@ ghcr.io/cloud-gtm/codemender-runner:<commit-sha>
 
 Pin a commit tag. Don't use `latest`.
 
+Because the orchestrated worker flow (`Launcher` -> `cm-worker` -> `cm-runner`)
+across local Docker/gVisor and Google Cloud Run Jobs is the most common
+execution case, the container image sets `ENTRYPOINT ["cm-worker"]` by default.
+To invoke `cm-runner` directly inside a local container without a `Launcher`,
+pass `--entrypoint cm-runner`.
+
 > [!NOTE] The container image above is the upstream development reference built
 > by this repository.
 >
@@ -38,12 +45,13 @@ Pin a commit tag. Don't use `latest`.
 > pipelines (building from source and pushing to customer private registries
 > such as Google Cloud Artifact Registry, AWS ECR, or private GHCR).
 
-| Where          | How                                                                                                                 |
-| :------------- | :------------------------------------------------------------------------------------------------------------------ |
-| Docker         | `docker run --rm ghcr.io/cloud-gtm/codemender-runner:<sha> version`                                                 |
-| GitHub Actions | Set `container: ghcr.io/cloud-gtm/codemender-runner:<sha>` on the job, then `run: cm-runner version`.               |
-| Cloud Run      | To be defined.                                                                                                      |
-| From source    | `uvx --from ./packages/codemender cm-runner version` or `pip install -e ./packages/codemender && cm-runner version` |
+| Where                    | How                                                                                                                                                                                              |
+| :----------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Docker (worker flow)     | `docker run --rm -v <cache_dir>:/cache ghcr.io/cloud-gtm/codemender-runner:<sha> --cache-uri file:///cache --task-id <id>` (default `cm-worker` entrypoint, invoked automatically by `Launcher`) |
+| Docker (`cm-runner` CLI) | `docker run --rm --entrypoint cm-runner ghcr.io/cloud-gtm/codemender-runner:<sha> version` (use `--entrypoint cm-runner` when running `cm-runner` commands from this guide directly)             |
+| GitHub Actions           | Set `container: ghcr.io/cloud-gtm/codemender-runner:<sha>` on the job, then `run: cm-runner version`.                                                                                            |
+| Cloud Run                | Cloud Run Jobs execute the default `cm-worker` entrypoint with `--cache-uri gs://... --task-id <id>`, which invokes `cm-runner` inside the container.                                            |
+| From source              | `uvx --from ./packages/codemender cm-runner version` or `pip install -e ./packages/codemender && cm-runner version`                                                                              |
 
 ## What you get back
 
@@ -131,7 +139,7 @@ isn't a folder.
 | `CODEMENDER_BUILD_COMMAND`           | The command `cm` runs to build and test a fix. If unset, it's taken from the repository's `.codemender.yaml`, or guessed from project files (e.g. `package.json` → `npm test`). If none is found, `cm init --verify` warns about it (on stderr) and fixes aren't tested. |
 | `CODEMENDER_MODEL`                   | The model `cm` uses.                                                                                                                                                                                                                                                     |
 | `CODEMENDER_SANDBOX_ENABLED`         | Whether `cm` runs its agent in a sandbox.                                                                                                                                                                                                                                |
-| `CODEMENDER_SANDBOX_NETWORK_PROFILE` | The sandbox's network access. Defaults to `permissive-closed` (no network for the agent's commands); set `permissive-open` to allow full network access, e.g. when the build or tests download dependencies. Only affects `fix` and `verify`.                                    |
+| `CODEMENDER_SANDBOX_NETWORK_PROFILE` | The sandbox's network access. Defaults to `permissive-closed` (no network for the agent's commands); set `permissive-open` to allow full network access, e.g. when the build or tests download dependencies. Only affects `fix` and `verify`.                            |
 
 `cm init --verify` also needs a GCP project ID, from `GOOGLE_CLOUD_PROJECT`,
 application default credentials, or the gcloud config. Without one, `cm_verify`
@@ -221,10 +229,10 @@ automatically runs [`init`](#init) for `--repo` first (logging `init` checks to
 
 **Flags:**
 
-| Flag             | Default  | Meaning                                                                                   |
-| :--------------- | :------- | :---------------------------------------------------------------------------------------- |
-| `--finding FILE` | Required | A SARIF file holding exactly one finding. `-` reads it from stdin.                        |
-| `--repo PATH`    | `.`      | The Git working tree to fix.                                                              |
+| Flag             | Default  | Meaning                                                                                     |
+| :--------------- | :------- | :------------------------------------------------------------------------------------------ |
+| `--finding FILE` | Required | A SARIF file holding exactly one finding. `-` reads it from stdin.                          |
+| `--repo PATH`    | `.`      | The Git working tree to fix.                                                                |
 | `--out DIR`      | None     | Folder to also write the patch to, as `<finding file name>.diff`. Created if it is missing. |
 
 There is no `--model` or retry flag. The model comes from `cm`'s default or
@@ -233,8 +241,8 @@ There is no `--model` or retry flag. The model comes from `cm`'s default or
 **Before it starts.** `fix` checks two things and changes nothing if either
 fails:
 
-1. The finding is a SARIF document holding **exactly one** result. A
-   `find-diff` report with several findings is rejected; split it first (see
+1. The finding is a SARIF document holding **exactly one** result. A `find-diff`
+   report with several findings is rejected; split it first (see
    [From `find-diff` to `fix`](#from-find-diff-to-fix)). Exit `2`.
 1. `--repo` is a Git working tree with **no uncommitted work**: no modified,
    staged, or untracked files, apart from `.cm_project` and `.exploit/`, which
@@ -248,18 +256,17 @@ fails:
 1. `cm report --format json`, to list the findings already in `cm`'s database.
 1. `cm report import -f <finding> -p <repo>`. A finding from stdin is first
    written to a temporary file outside the repository.
-1. `cm report --format json` again. Exactly one finding must be new; that is
-   the ID `cm` gave the import.
+1. `cm report --format json` again. Exactly one finding must be new; that is the
+   ID `cm` gave the import.
 1. `cm fix -y --bypass-warning <id>`, with a 30-minute limit. `--bypass-warning`
    accepts `cm`'s responsibility warning for you, as the older pipeline does.
-1. `cm report --format json`, to check that the finding's status is now
-   `FIXED`. `cm fix` exits `0` even when it did not produce a patch.
+1. `cm report --format json`, to check that the finding's status is now `FIXED`.
+   `cm fix` exits `0` even when it did not produce a patch.
 
-> [!IMPORTANT]
-> **`fix` is slow.** A one-line fix in a 10-line file took 8 to 9 minutes on
-> `cm` 0.11.0. `cm fix` prints nothing until it finishes, so its output appears
-> on stderr only at the end. To fix several findings faster, run one `fix` per
-> finding in parallel, each in its own checkout or container.
+> [!IMPORTANT] **`fix` is slow.** A one-line fix in a 10-line file took 8 to 9
+> minutes on `cm` 0.11.0. `cm fix` prints nothing until it finishes, so its
+> output appears on stderr only at the end. To fix several findings faster, run
+> one `fix` per finding in parallel, each in its own checkout or container.
 
 **Output: the patch on stdout.** stdout holds the patch exactly as
 `git diff --binary HEAD` produced it, and nothing else. It includes files the
@@ -270,21 +277,21 @@ fix created and leaves out `.cm_project` and `.exploit/`. Apply it with
 cm-runner fix --finding finding.sarif > fix.diff && git apply fix.diff
 ```
 
-The patch is also left applied in `--repo`. It is not committed or pushed;
-that is up to your CI job. Two runs on the same finding can produce different
-patches that are both correct, so don't compare patches by text.
+The patch is also left applied in `--repo`. It is not committed or pushed; that
+is up to your CI job. Two runs on the same finding can produce different patches
+that are both correct, so don't compare patches by text.
 
 **Files (`--out`).** When `--out DIR` is passed, `fix` writes the same bytes to
-`DIR/<name>.diff` before printing anything, where `<name>` is the finding
-file's name without its extension (`finding` when the finding came from
-stdin). Without `--out` it writes no files of its own.
+`DIR/<name>.diff` before printing anything, where `<name>` is the finding file's
+name without its extension (`finding` when the finding came from stdin). Without
+`--out` it writes no files of its own.
 
 **Exit code:**
 
-| Code | Meaning                                                                                                                                                                                              |
-| :--- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | The finding is `FIXED` and the patch was written.                                                                                                                                                    |
-| `2`  | Bad flags (`--repo` is not a folder, `--finding` is not a readable file, `--out` is a file) or a bad finding (not SARIF, or not exactly one result). Nothing is written to `stdout`.                 |
+| Code | Meaning                                                                                                                                                                                                 |
+| :--- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `0`  | The finding is `FIXED` and the patch was written.                                                                                                                                                       |
+| `2`  | Bad flags (`--repo` is not a folder, `--finding` is not a readable file, `--out` is a file) or a bad finding (not SARIF, or not exactly one result). Nothing is written to `stdout`.                    |
 | `3`  | Anything else: not a Git working tree, uncommitted work, `cm` not set up, import failed, `cm fix` failed or timed out, status not `FIXED`, empty patch, or writing `--out` failed. Nothing on `stdout`. |
 
 ## `verify`
@@ -299,33 +306,35 @@ first (logging `init` checks to `stderr` only) unless `--no-init` is passed.
 
 **Flags:**
 
-| Flag             | Default  | Meaning                                                                                               |
-| :--------------- | :------- | :---------------------------------------------------------------------------------------------------- |
-| `--finding FILE` | Required | A SARIF file holding exactly one finding. `-` reads it from stdin.                                    |
-| `--repo PATH`    | `.`      | The Git working tree to verify.                                                                       |
-| `--out DIR`      | None     | Folder to also write the updated SARIF document to, as `<finding file name>.sarif`. Created if needed.|
+| Flag             | Default  | Meaning                                                                                                |
+| :--------------- | :------- | :----------------------------------------------------------------------------------------------------- |
+| `--finding FILE` | Required | A SARIF file holding exactly one finding. `-` reads it from stdin.                                     |
+| `--repo PATH`    | `.`      | The Git working tree to verify.                                                                        |
+| `--out DIR`      | None     | Folder to also write the updated SARIF document to, as `<finding file name>.sarif`. Created if needed. |
 
 **Before it starts.** `verify` checks two things and changes nothing if either
 fails:
 
-1. The finding is a SARIF document holding **exactly one** result. A
-   `find-diff` report with several findings is rejected; split it first. Exit `2`.
-2. `--repo` is a Git working tree with **no uncommitted work**: no modified,
+1. The finding is a SARIF document holding **exactly one** result. A `find-diff`
+   report with several findings is rejected; split it first. Exit `2`.
+1. `--repo` is a Git working tree with **no uncommitted work**: no modified,
    staged, or untracked files, apart from `.cm_project` and `.exploit/`, which
    `cm` writes itself. Exit `3`.
 
 **What it runs.**
 
 1. `cm report --format json`, to inspect findings already in `cm`'s database.
-2. `cm report import -f <finding> -p <repo>`, discovering the newly assigned
+1. `cm report import -f <finding> -p <repo>`, discovering the newly assigned
    finding ID.
-3. `cm verify -y --bypass-warning <id>`, with a 30-minute limit.
-4. Resets the Git working tree (tracked modifications and untracked files
+1. `cm verify -y --bypass-warning <id>`, with a 30-minute limit.
+1. Resets the Git working tree (tracked modifications and untracked files
    outside `.cm_project` and `.exploit/`) via `codemender.vcs.git`.
-5. `cm report --format json`, reading the post-verify status and `dismiss_reason`.
+1. `cm report --format json`, reading the post-verify status and
+   `dismiss_reason`.
 
-**Output: updated SARIF 2.1.0 on stdout.**
-stdout holds the updated SARIF document as a single compact JSON line.
+**Output: updated SARIF 2.1.0 on stdout.** stdout holds the updated SARIF
+document as a single compact JSON line.
+
 - When `cm verify` refutes the finding (`DISMISSED` or `FALSE_POSITIVE`):
   `properties.status` is set to `"DISMISSED"`, `properties.dismiss_reason` is
   populated, `properties.updated_at` is set to the current ISO-8601 UTC
@@ -345,7 +354,7 @@ SARIF document to `DIR/<name>.sarif` before writing to `stdout`.
 
 | Code | Meaning                                                                                                                                            |
 | :--- | :------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | Verification completed (`DISMISSED`, `VERIFIED`, or `OPEN`) and the updated SARIF document was written.                                             |
+| `0`  | Verification completed (`DISMISSED`, `VERIFIED`, or `OPEN`) and the updated SARIF document was written.                                            |
 | `2`  | Bad flags or invalid SARIF finding (not SARIF or not exactly one result). Nothing on `stdout`.                                                     |
 | `3`  | Execution failed: not a Git repo, uncommitted work, `cm` not initialized, import failed, `cm verify` failed or timed out, or `--out` write failed. |
 
