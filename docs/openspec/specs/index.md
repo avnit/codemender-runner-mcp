@@ -14,5 +14,7 @@ capabilities.
 | [SPEC-DIST](distribute/spec.md)                 | [distribute](distribute/design.md)                                 | Component | Implemented | Customer Repository Distribution Engine & Propagation Kit (`scripts/distribute.sh`)                      |
 | [SPEC-GHA](github-actions/spec.md)              | [github-actions](github-actions/design.md)                         | Component | Draft       | GitHub Actions Orchestration & Dual Execution Backends (`LocalDocker` & `CloudRun`) |
 | [SPEC-GHA-FIX](github-actions-fix/spec.md)      | [github-actions-fix](github-actions-fix/design.md)                 | Component | Draft       | Fixes on Pull Requests: parallel `cm-runner fix` runs, suggestions & patch comments (GitHub Action M2) |
+| [SPEC-GHA-VERIFY](github-actions-verify/spec.md) | [github-actions-verify](github-actions-verify/design.md)           | Component | Draft       | On-Demand Verification on Pull Requests: `@cm-runner verify` in fix review threads (GitHub Action M3) |
 | [SPEC-GITLAB-CI](gitlab-ci/spec.md)             | [gitlab-ci](gitlab-ci/design.md)                                   | Component | Draft       | GitLab CI Orchestration, gVisor OCI Sandbox & Dual Execution Backends (`Gvisor` & `CloudRun`) |
+
 

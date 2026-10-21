@@ -261,6 +261,30 @@ artifact (`codemender-report-pr-<N>`).
     container. Nothing is ever committed or pushed automatically—a human
     reviewer must explicitly commit any suggested change or apply a patch.
 
+## On-demand verification
+
+- **Trigger:** Reply `@cm-runner verify` inside any CodeMender fix review
+  comment thread on a pull request.
+- **Authorization:** Only repository owners, organization members, and
+  collaborators (`OWNER`, `MEMBER`, `COLLABORATOR`) can trigger verification.
+  Comments from bots, external contributors, or cross-repository fork PRs are
+  ignored.
+- **Deduplication & concurrency:**
+  - Each `@cm-runner verify` comment runs in its own GitHub Actions workflow run
+    (up to `MAX_CONCURRENT_VERIFIES = 4` concurrent verifications per PR).
+  - If verification is already `in-progress` for that finding, duplicate
+    requests are skipped immediately before installing gVisor or pulling the
+    runner image.
+  - If the finding was already verified (`VERIFIED`, `DISMISSED`, or `OPEN`),
+    CodeMender replies with a link to the existing verification result without
+    re-running the container.
+- **Outcomes:** CodeMender reacts with 👀 (`eyes`), posts an in-progress reply,
+  runs `cm-runner verify` under gVisor, and updates the reply in place with:
+  - `🚨 Verified (VERIFIED)` — confirmed exploitable true positive.
+  - `✅ Dismissed (DISMISSED)` — refuted as not exploitable (with dismissal reason).
+  - `ℹ️ Inconclusive (OPEN)` — could neither confirm nor refute.
+  - `⚠️ Verification failed` — container failure or cancellation (retryable).
+
 ### Inputs
 
 | Input                            | Default            | Description                                                                                                                                                                                           |
@@ -276,16 +300,17 @@ artifact (`codemender-report-pr-<N>`).
 | `diff_workers`                   | `'8'`              | Number of concurrent workers for `cm-runner find-diff` (1..16).                                                                                                                                       |
 | `fix`                            | `'true'`           | Run `cm-runner fix` for each finding and post suggestions/patches on the PR. Set to `'false'` to scan only.                                                                                           |
 | `max_parallel_fixes`             | `'4'`              | Maximum number of `cm-runner fix` containers to run concurrently.                                                                                                                                     |
-| `artifact_retention_days`        | `'3'`              | Days to retain the uploaded `codemender-report-pr-<N>` artifact (`report.sarif`, `report.md`, `findings/*.sarif`, `fixes/*.diff`).                                                                    |
+| `artifact_retention_days`        | `'3'`              | Days to retain the uploaded `codemender-report-pr-<N>` artifact (`report.sarif`, `report.md`, `findings/*.sarif`, `fixes/*.diff`, `verified/*.sarif`).                                                |
 
 ### Required workflow permissions
 
 | Permission             | Why                                                                                          |
 | :--------------------- | :------------------------------------------------------------------------------------------- |
+| `actions: read`        | Download prior PR scan artifacts (`findings/*.sarif`) during on-demand verification          |
 | `contents: read`       | Check out the repository (`fetch-depth: 0` so the PR base commit is present for `find-diff`) |
 | `id-token: write`      | Request a GitHub OIDC token for Google Cloud Workload Identity Federation                    |
 | `packages: read`       | Pull the cm-runner image from GHCR with the workflow token                                   |
-| `pull-requests: write` | Post / update the CodeMender comment                                                         |
+| `pull-requests: write` | Post / update the CodeMender comment, inline fixes, and verification replies                 |
 
 ## Internal testing (cloud-gtm)
 

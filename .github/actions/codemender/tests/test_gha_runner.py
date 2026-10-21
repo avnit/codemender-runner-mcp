@@ -811,6 +811,10 @@ class TestWorkflowConfigGuard(unittest.TestCase):
     with open(workflow_path, "r", encoding="utf-8") as f:
       content = f.read()
 
+    self.assertIn(
+        "github.event.pull_request.head.repo.full_name == github.repository",
+        content,
+    )
     self.assertIn("- name: Check CodeMender configuration", content)
     self.assertIn("id: check-config", content)
     self.assertIn("shell: bash", content)
@@ -853,6 +857,236 @@ class TestWorkflowConfigGuard(unittest.TestCase):
     action_step_block = content[action_idx:]
     self.assertIn(cond, checkout_step_block)
     self.assertIn(cond, action_step_block)
+
+
+class TestM3OnDemandVerify(unittest.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    self._temp_dir = tempfile.mkdtemp(prefix="gha-verify-test-")
+    self._out_file = os.path.join(self._temp_dir, "github_output.txt")
+    self._event_file = os.path.join(self._temp_dir, "event.json")
+
+  def tearDown(self):
+    shutil.rmtree(self._temp_dir, ignore_errors=True)
+    super().tearDown()
+
+  def _write_event(self, body="@cm-runner verify", assoc="MEMBER", parent_id=100):
+    event = {
+        "action": "created",
+        "pull_request": {
+            "number": 7,
+            "head": {"sha": "aaaabbbb", "repo": {"full_name": "o/r"}},
+            "base": {"sha": "11112222", "repo": {"full_name": "o/r"}},
+        },
+        "comment": {
+            "id": 200,
+            "in_reply_to_id": parent_id,
+            "body": body,
+            "author_association": assoc,
+            "user": {"type": "User"},
+        },
+    }
+    with open(self._event_file, "w", encoding="utf-8") as f:
+      json.dump(event, f)
+    return event
+
+  def _env(self, **overrides):
+    env = dict(
+        _ENV,
+        GITHUB_EVENT_NAME="pull_request_review_comment",
+        GITHUB_EVENT_PATH=self._event_file,
+        GITHUB_OUTPUT=self._out_file,
+        RUNNER_TEMP=self._temp_dir,
+    )
+    env.update(overrides)
+    return env
+
+  def _read_outputs(self):
+    if not os.path.isfile(self._out_file):
+      return {}
+    out = {}
+    with open(self._out_file, encoding="utf-8") as f:
+      for line in f:
+        if "=" in line:
+          k, v = line.rstrip("\n").split("=", 1)
+          out[k] = v
+    return out
+
+  def test_has_verify_command_ignores_code_fences_and_spans(self):
+    self.assertTrue(gha_runner._has_verify_command("please @cm-runner verify this"))
+    self.assertFalse(gha_runner._has_verify_command("use `@cm-runner verify` here"))
+    self.assertFalse(
+        gha_runner._has_verify_command("```\n@cm-runner verify\n```")
+    )
+
+  def test_is_fork_pr_handles_fork_and_deleted_fork_repo(self):
+    self.assertFalse(
+        gha_runner.is_fork_pr({
+            "pull_request": {
+                "head": {"repo": {"full_name": "o/r"}},
+                "base": {"repo": {"full_name": "o/r"}},
+            }
+        })
+    )
+    self.assertTrue(
+        gha_runner.is_fork_pr({
+            "pull_request": {
+                "head": {"repo": {"full_name": "fork/r"}},
+                "base": {"repo": {"full_name": "o/r"}},
+            }
+        })
+    )
+    self.assertTrue(
+        gha_runner.is_fork_pr({
+            "pull_request": {
+                "head": {"repo": None},
+                "base": {"repo": {"full_name": "o/r"}},
+            }
+        })
+    )
+
+  @patch.object(gha_runner, "has_other_active_verify_runs", return_value=True)
+  @patch.object(gha_runner, "reply_to_comment")
+  @patch.object(gha_runner, "react_to_review_comment", return_value=True)
+  @patch.object(gha_runner, "list_verify_comments", return_value=[])
+  @patch.object(gha_runner, "get_review_comment")
+  def test_preflight_gates_auth_dedup_and_concurrency_cap(
+      self, mock_get_parent, mock_list_verifies, mock_react, mock_reply, _mock_active
+  ):
+    parent_body = (
+        "<!-- codemender-finding:aabbcc112233 -->\n"
+        "**CodeMender fix for finding 1:** 🔴 High / Critical · `CWE-78` · `Cmd Inj`"
+    )
+    mock_get_parent.return_value = {
+        "id": 100,
+        "user": {"type": "Bot"},
+        "body": parent_body,
+    }
+    mock_reply.return_value = gha_runner.fix_comments.github.ReviewResult(
+        ok=True, comment_id=301
+    )
+
+    # 1. Unauthorized contributor is skipped silently.
+    self._write_event(assoc="CONTRIBUTOR")
+    self.assertEqual(gha_runner.run_preflight(self._env()), 0)
+    self.assertEqual(self._read_outputs().get("should_run"), "false")
+    mock_react.assert_not_called()
+
+    # 1b. Non-bot parent comment with spoofed finding tag is skipped.
+    os.remove(self._out_file)
+    self._write_event(assoc="MEMBER")
+    mock_get_parent.return_value = {
+        "id": 100,
+        "user": {"type": "User"},
+        "body": parent_body,
+    }
+    self.assertEqual(gha_runner.run_preflight(self._env()), 0)
+    self.assertEqual(self._read_outputs().get("should_run"), "false")
+    mock_react.assert_not_called()
+
+    # 2. Authorized member on bot parent comment starts verification and emits reply_id.
+    os.remove(self._out_file)
+    mock_get_parent.return_value = {
+        "id": 100,
+        "user": {"type": "Bot"},
+        "body": parent_body,
+    }
+    self.assertEqual(gha_runner.run_preflight(self._env()), 0)
+    self.assertEqual(
+        self._read_outputs(), {"should_run": "true", "verify_reply_id": "301"}
+    )
+    mock_react.assert_called_once_with("o/r", 200, "tok", "eyes")
+
+    # 3. Duplicate in-progress finding is skipped without reacting or replying.
+    os.remove(self._out_file)
+    mock_react.reset_mock()
+    mock_reply.reset_mock()
+    mock_list_verifies.return_value = [
+        gha_runner.VerifyComment("aabbcc112233", "in-progress", "", "", "", 301)
+    ]
+    with patch("builtins.print"):
+      self.assertEqual(gha_runner.run_preflight(self._env()), 0)
+    self.assertEqual(self._read_outputs().get("should_run"), "false")
+    mock_reply.assert_not_called()
+
+    # 4. Already-done finding replies with link to earlier verification.
+    os.remove(self._out_file)
+    mock_list_verifies.return_value = [
+        gha_runner.VerifyComment(
+            "aabbcc112233", "done", "DISMISSED", "https://c/301", "", 301
+        )
+    ]
+    self.assertEqual(gha_runner.run_preflight(self._env()), 0)
+    self.assertEqual(self._read_outputs().get("should_run"), "false")
+    self.assertIn("already verified", mock_reply.call_args.args[4])
+    self.assertIn("https://c/301", mock_reply.call_args.args[4])
+
+    # 5. Concurrency cap (MAX_CONCURRENT_VERIFIES = 4) blocks 5th active verify.
+    os.remove(self._out_file)
+    mock_reply.reset_mock()
+    mock_list_verifies.return_value = [
+        gha_runner.VerifyComment(f"f{i:011d}", "in-progress", "", "", "", 400 + i)
+        for i in range(gha_runner.MAX_CONCURRENT_VERIFIES)
+    ]
+    self.assertEqual(gha_runner.run_preflight(self._env()), 0)
+    self.assertEqual(self._read_outputs().get("should_run"), "false")
+    self.assertIn("Maximum concurrent verifications (4)", mock_reply.call_args.args[4])
+
+  @patch.object(gha_runner, "update_review_comment")
+  @patch.object(gha_runner, "get_sticky_comment_body", return_value="")
+  @patch.object(gha_runner, "fetch_finding_sarif_from_artifact", return_value=None)
+  @patch.object(gha_runner, "get_review_comment")
+  def test_run_verify_reconstructs_sarif_and_updates_reply(
+      self, mock_get_parent, _mock_artifact, _mock_sticky, mock_update
+  ):
+    event = self._write_event()
+    mock_get_parent.return_value = {
+        "id": 100,
+        "user": {"type": "Bot"},
+        "path": "src/archive/unpack.py",
+        "line": 18,
+        "body": (
+            "<!-- codemender-finding:aabbcc112233 -->\n"
+            "**CodeMender fix for finding 1:** 🔴 High / Critical · `CWE-78` · `Cmd Inj`"
+        ),
+    }
+    mock_update.return_value = gha_runner.fix_comments.github.ReviewResult(
+        ok=True, comment_id=301
+    )
+    verified_doc = {
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "CodeMender"}},
+            "results": [{
+                "ruleId": "CWE-78",
+                "level": "error",
+                "message": {"text": "Cmd Inj"},
+                "properties": {
+                    "status": "DISMISSED",
+                    "dismiss_reason": "Input is sanitized upstream.",
+                },
+            }],
+        }],
+    }
+    launcher = _launcher(scan_result=_scan_result(verified_doc))
+    out_dir = os.path.join(self._temp_dir, "out")
+    os.makedirs(out_dir)
+
+    rc = gha_runner.run_verify(
+        event,
+        self._env(CODEMENDER_VERIFY_REPLY_ID="301"),
+        launcher,
+        out_dir=out_dir,
+    )
+    self.assertEqual(rc, 0)
+    self.assertEqual(launcher.run.call_args.args[0], "verify")
+    self.assertTrue(
+        os.path.isfile(os.path.join(out_dir, "verified", "finding-aabbcc112233.sarif"))
+    )
+    updated_body = mock_update.call_args.args[3]
+    self.assertIn("<!-- codemender-verify:done finding:aabbcc112233 status:DISMISSED -->", updated_body)
+    self.assertIn("Input is sanitized upstream.", updated_body)
 
 
 if __name__ == "__main__":

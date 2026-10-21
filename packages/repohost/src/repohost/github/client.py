@@ -25,11 +25,14 @@ helpers follow below.
 
 import dataclasses
 import functools
+import io
 import logging
 import re
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+import zipfile
 
+from codemender.sarif import SarifDocument
 import requests
 
 logger = logging.getLogger("codemender-github-actions")
@@ -39,7 +42,12 @@ GITHUB_API_URL = "https://api.github.com"
 # Hidden HTML marker that identifies the comment owned by CodeMender, so it
 # can be found and updated instead of posting a new comment on every run.
 STICKY_SUMMARY_MARKER = "<!-- codemender-summary -->"
-FINDING_TAG_RE = re.compile(r"<!-- codemender-finding:([^\s>]+) -->")
+FINDING_TAG_RE = re.compile(r"<!-- codemender-finding:([A-Za-z0-9_.:]+) -->")
+VERIFY_TAG_RE = re.compile(
+    r"<!-- codemender-verify:(in-progress|done|failed)"
+    r" finding:([A-Za-z0-9_.:]+)(?: status:([^\s>]+))? -->"
+)
+_MAX_ARTIFACT_FILE_BYTES = 20 * 1024 * 1024
 
 # GitHub rejects issue/review comment bodies longer than this.
 MAX_COMMENT_BODY_CHARS = 65536
@@ -83,6 +91,26 @@ class FindingComment:
   comment_id: int = 0
 
 
+@dataclasses.dataclass(frozen=True)
+class VerifyComment:
+  """An existing CodeMender verification reply comment on the PR."""
+
+  finding_id: str
+  state: str
+  status: str = ""
+  url: str = ""
+  updated_at: str = ""
+  comment_id: int = 0
+
+
+def is_bot_comment(comment: Optional[Mapping[str, Any]]) -> bool:
+  """Returns True if `comment` was authored by a GitHub bot."""
+  if not isinstance(comment, Mapping):
+    return False
+  user = comment.get("user")
+  return isinstance(user, Mapping) and user.get("type") == "Bot"
+
+
 def finding_tag(finding_id: str) -> str:
   """Returns the hidden HTML marker that tags a comment for `finding_id`.
 
@@ -97,9 +125,25 @@ def finding_tag(finding_id: str) -> str:
     ValueError: If `finding_id` is empty or contains unsafe characters.
   """
   clean = (finding_id or "").strip()
-  if not clean or any(c in clean for c in (" ", "-", "<", ">", "\n", "\r")):
+  if (
+      not clean
+      or ".." in clean
+      or any(c in clean for c in (" ", "-", "/", "\\", "<", ">", "\n", "\r"))
+  ):
     raise ValueError(f"Invalid finding_id for tag: {finding_id!r}")
   return f"<!-- codemender-finding:{clean} -->"
+
+
+def verify_tag(state: str, finding_id: str, status: str = "") -> str:
+  """Returns the hidden HTML marker that tags a verification reply comment."""
+  finding_tag(finding_id)
+  if state not in ("in-progress", "done", "failed"):
+    raise ValueError(f"Invalid verify state: {state!r}")
+  clean_status = (status or "").strip()
+  if clean_status and any(c in clean_status for c in (" ", "-", "<", ">", "\n", "\r")):
+    raise ValueError(f"Invalid verify status: {status!r}")
+  suffix = f" status:{clean_status}" if clean_status else ""
+  return f"<!-- codemender-verify:{state} finding:{finding_id.strip()}{suffix} -->"
 
 
 def post_or_update_sticky_comment(
@@ -146,10 +190,7 @@ def list_finding_comments(
     return None
   found: Dict[str, FindingComment] = {}
   for comment in comments:
-    if not isinstance(comment, dict) or comment.get("in_reply_to_id"):
-      continue
-    user = comment.get("user")
-    if not isinstance(user, dict) or user.get("type") != "Bot":
+    if not is_bot_comment(comment) or comment.get("in_reply_to_id"):
       continue
     body = str(comment.get("body") or "")
     tags = FINDING_TAG_RE.findall(body)
@@ -371,6 +412,170 @@ def reply_to_comment(
   return _with_comment_id(result, response)
 
 
+def update_review_comment(
+    repo: str, comment_id: int, token: str, body: str
+) -> ReviewResult:
+  """Updates an existing PR review comment in place (`PATCH`)."""
+  if not _positive_id(comment_id):
+    return ReviewResult(ok=False)
+  result, response = _post(
+      f"{GITHUB_API_URL}/repos/{repo}/pulls/comments/{comment_id}",
+      token,
+      {"body": truncate_comment_body(body)},
+      f"an update to review comment {comment_id}",
+      method="PATCH",
+  )
+  return _with_comment_id(result, response)
+
+
+def react_to_review_comment(
+    repo: str, comment_id: int, token: str, content: str = "eyes"
+) -> bool:
+  """Adds a reaction (default: `eyes`) to a PR review comment."""
+  if not _positive_id(comment_id):
+    return False
+  result, _ = _post(
+      f"{GITHUB_API_URL}/repos/{repo}/pulls/comments/{comment_id}/reactions",
+      token,
+      {"content": content},
+      f"a {content!r} reaction to review comment {comment_id}",
+  )
+  return result.ok
+
+
+def get_review_comment(
+    repo: str, comment_id: int, token: str
+) -> Optional[Dict[str, Any]]:
+  """Fetches a single PR review comment by ID, or `None` if unavailable."""
+  if not _positive_id(comment_id):
+    return None
+  data = _get_object(
+      f"{GITHUB_API_URL}/repos/{repo}/pulls/comments/{comment_id}",
+      token,
+      f"review comment {comment_id}",
+  )
+  return data if isinstance(data, dict) else None
+
+
+def list_verify_comments(
+    repo: str, pr_number: int, token: str
+) -> Optional[List[VerifyComment]]:
+  """Lists existing bot verification comments on the PR."""
+  comments = _get_pages(
+      f"{GITHUB_API_URL}/repos/{repo}/pulls/{pr_number}/comments?per_page=100",
+      token,
+      f"the review comments of PR #{pr_number}",
+  )
+  if comments is None:
+    return None
+  found: List[VerifyComment] = []
+  for comment in comments:
+    if not is_bot_comment(comment):
+      continue
+    body = str(comment.get("body") or "")
+    match = VERIFY_TAG_RE.search(body)
+    if not match:
+      continue
+    found.append(
+        VerifyComment(
+            finding_id=match.group(2),
+            state=match.group(1),
+            status=match.group(3) or "",
+            url=str(comment.get("html_url") or ""),
+            updated_at=str(
+                comment.get("updated_at") or comment.get("created_at") or ""
+            ),
+            comment_id=_positive_id(comment.get("id")),
+        )
+    )
+  return found
+
+
+def has_other_active_verify_runs(
+    repo: str, token: str, current_run_id: str
+) -> bool:
+  """Returns True if another `pull_request_review_comment` workflow run is active."""
+  data = _get_object(
+      f"{GITHUB_API_URL}/repos/{repo}/actions/runs"
+      "?event=pull_request_review_comment&per_page=20",
+      token,
+      f"active verify workflow runs for {repo}",
+  )
+  runs = (data or {}).get("workflow_runs") if isinstance(data, dict) else None
+  if not isinstance(runs, list):
+    return True
+  return any(
+      isinstance(r, dict)
+      and str(r.get("id") or "") != str(current_run_id or "")
+      and r.get("status")
+      in ("in_progress", "queued", "waiting", "pending", "requested")
+      for r in runs
+  )
+
+
+def get_sticky_comment_body(repo: str, pr_number: int, token: str) -> str:
+  """Returns the body of CodeMender's sticky summary comment on the PR, or ''."""
+  comments = _get_pages(
+      f"{GITHUB_API_URL}/repos/{repo}/issues/{pr_number}/comments?per_page=100",
+      token,
+      f"the issue comments of PR #{pr_number}",
+  )
+  for comment in comments or ():
+    if is_bot_comment(comment) and STICKY_SUMMARY_MARKER in str(
+        comment.get("body") or ""
+    ):
+      return str(comment.get("body") or "")
+  return ""
+
+
+def fetch_finding_sarif_from_artifact(
+    repo: str, pr_number: int, token: str, finding_id: str
+) -> Optional[Dict[str, Any]]:
+  """Downloads the PR's scan artifact and returns the 1-result SARIF for `finding_id`."""
+  data = _get_object(
+      f"{GITHUB_API_URL}/repos/{repo}/actions/artifacts"
+      f"?name=codemender-report-pr-{pr_number}&per_page=30",
+      token,
+      f"artifacts for PR #{pr_number}",
+  )
+  artifacts = (data or {}).get("artifacts") if isinstance(data, dict) else None
+  if not isinstance(artifacts, list):
+    return None
+  candidates = [
+      a
+      for a in artifacts
+      if isinstance(a, dict) and not a.get("expired") and _positive_id(a.get("id"))
+  ]
+  candidates.sort(key=lambda a: int(a["id"]), reverse=True)
+  for artifact in candidates:
+    archive_bytes = _get_bytes(
+        f"{GITHUB_API_URL}/repos/{repo}/actions/artifacts/{artifact['id']}/zip",
+        token,
+        f"artifact {artifact['id']} zip",
+    )
+    if not archive_bytes:
+      continue
+    try:
+      with zipfile.ZipFile(io.BytesIO(archive_bytes)) as zf:
+        sarif_names = sorted(
+            (n for n in zf.namelist() if n.endswith(".sarif")),
+            key=lambda n: (0 if n.startswith("findings/") else 1, n),
+        )
+        for name in sarif_names:
+          info = zf.getinfo(name)
+          if info.file_size > _MAX_ARTIFACT_FILE_BYTES:
+            continue
+          doc = SarifDocument.from_json(
+              zf.read(name).decode("utf-8", errors="replace")
+          )
+          for finding in doc.to_findings():
+            if finding.finding_id == finding_id and finding.document:
+              return finding.document
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      logger.warning("Could not read artifact %s: %s", artifact["id"], e)
+  return None
+
+
 def format_patch_comment(
     *,
     tag: str,
@@ -542,9 +747,12 @@ def _raise_if_retryable(resp: Any) -> None:
 
 
 @retry_on_exception(max_tries=3, initial_delay=3, backoff_factor=2)
-def _post_with_retries(url: str, token: str, payload: Dict[str, Any]) -> Any:
+def _post_with_retries(
+    url: str, token: str, payload: Dict[str, Any], method: str = "POST"
+) -> Any:
   with requests.Session() as session:
-    resp = session.post(
+    fn = session.patch if method == "PATCH" else session.post
+    resp = fn(
         url, headers=_headers(token), json=payload, timeout=_POST_TIMEOUT_SECONDS
     )
   _raise_if_retryable(resp)
@@ -552,10 +760,14 @@ def _post_with_retries(url: str, token: str, payload: Dict[str, Any]) -> Any:
 
 
 def _post(
-    url: str, token: str, payload: Dict[str, Any], what: str
+    url: str,
+    token: str,
+    payload: Dict[str, Any],
+    what: str,
+    method: str = "POST",
 ) -> Tuple[ReviewResult, Dict[str, Any]]:
   try:
-    resp = _post_with_retries(url, token, payload)
+    resp = _post_with_retries(url, token, payload, method=method)
   except _RetryableHTTPError as e:
     logger.warning("Failed to post %s: %s", what, e)
     return ReviewResult(ok=False, status=e.status), {}
@@ -573,6 +785,34 @@ def _post(
   if not isinstance(data, dict):
     data = {}
   return ReviewResult(ok=True, url=str(data.get("html_url") or ""), status=status), data
+
+
+@retry_on_exception(max_tries=3, initial_delay=2, backoff_factor=2)
+def _get_with_retries(url: str, token: str) -> Any:
+  with requests.Session() as session:
+    resp = session.get(
+        url, headers=_headers(token), timeout=_REQUEST_TIMEOUT_SECONDS
+    )
+  _raise_if_retryable(resp)
+  return resp
+
+
+def _get_object(url: str, token: str, what: str) -> Optional[Any]:
+  try:
+    resp = _get_with_retries(url, token)
+    return resp.json() if 200 <= resp.status_code < 300 else None
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.warning("Failed to get %s: %s", what, e)
+    return None
+
+
+def _get_bytes(url: str, token: str, what: str) -> Optional[bytes]:
+  try:
+    resp = _get_with_retries(url, token)
+    return bytes(resp.content) if 200 <= resp.status_code < 300 else None
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.warning("Failed to download %s: %s", what, e)
+    return None
 
 
 @retry_on_exception(max_tries=3, initial_delay=2, backoff_factor=2)
@@ -647,7 +887,9 @@ def _find_sticky_comment_id(
     if not isinstance(comments, list):
       return None
     for comment in comments:
-      if STICKY_SUMMARY_MARKER in (comment.get("body") or ""):
+      if is_bot_comment(comment) and STICKY_SUMMARY_MARKER in (
+          comment.get("body") or ""
+      ):
         return comment.get("id")
     url = resp.links.get("next", {}).get("url")
   return None

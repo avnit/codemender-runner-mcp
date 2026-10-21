@@ -52,9 +52,11 @@ Configuration comes from environment variables set by `action.yml`:
 
 import collections
 import contextlib
+import datetime
 import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import signal
@@ -83,11 +85,25 @@ from launcher.local import (
     LocalDockerLauncher,
     make_world_writable,
 )
-# Governing: ADR-0008, SPEC-GHA, SPEC-GHA-FIX
+# Governing: ADR-0008, SPEC-GHA, SPEC-GHA-FIX, SPEC-GHA-VERIFY
 from repohost.github import (
     fix_comments,
     list_finding_comments,
     post_or_update_sticky_comment,
+)
+from repohost.github.client import (
+    FINDING_TAG_RE,
+    VerifyComment,
+    fetch_finding_sarif_from_artifact,
+    get_review_comment,
+    get_sticky_comment_body,
+    has_other_active_verify_runs,
+    is_bot_comment,
+    list_verify_comments,
+    react_to_review_comment,
+    reply_to_comment,
+    update_review_comment,
+    verify_tag,
 )
 from repohost.github.fix_comments import FixCell
 
@@ -95,11 +111,23 @@ logger = logging.getLogger("codemender-github-actions")
 
 FIX_TIMEOUT_SECONDS = 35 * 60
 DEFAULT_MAX_PARALLEL_FIXES = DEFAULT_MAX_PARALLEL
-_PR_EVENTS = ("pull_request",)
+MAX_CONCURRENT_VERIFIES = 4
+VERIFY_LOCK_TTL_SECONDS = 45 * 60
+VERIFY_COMMAND = "@cm-runner verify"
+ALLOWED_VERIFY_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+_PR_EVENTS = ("pull_request", "pull_request_review_comment")
 _GHA_CREDS_PATTERN = "gha-creds-*.json"
 _FIX_OFF_VALUES = ("false", "0", "no")
 _EXIT_OK = 0
 _EXIT_NO_FIX = 3
+_VERIFY_CMD_RE = re.compile(
+    r"(?i)(?<!\w)@(?:cm-runner|codemender(?:-runner)?)\s+verify(?!\w)"
+)
+_FENCED_BLOCK_RE = re.compile(r"(?ms)^[ \t]{0,3}(`{3,}|~{3,}).*?^[ \t]{0,3}\1")
+_INLINE_CODE_RE = re.compile(r"`+[^`]*`+")
+_PARENT_HEADER_RE = re.compile(
+    r"\*\*CodeMender fix for finding (\d+):\*\*\s+(.+?)\s+·\s+`([^`]+)`\s+·\s+`([^`]+)`"
+)
 
 # Default and bounds for `cm-runner find-diff --diff-workers`. These mirror
 # `cli/commands/find_diff.py` in cm-runner, which this action can't import
@@ -149,7 +177,7 @@ _OUTCOME_LABELS = {
 
 
 # ---------------------------------------------------------------------------
-# Entry points (`main` -> `run_pr` -> `_run_fixes`)
+# Entry points (`main` -> `run_preflight` / `run_pr` / `run_verify`)
 # ---------------------------------------------------------------------------
 
 
@@ -224,11 +252,17 @@ def create_launcher(
   raise ValueError(f"Unsupported CODEMENDER_BACKEND: {backend!r}.")
 
 
-def main(env: Mapping[str, str] = os.environ) -> int:
+def main(
+    env: Mapping[str, str] = os.environ,
+    argv: Optional[Sequence[str]] = None,
+) -> int:
   """CLI entry point invoked by `action.yml`."""
   logging.basicConfig(
       level=logging.INFO, format="%(levelname)s %(message)s", stream=sys.stderr
   )
+  args = sys.argv[1:] if argv is None else list(argv)
+  if "--preflight" in args or env.get("CODEMENDER_PREFLIGHT") == "1":
+    return run_preflight(env)
 
   event_name = env.get("GITHUB_EVENT_NAME", "")
   if event_name not in _PR_EVENTS:
@@ -296,6 +330,8 @@ def main(env: Mapping[str, str] = os.environ) -> int:
         print(f"::error::{e}")
         return 1
       print(f"::notice::cm-runner container runtime: {launcher.runtime}")
+      if event_name == "pull_request_review_comment":
+        return run_verify(event, env, launcher, out_dir=out_dir)
       return run_pr(event, env, launcher, out_dir=out_dir)
     finally:
       shutil.rmtree(staging_root, ignore_errors=True)
@@ -317,7 +353,8 @@ def main(env: Mapping[str, str] = os.environ) -> int:
     except (ImportError, ValueError) as e:
       print(f"::error::{e}")
       return 1
-    return run_pr(event, env, launcher, out_dir=env.get("CODEMENDER_OUT_DIR"))
+    if event_name == "pull_request_review_comment":
+      return run_verify(event, env, launcher, out_dir=env.get("CODEMENDER_OUT_DIR"))
     return run_pr(event, env, launcher, out_dir=env.get("CODEMENDER_OUT_DIR"))
 
   else:
@@ -580,6 +617,413 @@ def _run_fixes(
     print("::error::Could not update the CodeMender comment with the fix results.")
     return 1
   return 1 if stopped else 0
+
+
+# ---------------------------------------------------------------------------
+# On-demand PR verification (`run_preflight` + `run_verify`)
+# ---------------------------------------------------------------------------
+
+
+def _is_valid_verify_request(event: Dict[str, Any]) -> bool:
+  """Returns True if `event` is a human collaborator's `@cm-runner verify` reply on a same-repo PR."""
+  comment = event.get("comment") or {}
+  pr = event.get("pull_request") or {}
+  assoc = str(comment.get("author_association") or "").upper()
+  return (
+      event.get("action") == "created"
+      and not is_bot_comment(comment)
+      and not is_fork_pr(event)
+      and int(pr.get("number") or 0) > 0
+      and int(comment.get("id") or 0) > 0
+      and int(comment.get("in_reply_to_id") or 0) > 0
+      and assoc in ALLOWED_VERIFY_ASSOCIATIONS
+      and _has_verify_command(str(comment.get("body") or ""))
+  )
+
+
+def _extract_parent_finding_id(
+    parent: Optional[Mapping[str, Any]],
+) -> Optional[str]:
+  """Returns the finding_id if `parent` is a bot-authored CodeMender fix comment."""
+  if not is_bot_comment(parent):
+    return None
+  match = FINDING_TAG_RE.search(str((parent or {}).get("body") or ""))
+  return match.group(1) if match else None
+
+
+def run_preflight(env: Mapping[str, str]) -> int:
+  """Fast pre-flight gate executed before WIF auth, gVisor, and Docker pull."""
+  event_name = env.get("GITHUB_EVENT_NAME", "")
+  if event_name == "pull_request":
+    _write_github_output(env, should_run="true")
+    return 0
+  if event_name != "pull_request_review_comment":
+    _write_github_output(env, should_run="false")
+    return 0
+
+  event_path = env.get("GITHUB_EVENT_PATH", "")
+  repo = env.get("GITHUB_REPOSITORY", "")
+  token = env.get("GITHUB_TOKEN", "")
+  if not (event_path and os.path.isfile(event_path) and repo and token):
+    _write_github_output(env, should_run="false")
+    return 0
+
+  with open(event_path, encoding="utf-8") as f:
+    event = json.load(f)
+
+  comment = event.get("comment") or {}
+  pr = event.get("pull_request") or {}
+  pr_number = int(pr.get("number") or 0)
+  comment_id = int(comment.get("id") or 0)
+  parent_id = int(comment.get("in_reply_to_id") or 0)
+  assoc = str(comment.get("author_association") or "").upper()
+  user_type = str((comment.get("user") or {}).get("type") or "")
+
+  if not _is_valid_verify_request(event):
+    print(
+        f"::notice::Pre-flight skip: action={event.get('action')!r},"
+        f" user_type={user_type!r}, assoc={assoc!r}, parent_id={parent_id},"
+        f" has_cmd={_has_verify_command(str(comment.get('body') or ''))}."
+    )
+    _write_github_output(env, should_run="false")
+    return 0
+
+  parent = get_review_comment(repo, parent_id, token)
+  finding_id = _extract_parent_finding_id(parent)
+  if not finding_id:
+    print(f"::notice::Pre-flight skip: parent comment {parent_id} is not a CodeMender finding comment.")
+    _write_github_output(env, should_run="false")
+    return 0
+
+  latest: Dict[str, VerifyComment] = {}
+  for vc in sorted(
+      list_verify_comments(repo, pr_number, token) or (),
+      key=lambda c: c.comment_id,
+  ):
+    latest[vc.finding_id] = vc
+
+  other_runs_active: Optional[bool] = None
+
+  def _is_active_lock(vc: VerifyComment) -> bool:
+    nonlocal other_runs_active
+    if vc.state != "in-progress" or not _is_fresh_lock(vc.updated_at):
+      return False
+    if other_runs_active is None:
+      other_runs_active = has_other_active_verify_runs(
+          repo, token, env.get("GITHUB_RUN_ID", "")
+      )
+    return other_runs_active
+
+  existing = latest.get(finding_id)
+  if existing is not None:
+    if _is_active_lock(existing):
+      print(f"::notice::Verification for finding {finding_id} is already in progress.")
+      _write_github_output(env, should_run="false")
+      return 0
+    if existing.state == "done":
+      react_to_review_comment(repo, comment_id, token, "eyes")
+      status_label = _inline(existing.status or "DONE", 20)
+      link = f"[this comment]({existing.url})" if existing.url else "an earlier comment"
+      reply_to_comment(
+          repo,
+          pr_number,
+          token,
+          parent_id,
+          f"ℹ️ This finding was already verified ({status_label}) in {link}.",
+      )
+      _write_github_output(env, should_run="false")
+      return 0
+
+  active_count = sum(1 for vc in latest.values() if _is_active_lock(vc))
+  if active_count >= MAX_CONCURRENT_VERIFIES:
+    react_to_review_comment(repo, comment_id, token, "eyes")
+    reply_to_comment(
+        repo,
+        pr_number,
+        token,
+        parent_id,
+        f"⚠️ Maximum concurrent verifications ({MAX_CONCURRENT_VERIFIES})"
+        " reached on this PR. Please wait for an active verification to finish"
+        " and try again.",
+    )
+    _write_github_output(env, should_run="false")
+    return 0
+
+  react_to_review_comment(repo, comment_id, token, "eyes")
+  in_progress_body = _format_verify_in_progress(finding_id, _run_url(env))
+  if existing is not None and existing.state == "in-progress" and existing.comment_id > 0:
+    updated = update_review_comment(repo, existing.comment_id, token, in_progress_body)
+    if updated.ok:
+      _write_github_output(
+          env, should_run="true", verify_reply_id=str(existing.comment_id)
+      )
+      return 0
+
+  reply = reply_to_comment(repo, pr_number, token, parent_id, in_progress_body)
+  _write_github_output(
+      env,
+      should_run="true",
+      verify_reply_id=str(reply.comment_id or 0),
+  )
+  return 0
+
+
+def run_verify(
+    event: Dict[str, Any],
+    env: Mapping[str, str],
+    launcher: Launcher,
+    *,
+    out_dir: Optional[str] = None,
+) -> int:
+  """Runs `cm-runner verify` for an on-demand `@cm-runner verify` comment."""
+  repo = env.get("GITHUB_REPOSITORY", "")
+  token = env.get("GITHUB_TOKEN", "")
+  pr = event.get("pull_request") or {}
+  comment = event.get("comment") or {}
+  pr_number = int(pr.get("number") or 0)
+  parent_id = int(comment.get("in_reply_to_id") or 0)
+  if pr_number <= 0 or parent_id <= 0:
+    print("::error::Event payload is missing pull_request.number or comment.in_reply_to_id.")
+    return 1
+
+  parent = get_review_comment(repo, parent_id, token)
+  finding_id = _extract_parent_finding_id(parent)
+  if not parent or not finding_id:
+    print("::error::Parent comment is not a CodeMender fix comment.")
+    return 1
+
+  run_url = _run_url(env)
+  try:
+    reply_id = int(env.get("CODEMENDER_VERIFY_REPLY_ID") or 0)
+  except ValueError:
+    reply_id = 0
+  if reply_id <= 0:
+    posted = reply_to_comment(
+        repo,
+        pr_number,
+        token,
+        parent_id,
+        _format_verify_in_progress(finding_id, run_url),
+    )
+    reply_id = posted.comment_id
+
+  def finish_reply(body: str) -> bool:
+    if reply_id > 0 and update_review_comment(repo, reply_id, token, body).ok:
+      return True
+    return reply_to_comment(repo, pr_number, token, parent_id, body).ok
+
+  if out_dir is None:
+    out_dir = tempfile.mkdtemp(
+        prefix="codemender-verify-out-", dir=env.get("RUNNER_TEMP") or None
+    )
+
+  sarif_doc = fetch_finding_sarif_from_artifact(
+      repo, pr_number, token, finding_id
+  ) or _reconstruct_finding_sarif(
+      finding_id, parent, get_sticky_comment_body(repo, pr_number, token)
+  )
+  finding_file = os.path.join(out_dir, "finding.sarif")
+  with open(finding_file, "w", encoding="utf-8") as f:
+    json.dump(sarif_doc, f, indent=2)
+    f.write("\n")
+
+  verify_result: Optional[RunResult] = None
+  error = ""
+  with _stop_fixes_on_signal(launcher):
+    try:
+      verify_result = launcher.run(
+          "verify",
+          [
+              "--repo",
+              CONTAINER_WORKSPACE_DIR,
+              "--finding",
+              f"{CONTAINER_OUT_DIR}/finding.sarif",
+              "--out",
+              CONTAINER_OUT_DIR,
+          ],
+      )
+    except KeyboardInterrupt:
+      finish_reply(
+          _format_verify_reply(
+              finding_id, "", "", run_url, "The verification run was cancelled or timed out."
+          )
+      )
+      return 1
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      error = str(e)
+
+  status, dismiss_reason, verified_sarif = _parse_verify_result(verify_result)
+  if verified_sarif is not None:
+    try:
+      verified_dir = os.path.join(out_dir, "verified")
+      os.makedirs(verified_dir, exist_ok=True)
+      target = os.path.join(verified_dir, f"finding-{finding_id}.sarif")
+      if not os.path.islink(target):
+        with open(target, "w", encoding="utf-8") as f:
+          json.dump(verified_sarif, f, indent=2)
+          f.write("\n")
+    except OSError as e:
+      logger.warning("Could not save verified SARIF: %s", e)
+  elif not error:
+    error = (
+        f"cm-runner verify exited with code {verify_result.exit_code}."
+        if verify_result is not None and not verify_result.ok
+        else "cm-runner verify did not emit a valid SARIF 2.1.0 document."
+    )
+
+  if not finish_reply(
+      _format_verify_reply(finding_id, status, dismiss_reason, run_url, error)
+  ):
+    return 1
+  return 0 if status in ("VERIFIED", "DISMISSED", "OPEN") and not error else 1
+
+
+def _has_verify_command(body: str) -> bool:
+  stripped = _FENCED_BLOCK_RE.sub(" ", body or "")
+  stripped = _INLINE_CODE_RE.sub(" ", stripped)
+  return bool(_VERIFY_CMD_RE.search(stripped))
+
+
+def _is_fresh_lock(updated_at: str) -> bool:
+  if not updated_at:
+    return True
+  try:
+    ts = datetime.datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+    if ts.tzinfo is None:
+      ts = ts.replace(tzinfo=datetime.timezone.utc)
+    age = (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds()
+    return age < VERIFY_LOCK_TTL_SECONDS
+  except ValueError:
+    return True
+
+
+def _write_github_output(env: Mapping[str, str], **items: str) -> None:
+  output_path = env.get("GITHUB_OUTPUT", "")
+  if not output_path:
+    return
+  with open(output_path, "a", encoding="utf-8") as f:
+    for key, value in items.items():
+      f.write(f"{key}={value}\n")
+
+
+def _format_verify_in_progress(finding_id: str, run_url: str) -> str:
+  return "\n".join([
+      verify_tag("in-progress", finding_id),
+      f"⏳ **Verifying finding `{finding_id}`...**"
+      f" ([Workflow run logs]({run_url}))",
+  ])
+
+
+def _format_verify_reply(
+    finding_id: str,
+    status: str,
+    dismiss_reason: str,
+    run_url: str,
+    error: str = "",
+) -> str:
+  if error or status not in ("VERIFIED", "DISMISSED", "OPEN"):
+    reason = _inline(error or "Verification failed", 200)
+    return "\n".join([
+        verify_tag("failed", finding_id),
+        f"⚠️ **Verification failed** for finding `{finding_id}`: {reason}."
+        f" ([Workflow run logs]({run_url}))",
+    ])
+  tag = verify_tag("done", finding_id, status)
+  if status == "VERIFIED":
+    msg = (
+        f"🚨 **Verified (`VERIFIED`)** — CodeMender confirmed that finding"
+        f" `{finding_id}` is exploitable."
+    )
+  elif status == "DISMISSED":
+    detail = f" Reason: {_sanitize_block_text(dismiss_reason, 500)}" if dismiss_reason else ""
+    msg = (
+        f"✅ **Dismissed (`DISMISSED`)** — CodeMender refuted finding"
+        f" `{finding_id}` as not exploitable.{detail}"
+    )
+  else:
+    msg = (
+        f"ℹ️ **Inconclusive (`OPEN`)** — CodeMender could neither confirm nor"
+        f" refute finding `{finding_id}`."
+    )
+  return f"{tag}\n{msg}\n\n[Workflow run logs]({run_url})"
+
+
+def _parse_verify_result(
+    verify_result: Optional[RunResult],
+) -> Tuple[str, str, Optional[Dict[str, Any]]]:
+  if (
+      verify_result is None
+      or not verify_result.ok
+      or not (verify_result.stdout or b"").strip()
+  ):
+    return ("", "", None)
+  try:
+    text = (
+        verify_result.stdout.decode("utf-8")
+        if isinstance(verify_result.stdout, bytes)
+        else verify_result.stdout
+    )
+    doc = SarifDocument.from_json(text)
+    if not doc.results:
+      return ("", "", None)
+    props = doc.results[0].get("properties") or {}
+    status = str(props.get("status") or "OPEN").strip().upper()
+    reason = str(props.get("dismiss_reason") or "").strip()
+    return (status, reason, doc.data)
+  except Exception:  # pylint: disable=broad-exception-caught
+    return ("", "", None)
+
+
+def _reconstruct_finding_sarif(
+    finding_id: str, parent: Mapping[str, Any], sticky_body: str = ""
+) -> Dict[str, Any]:
+  """Reconstructs a valid 1-result SARIF 2.1.0 dict from the parent fix comment."""
+  body = str(parent.get("body") or "")
+  match = _PARENT_HEADER_RE.search(body)
+  index = int(match.group(1)) if match else 1
+  sev_text = match.group(2) if match else ""
+  rule_id = match.group(3) if match else "unknown"
+  title = match.group(4) if match else "Vulnerability finding"
+  level = "warning"
+  for sarif_level, label in _SARIF_LEVEL_LABELS.items():
+    if label in sev_text:
+      level = sarif_level
+      break
+
+  details = ""
+  if sticky_body:
+    sec_re = re.compile(
+        rf"####\s+{index}\.\s+[^\n]+\n(?:- [^\n]+\n)*?- \*\*Details:\*\*\s+([^\n]+)"
+    )
+    sec_match = sec_re.search(sticky_body)
+    if sec_match:
+      details = sec_match.group(1).strip()
+  message = f"{title}: {details}" if details else title
+
+  path = str(parent.get("path") or "").strip()
+  end_line = int(parent.get("line") or parent.get("original_line") or 1)
+  start_line = int(
+      parent.get("start_line") or parent.get("original_start_line") or end_line
+  )
+  return {
+      "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+      "version": "2.1.0",
+      "runs": [{
+          "tool": {"driver": {"name": "CodeMender", "rules": [{"id": rule_id}]}},
+          "results": [{
+              "ruleId": rule_id,
+              "level": level,
+              "message": {"text": message},
+              "partialFingerprints": {"primaryLocationLineHash": finding_id},
+              "locations": [{
+                  "physicalLocation": {
+                      "artifactLocation": {"uri": path},
+                      "region": {"startLine": start_line, "endLine": end_line},
+                  }
+              }],
+          }],
+      }],
+  }
 
 
 # ---------------------------------------------------------------------------
@@ -871,7 +1315,7 @@ def is_fork_pr(event: Dict[str, Any]) -> bool:
   pr = event.get("pull_request") or {}
   head_repo = ((pr.get("head") or {}).get("repo") or {}).get("full_name")
   base_repo = ((pr.get("base") or {}).get("repo") or {}).get("full_name")
-  return bool(head_repo) and head_repo != base_repo
+  return bool(base_repo) and head_repo != base_repo
 
 
 def fix_enabled(env: Mapping[str, str]) -> bool:

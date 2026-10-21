@@ -16,8 +16,11 @@
 
 """Unit tests for repohost.github.client."""
 
+import io
+import json
 import unittest
 from unittest.mock import MagicMock, patch
+import zipfile
 
 from codemender.vcs.git import SuggestionHunk
 import repohost.github as github_pkg
@@ -31,15 +34,22 @@ from repohost.github.client import (
     STICKY_SUMMARY_MARKER,
     code_fence,
     create_review_with_suggestions,
+    fetch_finding_sarif_from_artifact,
     finding_tag,
     format_patch_comment,
     get_pr_diff_line_ranges,
+    get_review_comment,
+    get_sticky_comment_body,
     list_finding_comments,
+    list_verify_comments,
     post_or_update_sticky_comment,
     post_patch_comment,
+    react_to_review_comment,
     reply_to_comment,
     retry_on_exception,
     truncate_comment_body,
+    update_review_comment,
+    verify_tag,
 )
 
 
@@ -119,8 +129,13 @@ class TestGitHubApi(unittest.TestCase):
     )
 
     session.get.side_effect = [
-        _response([{"id": 1, "body": "a"}], links={"next": {"url": "page2"}}),
-        _response([{"id": 99, "body": STICKY_SUMMARY_MARKER}]),
+        _response(
+            [{"id": 1, "user": {"type": "User"}, "body": STICKY_SUMMARY_MARKER}],
+            links={"next": {"url": "page2"}},
+        ),
+        _response(
+            [{"id": 99, "user": {"type": "Bot"}, "body": STICKY_SUMMARY_MARKER}]
+        ),
     ]
     session.patch.return_value = _response({"html_url": "https://x/c/99"})
     self.assertEqual(
@@ -196,6 +211,87 @@ class TestGitHubApi(unittest.TestCase):
     self.assertEqual(
         session.post.call_args_list[1].kwargs["json"]["subject_type"], "file"
     )
+
+  @patch.object(github.requests, "Session")
+  def test_verify_comment_helpers(self, mock_session_cls):
+    session = mock_session_cls.return_value.__enter__.return_value
+    self.assertEqual(
+        verify_tag("done", "aabbcc112233", "VERIFIED"),
+        "<!-- codemender-verify:done finding:aabbcc112233 status:VERIFIED -->",
+    )
+    with self.assertRaises(ValueError):
+      finding_tag("../evil")
+
+    session.patch.return_value = _response({"html_url": "https://c/55", "id": 55})
+    updated = update_review_comment("o/r", 55, "tok", "updated")
+    self.assertTrue(updated.ok)
+    self.assertEqual(updated.comment_id, 55)
+
+    session.post.return_value = _response({"id": 1}, 201)
+    self.assertTrue(react_to_review_comment("o/r", 55, "tok", "eyes"))
+
+    session.get.return_value = _response({"id": 55, "body": "parent"})
+    self.assertEqual(get_review_comment("o/r", 55, "tok"), {"id": 55, "body": "parent"})
+
+    session.get.return_value = _response([
+        {
+            "id": 88,
+            "user": {"type": "Bot"},
+            "body": verify_tag("done", "aabbcc112233", "DISMISSED") + "\nDismissed",
+            "html_url": "https://c/88",
+            "updated_at": "2026-10-16T12:00:00Z",
+        },
+        {
+            "id": 89,
+            "user": {"type": "User"},
+            "body": verify_tag("in-progress", "aabbcc112233"),
+        },
+    ])
+    verifies = list_verify_comments("o/r", 7, "tok")
+    self.assertEqual(len(verifies), 1)
+    self.assertEqual(verifies[0].finding_id, "aabbcc112233")
+    self.assertEqual(verifies[0].state, "done")
+    self.assertEqual(verifies[0].status, "DISMISSED")
+
+    session.get.return_value = _response([
+        {"id": 8, "user": {"type": "User"}, "body": f"{STICKY_SUMMARY_MARKER}\n### Spoofed"},
+        {"id": 9, "user": {"type": "Bot"}, "body": f"{STICKY_SUMMARY_MARKER}\n### Summary"},
+    ])
+    self.assertIn("### Summary", get_sticky_comment_body("o/r", 7, "tok"))
+
+  @patch.object(github.requests, "Session")
+  def test_fetch_finding_sarif_from_artifact(self, mock_session_cls):
+    session = mock_session_cls.return_value.__enter__.return_value
+    sarif_doc = {
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "cm", "rules": [{"id": "R1"}]}},
+            "results": [{
+                "ruleId": "R1",
+                "level": "error",
+                "message": {"text": "boom"},
+                "partialFingerprints": {"primaryLocationLineHash": "aabbcc112233"},
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": "src/a.py"},
+                        "region": {"startLine": 5},
+                    }
+                }],
+            }],
+        }],
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+      zf.writestr("findings/finding_1.sarif", json.dumps(sarif_doc))
+    zip_resp = _response({}, 200)
+    zip_resp.content = buf.getvalue()
+    session.get.side_effect = [
+        _response({"artifacts": [{"id": 101, "expired": False}]}),
+        zip_resp,
+    ]
+    found = fetch_finding_sarif_from_artifact("o/r", 7, "tok", "aabbcc112233")
+    self.assertIsNotNone(found)
+    self.assertEqual(found["runs"][0]["results"][0]["ruleId"], "R1")
 
 
 if __name__ == "__main__":

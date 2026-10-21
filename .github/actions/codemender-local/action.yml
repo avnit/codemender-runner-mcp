@@ -8,6 +8,11 @@
 # Runs CodeMender (cm-runner) locally in Docker containers under gVisor on the
 # GitHub Actions runner VM.
 #
+# M3 (on-demand verification): when a collaborator replies `@cm-runner verify`
+# in a CodeMender fix thread (`pull_request_review_comment`), run a fast
+# pre-flight check (`--preflight`) before WIF/gVisor/Docker setup, then run
+# `cm-runner verify` in a gVisor container and update the thread reply in place.
+#
 # Security boundary: GitHub tokens are used only by host steps below (pulling
 # the image and posting PR comments). They are never passed into a cm-runner
 # container (ADR-0003).
@@ -128,7 +133,21 @@ runs:
           "${PKG_DIR}/launcher" \
           "${PKG_DIR}/repohost[github]"
 
+    - name: Pre-flight check
+      id: preflight
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        PYTHONDONTWRITEBYTECODE: '1'
+      run: |
+        SCRIPT_PATH="${{ github.action_path }}/src/gha_runner.py"
+        if [[ ! -f "$SCRIPT_PATH" ]]; then
+          SCRIPT_PATH="${{ github.action_path }}/../codemender/src/gha_runner.py"
+        fi
+        python "$SCRIPT_PATH" --preflight
+
     - name: Verify PR base commit is present
+      if: steps.preflight.outputs.should_run == 'true' && github.event_name == 'pull_request'
       shell: bash
       env:
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -146,6 +165,7 @@ runs:
         fi
 
     - name: Authenticate to Google Cloud (WIF)
+      if: steps.preflight.outputs.should_run == 'true'
       id: gcp_auth
       uses: google-github-actions/auth@v2
       with:
@@ -155,7 +175,7 @@ runs:
         create_credentials_file: true
 
     - name: Install gVisor
-      if: inputs.container_runtime == 'runsc'
+      if: steps.preflight.outputs.should_run == 'true' && inputs.container_runtime == 'runsc'
       shell: bash
       env:
         GVISOR_RELEASE: ${{ inputs.gvisor_release }}
@@ -184,6 +204,7 @@ runs:
         echo "::notice::gVisor ${GVISOR_RELEASE} (${ARCH}) installed in $((SECONDS - START))s."
 
     - name: Pull cm-runner image
+      if: steps.preflight.outputs.should_run == 'true'
       id: pull-image
       shell: bash
       env:
@@ -210,6 +231,7 @@ runs:
         echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
 
     - name: Run CodeMender
+      if: steps.preflight.outputs.should_run == 'true'
       shell: bash
       env:
         CODEMENDER_BACKEND: ${{ inputs.backend || 'local' }}
@@ -219,6 +241,7 @@ runs:
         CODEMENDER_DIFF_WORKERS: ${{ inputs.diff_workers }}
         CODEMENDER_FIX: ${{ inputs.fix }}
         CODEMENDER_MAX_PARALLEL_FIXES: ${{ inputs.max_parallel_fixes }}
+        CODEMENDER_VERIFY_REPLY_ID: ${{ steps.preflight.outputs.verify_reply_id }}
         CODEMENDER_OUT_DIR: ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}
         GOOGLE_CLOUD_PROJECT: ${{ inputs.gcp_project_id }}
         GOOGLE_GHA_CREDS_PATH: ${{ steps.gcp_auth.outputs.credentials_file_path }}
@@ -233,7 +256,7 @@ runs:
         exec python "$SCRIPT_PATH"
 
     - name: Upload CodeMender report artifacts
-      if: always()
+      if: always() && steps.preflight.outputs.should_run == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: codemender-report-pr-${{ github.event.pull_request.number || github.run_id }}
@@ -242,5 +265,6 @@ runs:
           ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}/report.md
           ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}/findings/*.sarif
           ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}/fixes/*.diff
+          ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}/verified/*.sarif
         if-no-files-found: ignore
         retention-days: ${{ inputs.artifact_retention_days }}

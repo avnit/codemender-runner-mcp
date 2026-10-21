@@ -102,7 +102,16 @@ runs:
           "${PKG_DIR}/launcher" \
           "${PKG_DIR}/repohost[github]"
 
+    - name: Pre-flight check
+      id: preflight
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        PYTHONDONTWRITEBYTECODE: '1'
+      run: python "${{ github.action_path }}/src/gha_runner.py" --preflight
+
     - name: Verify PR base commit is present
+      if: steps.preflight.outputs.should_run == 'true' && github.event_name == 'pull_request'
       shell: bash
       env:
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -120,6 +129,7 @@ runs:
         fi
 
     - name: Authenticate to Google Cloud (WIF)
+      if: steps.preflight.outputs.should_run == 'true'
       id: gcp_auth
       uses: google-github-actions/auth@v2
       with:
@@ -129,12 +139,14 @@ runs:
         create_credentials_file: true
 
     - name: Run CodeMender
+      if: steps.preflight.outputs.should_run == 'true'
       shell: bash
       env:
         CODEMENDER_BACKEND: ${{ inputs.backend || 'cloudrun' }}
         CODEMENDER_LOG_LEVEL: ${{ inputs.log_level }}
         CODEMENDER_DIFF_WORKERS: ${{ inputs.diff_workers }}
         CODEMENDER_FIX: ${{ inputs.fix }}
+        CODEMENDER_VERIFY_REPLY_ID: ${{ steps.preflight.outputs.verify_reply_id }}
         CODEMENDER_OUT_DIR: ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}
         GOOGLE_CLOUD_PROJECT: ${{ inputs.gcp_project_id }}
         GOOGLE_GHA_CREDS_PATH: ${{ steps.gcp_auth.outputs.credentials_file_path }}
@@ -148,7 +160,7 @@ runs:
         exec python "${{ github.action_path }}/src/gha_runner.py"
 
     - name: Upload CodeMender report artifacts
-      if: always()
+      if: always() && steps.preflight.outputs.should_run == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: codemender-report-pr-${{ github.event.pull_request.number || github.run_id }}
@@ -157,5 +169,6 @@ runs:
           ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}/report.md
           ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}/findings/*.sarif
           ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}/fixes/*.diff
+          ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}/verified/*.sarif
         if-no-files-found: ignore
         retention-days: ${{ inputs.artifact_retention_days }}
