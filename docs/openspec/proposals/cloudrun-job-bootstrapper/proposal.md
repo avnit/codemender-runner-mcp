@@ -1,9 +1,9 @@
 # Proposal: Cloud Run Jobs Container Bootstrapper & Execution Harness
 
 **Change ID:** `cloudrun-job-bootstrapper` \
-**Status:** Draft \
+**Status:** Superseded / Consolidated into [SPEC-WORKER](../../specs/worker/spec.md) and [SPEC-0003](../../specs/runner-container-packaging/spec.md) \
 **Author:** Jonathan Del Toro (jondeltoro@google.com) \
-**Target Spec:** [SPEC-RUNNER-CONTAINER-PACKAGING](../../specs/runner-container-packaging/spec.md) \
+**Target Spec:** [SPEC-WORKER](../../specs/worker/spec.md), [SPEC-0003](../../specs/runner-container-packaging/spec.md) \
 **Bug/Epic:** go/cm-ci-cd-project-plan (Workstream 3: Cloud Run Jobs)
 
 ## Why
