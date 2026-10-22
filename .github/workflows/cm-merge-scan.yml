@@ -28,7 +28,7 @@ on:
 # Isolate PR scans from per-thread on-demand verification runs.
 concurrency:
   group: codemender-${{ github.event.pull_request.number || github.ref }}-${{ github.event.comment.in_reply_to_id || github.event.comment.id || 'scan' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_call' }}
 
 permissions:
   actions: read         # Read prior PR scan artifacts when verifying a finding
@@ -42,6 +42,7 @@ jobs:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       (github.event_name == 'pull_request' ||
+       github.event_name == 'workflow_call' ||
        (github.event.comment.in_reply_to_id != null &&
         contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
         contains(github.event.comment.body, '@cm-runner verify')))

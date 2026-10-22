@@ -812,6 +812,10 @@ class TestWorkflowConfigGuard(unittest.TestCase):
         "github.event.pull_request.head.repo.full_name == github.repository",
         content,
     )
+    self.assertIn(
+        "github.event_name == 'workflow_call'",
+        content,
+    )
 
     import re
     import subprocess
