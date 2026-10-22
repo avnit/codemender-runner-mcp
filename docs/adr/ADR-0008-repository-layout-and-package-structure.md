@@ -110,17 +110,29 @@ ______________________________________________________________________
 ### Decision 1: Single Shared Customer Repository & Native Root Entrypoints (`.github/`, `templates/`)
 
 - **Design:** Place GitHub workflows and actions in `.github/` and GitLab CI/CD
-  component templates in `templates/` at the root of the repository.
-- **Why:** Enterprise customers adopt CodeMender in two ways:
-  1. **Org-Level Controls:** Cloning or forking the repository into a customer's
-     GitHub Organization or GitLab Group as a central reusable workflow, action,
-     or component catalog repository.
-  1. **Single-Repo Adoption:** Referencing or copying the CI configuration into
-     a single application repository. Both GitHub (`.github/`) and GitLab
-     (`templates/`) require fixed root paths for reusable workflows, composite
-     actions, and CI/CD Catalog components. Because `.github/` and `templates/`
-     do not collide, placing both at the root allows a single repository to
-     serve both platforms and both adoption models out of the box.
+  component templates in `templates/` at the root of the repository (governed
+  for GitHub distribution and deployment by
+  [SPEC-DIST](../openspec/specs/distribute/spec.md)).
+- **Why:** Enterprise and individual customers adopt CodeMender across three
+  native deployment patterns ([SPEC-DIST](../openspec/specs/distribute/spec.md)):
+  1. **Self-Dogfooding (`codemender-runner`):** Running `.github/workflows/*`
+     and `.github/actions/*` directly on pull requests in this repository,
+     resolving Python workspace packages from the checked-out repository
+     workspace so pull requests test their own code changes.
+  1. **Org-Level Controls (Fork + Rulesets / Cross-Org Action Reuse):** Cloning
+     or forking the repository into a customer's GitHub Organization (enforcing
+     workflows in `.github/workflows/*` via GitHub Organization Repository
+     Rulesets, referencing public cross-org actions in `.github/actions/*`, or
+     running `scripts/set-fork-owner.sh` for private forks) or GitLab Group as a
+     central reusable workflow, action, or component catalog repository.
+  1. **Single-Repo / Personal Account Adoption:** Calling workflows in
+     `.github/workflows/*` via `workflow_call` or referencing composite actions
+     in `.github/actions/*` directly from an individual application repository.
+     Both GitHub (`.github/`) and GitLab (`templates/`) require fixed root paths
+     for reusable workflows, composite actions, and CI/CD Catalog components.
+     Because `.github/` and `templates/` do not collide, placing both at the
+     root allows a single repository to serve both platforms and all adoption
+     models out of the box.
 - **Alternatives Rejected:**
   - *Platform-specific subdirectories (e.g., `github-actions/`, `gitlab-ci/`):*
     Prevents native GitHub cross-repo references and GitLab CI/CD Component

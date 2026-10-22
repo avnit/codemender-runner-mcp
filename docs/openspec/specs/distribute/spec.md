@@ -1,5 +1,5 @@
 <!--*
-freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-02' }
+freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-20' }
 *-->
 
 <!--
@@ -7,496 +7,164 @@ sdd_spec_id: SPEC-DIST
 sdd_implements: None
 sdd_extends: None
 sdd_level: COMPONENT
-sdd_archetype: CLI_TOOL_BATCH_JOB
+sdd_archetype: CI_CD_WORKFLOW
 sdd_cujspec_product: codemender-runner
 -->
 
-# SPEC-DIST: Customer Repository Distribution & Incremental Sync (`scripts/distribute.sh`)
+# SPEC-DIST: Customer Repository Distribution, GitHub Deployment Models & Cross-Repo Action Resolution
 
 **Implements Spec:** None
 
 **Extends Spec:** None
 
+**Governing Journeys:**
+- **Platform / Security Administrator (`persona-platform-admin`)**: As an organization administrator, I want to fork `codemender-runner` once into my GitHub Organization and enforce customer-facing workflows in `.github/workflows/*` across repositories via GitHub Organization Repository Rulesets (*"Require workflows to pass before merging"*), or reuse a public organization's composite actions in `.github/actions/*` without copying files into downstream repositories.
+- **Individual Repository Owner (`persona-repo-owner`)**: As a personal account user or single-repository owner without Organization Rulesets, I want to call workflows in `.github/workflows/*` as reusable workflows (`workflow_call`) or invoke composite actions in `.github/actions/*` directly in a workflow step.
+- **CodeMender Maintainer (`persona-maintainer`)**: As a maintainer developing on `codemender-runner`, I want pull requests opened on `codemender-runner` to dogfood the PR branch's own `packages/{codemender,launcher,repohost}` changes live while using the same `.github/workflows/*` and `.github/actions/*` entrypoints that customers use.
+
 ## Overview
 
-This specification defines the functional requirements, command-line interface,
-file mapping and filtering rules, Git 3-way incremental sync protocol, and
-customer-facing repository layout for the unified distribution script
-(`scripts/distribute.sh`).
+This specification defines the customer repository distribution requirements, GitHub deployment models, workspace-vs-action package resolution behavior, cross-repository composite action and container image resolution, and private fork ownership configuration (`scripts/set-fork-owner.sh` / `make init-fork`) for `codemender-runner`.
 
-`scripts/distribute.sh` is a standalone Bash utility (`#!/usr/bin/env bash`,
-`set -euo pipefail`) that extracts a curated, customer-ready subset of the
-codebase from Git and synchronizes it into a target Git repository—without
-requiring shared Git commit history or checking a tracking manifest file (such
-as `.dist.json`) into the target repository.
+With the three-package Python workspace (`packages/{codemender,launcher,repohost}`) and root `.github/` entrypoints ([ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md)), `codemender-runner` is distributed and consumed directly through **native GitHub repository forking, Organization Repository Rulesets, `workflow_call` reusable workflows, and cross-repository composite action invocations** across `.github/workflows/*` and `.github/actions/*`.
 
-The resulting distribution repository serves a **dual purpose**:
+### Supported GitHub Deployment Models
 
-1. **Live Example Repository:** It places the CodeMender composite GitHub Action
-   directly at `.github/actions/codemender/` and the pull request differential
-   scan workflow at `.github/workflows/cm-merge-scan.yml` alongside
-   `.github/workflows/build_runner_image.yml`, so the distribution repository
-   functions out-of-the-box as a working reference implementation.
-1. **Live Example Repository (`--include-top-level`):** When the maintainer
-   populates the standalone distribution repository with `--include-top-level`,
-   `LICENSE`, `.gitignore`, and `dist/README.md` (mapped to `README.md`) are
-   placed at the repository root alongside `.github/actions/codemender/`,
-   `.github/workflows/cm-merge-scan.yml`,
-   `.github/workflows/build_runner_image.yml`, `.github/codemender-runner/`, and
-   the root GCP Workload Identity Federation (WIF) Terraform configuration
-   (`.github/terraform/` and `.github/terraform/modules/wif/`), so the
-   distribution repository functions out-of-the-box as a self-contained working
-   reference implementation with zero extra top-level directories.
-1. **Default `.github/`-Only Sync:** When `--include-top-level` is omitted (the
-   default), `scripts/distribute.sh` stages only `.github/`, allowing a target
-   repository's existing root `README.md`, `LICENSE`, and `.gitignore` to remain
-   untouched while syncing `.github/`. `scripts/distribute.sh` itself is never
-   copied into `--target`; `README.md` in the distribution repository includes
-   step-by-step instructions for manually copying `.github/actions/codemender/`
-   and `.github/workflows/cm-merge-scan.yml` into additional repositories.
+1. **Model 1 — Self-Dogfooding (`pull_request` on `codemender-runner`):**
+   - Pull requests on `codemender-runner` trigger `.github/workflows/*` directly.
+   - Because `packages/` is present in the checked-out repository workspace on `codemender-runner`, composite actions in `.github/actions/*` install `packages/{codemender,launcher,repohost}` from the checked-out workspace so pull requests test their own code changes live.
+2. **Model 2 — Organization-Wide Policy Enforcement (Fork + Org Repository Rulesets & Public Cross-Org Reuse):**
+   - **Same-Org Ruleset Enforcement & Event Scope (`pull_request` Scanning & Fixes vs. PR-Comment `@cm-runner verify`):** Organizations fork `codemender-runner` into `<org>/codemender-runner` and configure a GitHub Organization Repository Ruleset (*"Require workflows to pass before merging"*) targeting customer-facing workflows in `.github/workflows/*` across selected repositories in `<org>`. Because GitHub Organization Repository Rulesets trigger required workflows on branch/merge-gate events (`pull_request`, `push`, `merge_group`), both **`find-diff` PR scanning** and **automatic `fix` generation (posting inline PR review suggestions/comments and sticky summary comments)** work with **zero workflow files** in target repositories. By contrast, on-demand verification triggered by replying to a PR comment (**`@cm-runner verify`** on `pull_request_review_comment` / `issue_comment`) is ignored by GitHub Organization Repository Rulesets and requires a thin caller workflow in the target repository (Model 3) or an organization-level GitHub App / webhook dispatcher.
+   - **Model 2a — Public Cross-Org Consumption (`Org A -> Org B`) & Live `@main` Trade-Off:** Because customer-facing workflows in `.github/workflows/*` invoke composite actions via full `<owner>/codemender-runner/.github/actions/*` coordinates rather than workspace-relative paths, when `<org-A>/codemender-runner` is **Public**, `<org-B>` can fork the repository for Organization Rulesets and reference `<org-A>`'s public composite actions and public GHCR runner image with **zero edits**. However, leaving the action reference as `<org-A>/codemender-runner/.github/actions/*@main` resolves `<org-A>`'s `main` branch live on every run (so breaking changes merged to upstream `main` immediately affect `<org-B>`). Organizations requiring version isolation should either pin `@<ref>` to a release tag/commit SHA or use Model 2b (`scripts/set-fork-owner.sh` / `make init-fork`).
+   - **Model 2b — Fork-Isolated & Private/Internal Fork Ownership (`scripts/set-fork-owner.sh`):** When `<org-B>` wants to isolate its workflows from live upstream `@main` changes (updating only when `<org-B>` explicitly syncs its fork), customizes `.github/actions/*`, or operates a Private/Internal fork (with GitHub Actions *"Accessible from repositories in the organization/user"* enabled), operators run the fork ownership helper (`scripts/set-fork-owner.sh` / `make init-fork`) to point the `<owner>/codemender-runner` action references in `.github/workflows/*` at `<org-B>/codemender-runner`.
+3. **Model 3 — Personal Account, Single-Repo & Comment-Triggered Adoption (`workflow_call` & Direct Action `uses:`):**
+   - Customer-facing workflows in `.github/workflows/*` support both `pull_request` and `workflow_call`, allowing personal repositories (where GitHub Organization Rulesets are unavailable), individual repositories, or repositories requiring PR-comment-triggered workflows (such as **`@cm-runner verify`** on `pull_request_review_comment` / `issue_comment`) to include a thin caller workflow in `.github/workflows/` that calls `.github/workflows/*` via `workflow_call` or invokes `.github/actions/*` directly while keeping `.github/actions/*` and `packages/` centralized in `codemender-runner`.
 
 This specification is governed by and references:
+- [SPEC-GHA](../github-actions/spec.md) — GitHub Actions Orchestration & Execution Backends.
+- [SPEC-GHA-FIX](../github-actions-fix/spec.md) — Fixes on Pull Requests.
+- [SPEC-WIF](../wif/spec.md) — Unified Terraform Root & Composable Mode-Aware WIF Module (`terraform/` & `terraform/modules/{wif,gcp}`).
+- [ADR-0001: Machine-Readable Output Contract](../../../adr/ADR-0001-machine-readable-output-contract.md)
+- [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../../adr/ADR-0003-environment-scrubbing.md)
+- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
+- [ADR-0009: Abstraction Layers, Orchestration Ownership, and Dependency Injection](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
 
-- [SPEC-FIND-DIFF](../find-diff/spec.md) — Differential vulnerability scanning
-  subcommand (`cm-runner find-diff`).
-- [SPEC-FIX](../fix/spec.md) — Automated patch synthesis and remediation
-  subcommand (`cm-runner fix`).
-- [SPEC-WIF](../wif/spec.md) — Unified Terraform root and composable mode-aware
-  Workload Identity Federation module (`terraform/` &
-  `terraform/modules/{wif,gcp}`).
-- [ADR-0001: Machine-Readable Output Contract](../../adr/ADR-0001-machine-readable-output-contract.md)
-- [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../adr/ADR-0003-environment-scrubbing.md)
-- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../adr/ADR-0008-repository-layout-and-package-structure.md)
+---
 
 ## Requirements
 
-### REQ-0001: Distribution CLI Surface & Pre-Flight Validation {#req-0001}
+### REQ-0001: Dual-Mode Python Package Resolution in `.github/actions/*` {#req-0001}
 
-- **CUJ UUID:** cuj-dist-cli-surface
+- **CUJ UUID:** cuj-dist-dual-mode-pkg-dir
 
-The repository MUST provide an executable Bash script at `scripts/distribute.sh`
-(`chmod +x`, `#!/usr/bin/env bash`, `set -euo pipefail`) that accepts the
-following command-line flags:
+Composite actions in `.github/actions/*` MUST resolve and install the monorepo Python packages (`codemender`, `launcher`, and `repohost`) across both self-dogfooding runs on `codemender-runner` and runs on external target repositories that do not contain `packages/`:
 
-- `--target DIR`: **Required.** Path to the local checkout of the target Git
-  repository.
-- `--source-ref REF`: Optional Git reference in the source repository to package
-  from (default: `HEAD`).
-- `--include-top-level`: Optional flag (**off by default**) controlling whether
-  the top-level files (`LICENSE`, `.gitignore`, and `dist/README.md` mapped to
-  `README.md`) are staged at the root of `--target` in addition to `.github/`.
-  When omitted (and not already synced in the target repository's previous
-  `Codemender-Source-Commit`), only `.github/` is staged.
-- `--branch NAME`: Optional branch name that the script MUST create or switch to
-  in the target repository before applying and committing the update.
-- `--dry-run`: Optional flag instructing the script that it MUST materialize the
-  filtered distribution tree, compute the file-level diff against the target
-  repository, print the summary of changes to `stderr`, and exit `0` without
-  modifying or committing to the target repository (`--target` MUST NOT be
-  modified).
-- `-h` / `--help`: Optional flag that MUST print usage instructions and exit
-  `0`.
+1. **Workspace Precedence When Self-Dogfooding:**
+   - When the checked-out repository workspace contains the CodeMender `packages/` tree (such as during a pull request on `codemender-runner`), the composite action MUST install the Python packages from the checked-out repository workspace so changes in the pull request are exercised directly.
+2. **Action-Tree Fallback on External Target Repositories:**
+   - When the checked-out repository workspace does not contain the CodeMender `packages/` tree (such as when scanning an external application repository), the composite action MUST resolve and install the Python packages from the action's own repository tree so the scan succeeds without requiring `packages/` to exist in the target repository.
 
-Before modifying the target repository, `scripts/distribute.sh` MUST validate:
+#### Scenario: Pull request on `codemender-runner` installs packages from the checked-out workspace
+- **GIVEN** a workflow runs on a repository checkout that contains `packages/`
+- **WHEN** a composite action in `.github/actions/*` installs Python dependencies
+- **THEN** the action MUST install `codemender`, `launcher`, and `repohost` from the checked-out repository workspace.
 
-1. `--target` is provided, exists, is a directory, and is the root of a valid
-   Git working tree (`[ -e "$TARGET/.git" ]` and
-   `git -C "$TARGET" rev-parse --is-inside-work-tree`, preventing false
-   positives when `--target` is a plain subdirectory nested inside an ancestor
-   Git repository). If not, the script MUST log an error to `stderr` and exit
-   with code `2`.
-1. The target repository working tree and index have no uncommitted
-   modifications or untracked files (`git -C "$TARGET" status --porcelain` is
-   empty), so an in-progress edit in the target repository is never clobbered.
-   If the target working tree is dirty, the script MUST log an error to `stderr`
-   and exit with code `3`.
-1. `--source-ref` resolves to a valid commit in the source repository
-   (`git rev-parse --verify "$SOURCE_REF^{commit}"`). If not, the script MUST
-   log an error to `stderr` and exit with code `2`.
+#### Scenario: External target repository without `packages/` installs from the action's repository tree
+- **GIVEN** a workflow runs on an external application repository (`org/app-repo`) where `packages/` does not exist in the checked-out workspace
+- **WHEN** a composite action in `.github/actions/*` installs Python dependencies
+- **THEN** the action MUST resolve and install `codemender`, `launcher`, and `repohost` from the action's own repository tree
+- **AND** dependency installation MUST succeed without `packages/` existing in `org/app-repo`.
 
-#### Scenario: Rejecting a Dirty Target Repository
+---
 
-- **GIVEN** the target repository `/tmp/cm-distro` has an uncommitted change in
-  `README.md`
-- **WHEN** `./scripts/distribute.sh --target /tmp/cm-distro` is executed
-- **THEN** the script logs an error stating that `/tmp/cm-distro` has
-  uncommitted changes, makes zero modifications to `/tmp/cm-distro`, and exits
-  with code `3`.
+### REQ-0002: Reusable Workflow Triggers & Cross-Repository Action Resolution in `.github/workflows/*` {#req-0002}
 
-#### Scenario: Rejecting a Non-Git Target Directory
+- **CUJ UUID:** cuj-dist-workflow-triggers-and-uses
 
-- **GIVEN** `/tmp/plain-dir` is an existing directory that is not a Git
-  repository (even if nested beneath an ancestor Git checkout)
-- **WHEN** `./scripts/distribute.sh --target /tmp/plain-dir` is executed
-- **THEN** the script logs an error to `stderr` and exits with code `2`.
+Customer-facing workflows in `.github/workflows/*` MUST support all three GitHub deployment models without requiring target repositories to copy `.github/actions/*`:
 
-#### Scenario: Dry-Run Prints Diff Summary Without Modifying Target Repository
+1. **Dual Event Triggers (`pull_request` & `workflow_call`) and Organization Ruleset Event Scope:**
+   - Customer-facing workflows in `.github/workflows/*` MUST support both direct `pull_request` events (for self-dogfooding on `codemender-runner` and Organization Repository Ruleset enforcement of **`find-diff` scanning** and **automatic `fix` review comments** across an organization with zero workflow files in target repositories) and `workflow_call` events (for personal account, single-repository, and caller-workflow adoption).
+   - Because GitHub Organization Repository Rulesets only trigger required workflows on branch/merge-gate events (`pull_request`, `push`, `merge_group`) and ignore PR comment events (`pull_request_review_comment`, `issue_comment`), target repositories that require PR-comment-triggered verification (**`@cm-runner verify`**) MUST use a thin caller workflow in the target repository (Model 3) or an organization-level GitHub App / webhook dispatcher while still resolving `.github/actions/*` and `packages/` from the central `codemender-runner` repository.
+2. **Cross-Repository Action References & Version Isolation:**
+   - Workflow steps in `.github/workflows/*` that invoke composite actions in `.github/actions/*` MUST reference them using full repository coordinates (`<owner>/<repo>/.github/actions/<action>@<ref>`) rather than workspace-relative paths (`./.github/actions/<action>`).
+   - This ensures that when an Organization Repository Ruleset or `workflow_call` runs a workflow against a downstream target repository that does not contain `.github/actions/*` in its workspace, the composite action still resolves from `<owner>/<repo>`.
+   - Because GitHub resolves `@<ref>` against `<owner>/<repo>` live on every workflow run, operators who want to isolate their organization from unreviewed upstream `@main` changes SHOULD either pin `@<ref>` to a release tag/commit SHA or re-point `<owner>/<repo>` to their own fork via `scripts/set-fork-owner.sh` (`make init-fork`, `REQ-0004`).
+3. **Graceful Skip for Unconfigured Repositories:**
+   - When required cloud authentication configuration (project ID, Workload Identity Provider, or Service Account) is absent in a target repository, customer-facing workflows in `.github/workflows/*` MUST emit an informational notice, skip checkout and scan execution steps, and exit with status `0` so unconfigured repositories in an organization are not blocked from merging.
 
-- **GIVEN** an initialized target Git repository `/tmp/cm-distro` at commit `T1`
-- **WHEN** `./scripts/distribute.sh --target /tmp/cm-distro --dry-run` is
-  executed
-- **THEN** the script prints the summary of staged file changes to `stderr`,
-  leaves `/tmp/cm-distro` working tree, index, and `HEAD` at `T1` with zero
-  modifications, and exits with code `0`.
+#### Scenario: Organization Ruleset runs a workflow on a target repository that lacks `.github/actions/*`
+- **GIVEN** an Organization Repository Ruleset enforces a workflow from `<owner>/codemender-runner/.github/workflows/*` on `target-org/service-a`
+- **AND** `target-org/service-a` does not contain `.github/actions/*` in its repository tree
+- **WHEN** a pull request is opened on `target-org/service-a`
+- **THEN** the workflow MUST check out `target-org/service-a`
+- **AND** MUST resolve the composite action from `<owner>/codemender-runner/.github/actions/*` without path-not-found errors.
 
-#### Scenario: Rejecting an Invalid Source Ref
+#### Scenario: Personal or single repository invokes a workflow via `workflow_call`
+- **GIVEN** a caller workflow in `user/my-app` invokes a workflow in `<owner>/codemender-runner/.github/workflows/*` via `workflow_call`
+- **WHEN** a pull request is opened on `user/my-app`
+- **THEN** the called workflow MUST execute using the caller repository's configured variables and secrets.
 
-- **GIVEN** a clean target Git repository `/tmp/cm-distro`
-- **WHEN**
-  `./scripts/distribute.sh --target /tmp/cm-distro --source-ref nonexistent-ref`
-  is executed
-- **THEN** the script logs an error to `stderr` and exits with code `2`.
+#### Scenario: Unconfigured repository in an organization skips execution cleanly
+- **GIVEN** an Organization Repository Ruleset triggers a workflow in `.github/workflows/*` on a repository that has not configured CodeMender cloud credentials
+- **WHEN** the workflow runs
+- **THEN** the workflow MUST emit a notice indicating CodeMender is not configured, skip the scan steps, and succeed with exit status `0`.
 
-______________________________________________________________________
+---
 
-### REQ-0002: Clean Source Extraction via `git archive` {#req-0002}
+### REQ-0003: Automatic Cross-Org Default `runner_image` Resolution {#req-0003}
 
-- **CUJ UUID:** cuj-dist-clean-source-extraction
+- **CUJ UUID:** cuj-dist-default-runner-image
 
-To guarantee that untracked local files, temporary build caches, `__pycache__`
-directories, `.worktrees/`, or uncommitted developer edits in the source
-workspace never leak into a customer distribution, `scripts/distribute.sh` MUST
-extract source files exclusively from the source repository's Git object
-database using `git archive "$SOURCE_REF"` into a temporary staging directory
-(`mktemp -d`) cleaned up on `EXIT`.
+When a composite action in `.github/actions/*` runs in local container mode and no runner container image is explicitly provided via action inputs or repository variables:
 
-#### Scenario: Ignoring Untracked and Uncommitted Files in Source Workspace
+1. The action MUST default the container image reference to the GHCR image belonging to the repository that hosts the invoked action (falling back to the current workflow repository when invoked locally), normalized to lowercase.
+2. When `<org-B>` invokes a public composite action hosted in `<org-A>/codemender-runner`, the default image MUST resolve to `<org-A>`'s published GHCR image without requiring `<org-B>` to rebuild or republish the container image.
+3. When `<org-B>` invokes the composite action from its own fork `<org-B>/codemender-runner`, the default image MUST resolve to `<org-B>`'s GHCR image.
 
-- **GIVEN** the maintainer's local `codemender-runner` checkout contains an
-  untracked file `packages/codemender/secret_notes.txt` and an uncommitted edit
-  to `packages/codemender/src/codemender/runner/__main__.py`
-- **WHEN** `./scripts/distribute.sh --target /tmp/cm-distro --source-ref HEAD`
-  runs
-- **THEN** the staged distribution contains the committed `HEAD` version of
-  `packages/codemender/src/codemender/runner/__main__.py` and does not include
-  `secret_notes.txt`.
+#### Scenario: Cross-org caller automatically uses the upstream action repository's GHCR image
+- **GIVEN** a workflow in `org-b/app-repo` invokes a local-mode composite action from `org-a/codemender-runner/.github/actions/*` without specifying a custom runner image
+- **WHEN** the action resolves the default container image
+- **THEN** the image reference MUST resolve to `ghcr.io/org-a/codemender-runner:latest` in lowercase.
 
-______________________________________________________________________
+---
 
-### REQ-0003: Target Layout & File Filtering {#req-0003}
+### REQ-0004: Private Fork Ownership Configuration (`scripts/set-fork-owner.sh` & `make init-fork`) {#req-0004}
 
-- **CUJ UUID:** cuj-dist-layout-mapping
+- **CUJ UUID:** cuj-dist-set-fork-owner
 
-When building the staged distribution tree, `scripts/distribute.sh` MUST
-transform the archive into the target repository layout:
+To support private or internal organization forks and forks that customize `.github/actions/*` while keeping tracked `.github/workflows/*` files free of Terraform state mutations:
 
-1. **Optional Top-Level Files (`--include-top-level`):**
-   - Only when `--include-top-level` is passed (or when the target repository's
-     previous `Codemender-Source-Commit` already synced top-level files):
-     - Copy `LICENSE` and `.gitignore` to the target root.
-     - Map `dist/README.md` to `README.md` at the target root.
-   - Never copy `scripts/distribute.sh` or any `docs/` directory into
-     `--target`.
-1. **Live GitHub Actions Configuration (`.github/actions/` &
-   `.github/workflows/`):**
-   - Map `github-actions/actions/codemender/` to `.github/actions/codemender/`
-     (including `action.yml`, which normalizes `ghcr.io/` repository names to
-     lowercase and passes the resolved image via
-     `steps.pull-image.outputs.image` to `CODEMENDER_RUNNER_IMAGE`,
-     `requirements.txt`, `src/`, and `tests/`).
-   - Map `github-actions/workflows/*.yml` (currently `cm-merge-scan.yml`, which
-     defaults `runner_image` to
-     `${{ vars.CODEMENDER_RUNNER_IMAGE || format('ghcr.io/{0}/codemender-runner:latest', github.repository_owner) }}`
-     and passes `vars.CODEMENDER_GCP_PROJECT_ID`,
-     `secrets.CODEMENDER_WORKLOAD_IDENTITY_PROVIDER`, and
-     `secrets.CODEMENDER_SERVICE_ACCOUNT`, plus any additional workflows added
-     under `github-actions/workflows/`) to `.github/workflows/`.
-   - Copy `.github/workflows/build_runner_image.yml` to
-     `.github/workflows/build_runner_image.yml` (with the build context updated
-     to `.github/codemender-runner`, `file: docker/runner.Dockerfile` stripped,
-     the `Verify Image Contract` step asserting `CMD ["version"]`, and the
-     `Push Runner Image` step honoring `vars.CODEMENDER_RUNNER_IMAGE` while
-     publishing lowercase `ghcr.io/${OWNER,,}/codemender-runner:latest` and
-     `:${SHA}`).
-   - Explicitly exclude `.github/workflows/ci.yml` and
-     `.github/workflows/codemender_parallel.yml`.
-1. **Stripped `.github/codemender-runner/` Self-Contained Build Context:**
-   - Map `docker/runner.Dockerfile` to `.github/codemender-runner/Dockerfile`
-     (with the legacy `main.py` symlink removed and default `CMD ["version"]`),
-     along with `.dockerignore` and `codemender-runner/requirements.txt`.
-   - Copy `codemender-runner/__main__.py` (dispatching directly to
-     `codemender.runner.__main__`) and `codemender-runner/bin/cm-runner` into
-     `.github/codemender-runner/`.
-   - Map `packages/codemender/` into
-     `.github/codemender-runner/packages/codemender/`, `packages/launcher/`
-     into `.github/codemender-runner/packages/launcher/`, and `packages/repohost/`
-     into `.github/codemender-runner/packages/repohost/`, stripping co-located
-     test files (`test_*.py`, `*_test.py`), `testdata/`, and `__pycache__/`
-     directories so `.github/codemender-runner` acts as a self-contained Docker
-     build context (`COPY packages/codemender/ ...` and
-     `/opt/codemender/venv/bin/pip install --no-cache-dir ./packages/codemender`)
-     and provides `launcher` and `repohost.github` to `.github/actions/codemender/`.
-   - **Explicitly exclude all legacy pipeline files:**
-     - `main.py`, `runners/`, `storage.py`, `utils.py`, `codemender/db.py`,
-       `vcs/github.py`, `codemender-runner/README.md`, and all legacy test files
-       (`test_runners_*.py`, `test_orchestrator.py`,
-       `test_pr_review_suggestions.py`, `test_storage.py`, `test_utils.py`,
-       `test_vcs_github.py`, `test_codemender_db.py`, `test_command_builder.py`,
-       `e2e_test_local.py`, `dummy_cm.py`, `tests/cm`).
-1. **GCP Workload Identity Federation Terraform Configuration
-   (`.github/terraform/` & `.github/terraform/modules/wif/`):**
-   - Copy the root `terraform/` files (`main.tf`, `variables.tf`, `outputs.tf`,
-     `provider.tf`, `terraform.tfvars.example`, `.terraform.lock.hcl`, and
-     `tests/root_test.tftest.hcl`) and `terraform/modules/wif/` to
-     `.github/terraform/` (and `.github/terraform/modules/wif/`).
-   - Explicitly exclude/strip `terraform/modules/gcp/`, `terraform/gcp.tf`,
-     `terraform/gcp_override.tf`, `terraform/tests/root_gcp_test.tftest.hcl`,
-     `workflows/gcp_parallel_workflow.yaml`, `cloudbuild.yaml`, and all `docs/`
-     files (`docs/openspec/`, `docs/adr/`, `docs/architecture/`, `docs/guides/`)
-     until Cloud Run support is ready to be added to `scripts/distribute.sh` in
-     a future commit, ensuring `terraform init`, `terraform validate`, and
-     `terraform test` succeed directly in `.github/terraform/` inside the
-     distributed repository with zero dangling local, module, or output
-     references.
+1. **Fork Ownership Helper:**
+   - The repository MUST provide a fork ownership configuration utility (`scripts/set-fork-owner.sh` and `make init-fork`) that updates `<owner>/<repo>/.github/actions/*` references across `.github/workflows/*` to match the fork's owner and repository name.
+   - The utility MUST accept an explicit `<owner>` or `<owner>/<repo>` argument, or automatically detect `<owner>/<repo>` from the local Git `origin` remote when requested, and apply updates idempotently.
+   - If the supplied owner/repository argument is malformed, the utility MUST report an error and exit with a non-zero status code without modifying any workflow files.
+2. **No Terraform Mutation of Tracked Workflow Files:**
+   - Infrastructure automation under `terraform/` MUST NOT overwrite or mutate tracked `.github/workflows/*` files in the repository.
 
-#### Scenario: Distribution With `--include-top-level` Produces a Self-Contained Repo With Zero Legacy Files
+#### Scenario: Updating workflow action references for a private organization fork
+- **GIVEN** an administrator forks the repository into `acme-corp/codemender-runner`
+- **WHEN** the administrator runs the fork ownership helper for `acme-corp`
+- **THEN** all `<owner>/<repo>/.github/actions/*` references in `.github/workflows/*` MUST be updated to `acme-corp/codemender-runner/.github/actions/*`
+- **AND** the command MUST succeed with exit status `0`.
 
-- **GIVEN** an initialized target Git repository `/tmp/cm-distro`
-- **WHEN**
-  `./scripts/distribute.sh --target /tmp/cm-distro --include-top-level`
-  completes
-- **THEN** `/tmp/cm-distro` contains only `LICENSE`, `.gitignore`, `README.md`,
-  and `.github/` at the repository root (with `.github/actions/codemender/`,
-  `.github/workflows/cm-merge-scan.yml`,
-  `.github/workflows/build_runner_image.yml`, `.github/codemender-runner/`,
-  `.github/terraform/main.tf`, `.github/terraform/terraform.tfvars.example`,
-  `.github/terraform/tests/root_test.tftest.hcl`, and
-  `.github/terraform/modules/wif/`)
-- **AND** `/tmp/cm-distro` contains no `docs/` directory, no `distribute.sh`
-  script, and no files under `.github/codemender-runner/runners/` or
-  `.github/terraform/modules/gcp/`, nor `.github/terraform/gcp.tf`,
-  `.github/terraform/gcp_override.tf`,
-  `.github/terraform/tests/root_gcp_test.tftest.hcl`,
-  `.github/codemender-runner/main.py`, or `.github/codemender-runner/utils.py`
-- **AND** running `python3 .github/codemender-runner --version` and
-  `python3 -m unittest discover -s .github/actions/codemender/tests` inside
-  `/tmp/cm-distro` both pass with exit code `0`.
+#### Scenario: Rejecting a malformed owner argument
+- **GIVEN** a caller runs the fork ownership helper with a malformed owner argument containing spaces or invalid path characters
+- **WHEN** input validation runs
+- **THEN** the utility MUST exit with a non-zero status code and leave `.github/workflows/*` unmodified.
 
-______________________________________________________________________
+---
 
-### REQ-0004: Stateless 3-Way Incremental Sync via Git Commit Trailer (No `.dist.json`) {#req-0004}
+### REQ-0005: Host Orchestrator CLI Entrypoint (`cm-github`) {#req-0005}
 
-- **CUJ UUID:** cuj-dist-git-three-way-sync
+- **CUJ UUID:** cuj-dist-cm-github-entrypoint
 
-`scripts/distribute.sh` MUST NOT write a `.dist.json` or any other distribution
-tracking manifest file into the target repository working tree. Instead, it MUST
-use a Git commit trailer (`Codemender-Source-Commit`) and Git's native 3-way
-merge machinery so repeat runs update the target repository without stomping on
-target-side edits, even when the source and target repositories have no shared
-commit history:
+To allow composite actions in `.github/actions/*` to invoke the GitHub orchestrator cleanly from any working directory after installing the workspace packages:
 
-1. **Automatic Commit With Provenance Trailer:**
-   - Every completed sync (when `--dry-run` is not passed and `$new_tree`
-     differs from `$base_tree`) MUST automatically create a Git commit in the
-     target repository whose commit message contains the trailer:
-     ```text
-     Codemender-Source-Commit: <full-40-char-source-commit-sha>
-     ```
-1. **Base Tree Resolution from Commit Trailer:**
-   - On every run against a target repository that has at least one commit on
-     `HEAD`, `scripts/distribute.sh` MUST search the target repository's commit
-     history (`git -C "$TARGET" log --grep="^Codemender-Source-Commit:" -n 1`)
-     to extract the most recent `Codemender-Source-Commit` SHA
-     (`<prev_source_sha>`).
-   - If `<prev_source_sha>` is found, `scripts/distribute.sh` MUST verify that
-     `<prev_source_sha>` exists in the source repository
-     (`git cat-file -e "${prev_source_sha}^{commit}"`); if `<prev_source_sha>`
-     is missing in the source repository, the script MUST log an error to
-     `stderr` and exit with code `2`. Otherwise, `scripts/distribute.sh` MUST
-     reconstruct the filtered distribution tree for `<prev_source_sha>` (using
-     `<prev_source_sha>`'s own `scripts/distribute.sh` staging rules if present
-     at `<prev_source_sha>`, so directories added to `scripts/distribute.sh` in
-     later commits—such as Cloud Run—are accurately absent from `$base_tree` and
-     added in `$new_tree`) and write it into the target repository's Git object
-     store as `$base_tree` (`GIT_INDEX_FILE` + `git write-tree`).
-   - If no `Codemender-Source-Commit` trailer exists in the target repository's
-     history (initial sync), `$base_tree` MUST be set to Git's empty tree SHA
-     (`4b825dc642cb6eb9a060e54bf8d69288fbee4904`).
-1. **3-Way Merge & Commit Execution (`git commit-tree` +
-   `git cherry-pick --no-commit` + `git commit`):**
-   - `scripts/distribute.sh` MUST write the new filtered distribution tree for
-     `--source-ref` into the target repository's Git object store as
-     `$new_tree`.
-   - If the target repository has no commits yet, the script MUST populate the
-     index and working tree via
-     `git -C "$TARGET" read-tree --reset -u "$new_tree"` and commit the staged
-     tree with the `Codemender-Source-Commit` trailer.
-   - Otherwise, if `$new_tree` equals `$base_tree`, the script MUST report that
-     the target repository is already up to date and exit `0` without creating
-     an empty commit.
-   - Otherwise, the script MUST synthesize two ephemeral commits in the target
-     repository's object store:
-     - `base_commit=$(git -C "$TARGET" commit-tree "$base_tree" -m "dist-base")`
-     - `new_commit=$(git -C "$TARGET" commit-tree "$new_tree" -p "$base_commit" -m "dist-new")`
-       and apply the delta onto the target repository's `HEAD` via
-       `git -C "$TARGET" cherry-pick --no-commit "$new_commit"`.
-   - If the 3-way merge completes cleanly, all upstream additions,
-     modifications, and deletions between `<prev_source_sha>` and `<source_ref>`
-     MUST be committed in the target repository with the
-     `Codemender-Source-Commit` trailer while preserving any target-only files
-     or non-conflicting target edits.
-   - If a file was modified on conflicting lines in both the source and target
-     repositories, `git cherry-pick --no-commit` leaves standard 3-way conflict
-     markers in the target working tree without creating a commit, and
-     `scripts/distribute.sh` MUST log the conflicting file paths to `stderr` and
-     exit with code `4` so the user can resolve them without data loss.
+1. `packages/repohost` MUST expose the `cm-github` console script entrypoint upon package installation.
+2. Invoking `cm-github` MUST dispatch the GitHub pull request orchestration workflow without requiring callers to reference internal module file paths.
 
-#### Scenario: Initial Sync to a New Target Repository
-
-- **GIVEN** a newly initialized target Git repository `/tmp/cm-distro` with no
-  prior `Codemender-Source-Commit` trailer
-- **WHEN** `./scripts/distribute.sh --target /tmp/cm-distro --source-ref C1` is
-  executed
-- **THEN** a commit is created on `/tmp/cm-distro` whose commit message contains
-  `Codemender-Source-Commit: <full-40-char-C1-sha>`
-- **AND** no `.dist.json` or tracking manifest file exists anywhere in
-  `/tmp/cm-distro`
-- **AND** immediately re-running
-  `./scripts/distribute.sh --target /tmp/cm-distro --source-ref C1` reports that
-  the target repository is already up to date and exits `0` with a clean working
-  tree.
-
-#### Scenario: Repeat Sync Preserves Target-Only Files and Non-Conflicting Target Edits
-
-- **GIVEN** `/tmp/cm-distro` was previously synced at source commit `C1`
-  (recorded in `Codemender-Source-Commit: <C1>`), and in `/tmp/cm-distro` a
-  custom file `CODEOWNERS` was added and `.github/workflows/cm-merge-scan.yml`
-  had its `runner_image:` line customized
-- **WHEN** source commit `C2` updates
-  `packages/codemender/src/codemender/runner/commands/find_diff.py` and
-  `./scripts/distribute.sh --target /tmp/cm-distro --source-ref C2` is executed
-- **THEN**
-  `.github/codemender-runner/packages/codemender/src/codemender/runner/commands/find_diff.py`
-  is updated to the `C2` version, `CODEOWNERS` and the customized
-  `runner_image:` line in `.github/workflows/cm-merge-scan.yml` remain intact,
-  and the new commit on `/tmp/cm-distro` records `Codemender-Source-Commit: <C2>`.
-
-#### Scenario: Repeat Sync Propagates Upstream File Deletions Without Deleting Target-Only Files
-
-- **GIVEN** `/tmp/cm-distro` was synced at `C1`, and in `C2` a distributed
-  helper file is removed upstream while `/tmp/cm-distro` also contains a
-  target-only file `SECURITY.md`
-- **WHEN** `./scripts/distribute.sh --target /tmp/cm-distro --source-ref C2`
-  runs
-- **THEN** the file removed between `C1` and `C2` is deleted from
-  `/tmp/cm-distro` in the new commit, while `SECURITY.md` is untouched.
-
-#### Scenario: Detecting Overlapping Line Conflicts Without Stomping
-
-- **GIVEN** `/tmp/cm-distro` modified line 45 of
-  `.github/workflows/cm-merge-scan.yml` after syncing `C1`, and upstream commit
-  `C2` also modified line 45 of `github-actions/workflows/cm-merge-scan.yml` to
-  a different value
-- **WHEN** `./scripts/distribute.sh --target /tmp/cm-distro --source-ref C2`
-  runs
-- **THEN** the script does not silently overwrite the target file, leaves
-  standard Git conflict markers in `.github/workflows/cm-merge-scan.yml`, prints
-  the conflicted file path to `stderr`, and exits with code `4`.
-
-______________________________________________________________________
-
-### REQ-0005: Off-by-Default Top-Level File Staging (`--include-top-level`) {#req-0005}
-
-- **CUJ UUID:** cuj-dist-include-top-level-flag
-
-`scripts/distribute.sh` MUST control top-level repository file staging
-(`LICENSE`, `.gitignore`, `README.md`) via the off-by-default
-`--include-top-level` flag:
-
-1. **Off by Default (`.github/` Only):**
-   - When `--include-top-level` is NOT passed (and the target repository's
-     previous `Codemender-Source-Commit` did not sync top-level `README.md` from
-     `dist/README.md`), `scripts/distribute.sh` MUST stage ONLY `.github/` and
-     MUST NOT create, modify, or overwrite `LICENSE`, `.gitignore`, or
-     `README.md` at the root of `--target`.
-1. **Explicit Top-Level Staging (`--include-top-level`):**
-   - When `--include-top-level` IS passed (or the target repository's previous
-     `Codemender-Source-Commit` already synced top-level `README.md` from
-     `dist/README.md`), `scripts/distribute.sh` MUST include `LICENSE`,
-     `.gitignore`, and `dist/README.md` (mapped to `README.md`) in both
-     `$base_tree` and `$new_tree`.
-1. **No Self-Copy of `scripts/distribute.sh`:**
-   - `scripts/distribute.sh` MUST NOT copy itself into `--target` regardless of
-     whether `--include-top-level` is passed.
-
-#### Scenario: Default Sync Stages Only `.github/` While `--include-top-level` Stages Top-Level Files
-
-- **GIVEN** `/tmp/existing-app` has its own `README.md` (`# My Existing App`),
-  and `/tmp/cm-distro` is an empty Git repository for the standalone
-  distribution
-- **WHEN** `./scripts/distribute.sh --target /tmp/existing-app` runs without
-  `--include-top-level` and
-  `./scripts/distribute.sh --target /tmp/cm-distro --include-top-level` runs
-  with `--include-top-level`
-- **THEN** `/tmp/existing-app/README.md` remains `# My Existing App` and
-  `/tmp/existing-app/.github/` is populated with `actions/codemender/`,
-  `workflows/`, `codemender-runner/`, and `terraform/` (including
-  `terraform/modules/wif/`)
-- **AND** `/tmp/cm-distro` receives `LICENSE`, `.gitignore`, `README.md` (from
-  `dist/README.md`), and `.github/`
-- **AND** neither repository contains `distribute.sh`.
-
-#### Scenario: Repeat Sync on a Repo Initialized With `--include-top-level` Preserves and Updates Top-Level Files
-
-- **GIVEN** `/tmp/cm-distro` was initialized with `--include-top-level` at
-  commit `C1`
-- **WHEN** the maintainer runs
-  `./scripts/distribute.sh --target /tmp/cm-distro --source-ref C2`
-- **THEN** `README.md`, `LICENSE`, and `.gitignore` in `/tmp/cm-distro` are
-  preserved and updated to the `C2` version rather than deleted.
-
-______________________________________________________________________
-
-### REQ-0006: Customer-Facing Root Documentation (`dist/README.md`) {#req-0006}
-
-- **CUJ UUID:** cuj-dist-customer-docs
-
-The source repository MUST maintain a comprehensive customer-facing root
-documentation file at `dist/README.md` (mapped to `README.md` in the
-distribution repository when `--include-top-level` is passed) that documents:
-
-1. **Repository Overview & Layout:** A summary of what the repository is and a
-   directory tree illustrating `LICENSE`, `.gitignore`, `README.md`, and
-   `.github/{actions/codemender,workflows,codemender-runner,terraform}`
-   (including `.github/terraform/modules/wif`).
-1. **Step-by-Step Setup & Usage Instructions:**
-   - **Step 1 — Provisioning GCP Workload Identity Federation (Terraform):** How
-     to use `.github/terraform/` (`cd .github/terraform && cp terraform.tfvars.example terraform.tfvars && terraform init && terraform apply`)
-     so GitHub Actions can authenticate to Google Cloud.
-   - **Step 2 — Configuring GitHub Actions Secrets & Variables:** Required and
-     optional repository secrets and variables
-     (`CODEMENDER_WORKLOAD_IDENTITY_PROVIDER`, `CODEMENDER_SERVICE_ACCOUNT`,
-     `GH_APP_ID`, `CODEMENDER_GCP_PROJECT_ID`, `CODEMENDER_GCP_REGION`, and
-     optional `CODEMENDER_RUNNER_IMAGE` to override the default
-     `ghcr.io/<owner>/codemender-runner:latest` image or pin a `<commit-sha>`
-     tag).
-   - **Step 3 — Building & Publishing the `cm-runner` Image:** How
-     `.github/workflows/build_runner_image.yml` (or
-     `docker build .github/codemender-runner`) builds and publishes the
-     `cm-runner` container image (`ghcr.io/<owner>/codemender-runner:latest` and
-     `:<commit-sha>`), which `.github/workflows/cm-merge-scan.yml` uses
-     automatically out of the box without editing the workflow file.
-   - **Step 4 — Running CodeMender on Pull Requests & via CLI:** How
-     `.github/workflows/cm-merge-scan.yml` runs automatically on PRs and how to
-     invoke `cm-runner` (`find-diff`, `fix`) directly via CLI.
-1. **Setting Up CodeMender in a Separate Repository:** Step-by-step instructions
-   for manually onboarding another repository by copying
-   `.github/actions/codemender/` and `.github/workflows/cm-merge-scan.yml`,
-   optionally setting the `CODEMENDER_RUNNER_IMAGE` repository/organization
-   variable (if the image is hosted under a different owner/registry or pinned
-   to a commit SHA), adding the new repository to `github_repositories` in
-   `.github/terraform/terraform.tfvars`, and configuring its GitHub Actions
-   variables.
-
-#### Scenario: Relative Links in Distributed `README.md` Resolve Validly
-
-- **GIVEN** `/tmp/cm-distro` has been populated by
-  `./scripts/distribute.sh --target /tmp/cm-distro --include-top-level`
-- **WHEN** all relative Markdown links in `/tmp/cm-distro/README.md` are
-  inspected
-- **THEN** every linked target (`LICENSE`, `.github/actions/codemender/`,
-  `.github/actions/codemender/action.yml`,
-  `.github/workflows/cm-merge-scan.yml`,
-  `.github/workflows/build_runner_image.yml`, `.github/codemender-runner/`,
-  `.github/terraform/`, `.github/terraform/terraform.tfvars.example`)
-  exists at its resolved path inside `/tmp/cm-distro`.
+#### Scenario: Installing `packages/repohost` exposes `cm-github` on `PATH`
+- **GIVEN** a composite action in `.github/actions/*` installs `packages/codemender`, `packages/launcher`, and `packages/repohost[github]`
+- **WHEN** the action's execution step runs
+- **THEN** `cm-github` MUST be available as an executable command on `PATH`.

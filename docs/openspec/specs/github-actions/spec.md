@@ -23,7 +23,7 @@ sdd_cujspec_product: codemender-runner
 
 ## Overview
 
-This specification defines the functional requirements, configuration interface, launcher abstraction, and execution routing for the CodeMender GitHub Actions integration (`github-actions/`).
+This specification defines the functional requirements, configuration interface, launcher abstraction, and execution routing for the CodeMender GitHub Actions integration (`.github/actions` and `.github/workflows`; repository distribution and GitHub deployment models are governed by [SPEC-DIST](../distribute/spec.md)).
 
 The integration allows repositories to run CodeMender during pull request workflows. It supports dual execution backends:
 1. **Local Docker Mode (`local`)**: Runs `cm-runner` natively on the GitHub Actions runner VM inside a throwaway Docker container with zero external cloud dependencies.
@@ -32,6 +32,7 @@ The integration allows repositories to run CodeMender during pull request workfl
 Both backends adhere to an identical, symmetric execution interface: CLI arguments, NDJSON stream contracts, and file-based workspace inputs and outputs (e.g. `output/receipt.json`, diff patches, reports) are placed in identical workspace locations. This minimizes operational differences and ensures downstream action steps operate transparently without backend branching.
 
 This specification is governed by:
+- [SPEC-DIST: Customer Repository Distribution, GitHub Deployment Models & Cross-Repo Action Resolution](../distribute/spec.md)
 - [ADR-0001: Machine-Readable Output Contract](../../../adr/ADR-0001-machine-readable-output-contract.md) (NDJSON events on `stdout`, logs on `stderr`, coarse exit codes)
 - [ADR-0003: Environment Variable Scrubbing](../../../adr/ADR-0003-environment-scrubbing.md)
 - [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
@@ -48,7 +49,7 @@ This specification is governed by:
 
 - **CUJ UUID:** cuj-gha-backend-config
 
-The GitHub Action metadata (`github-actions/actions/codemender/action.yml`) MUST support configurable execution backends through a unified input schema:
+The GitHub Action metadata (`.github/actions`) MUST support configurable execution backends through a unified input schema:
 
 | Input | Type | Required | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
