@@ -31,8 +31,9 @@ inputs:
       Universal cm-runner container image (pre-baked with Python 3.11, Node 22,
       Java 17, Go 1.22, C/C++) or a custom Bring-Your-Own-Image (BYOI) built
       `FROM codemender-runner` with your project's dependencies pre-installed.
-      Pin to a commit SHA tag (not :latest). Required.
-    required: true
+      Defaults to `ghcr.io/<action-or-workflow-repo>:latest` when omitted.
+    required: false
+    default: ''
   gcp_project_id:
     description: >-
       Google Cloud project ID used by CodeMender (`GOOGLE_CLOUD_PROJECT`).
@@ -106,26 +107,22 @@ runs:
       with:
         python-version: '3.11'
 
-    # Governing: ADR-0008, SPEC-GHA, SPEC-GHA-FIX
+    # Governing: docs/openspec/specs/distribute/spec.md#req-0001, ADR-0008, SPEC-DIST, SPEC-GHA, SPEC-GHA-FIX
     - name: Install action dependencies
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
+        GITHUB_WORKSPACE: ${{ github.workspace }}
       run: |
         set -euo pipefail
         REQ_PATH="${ACTION_PATH}/requirements.txt"
         if [[ ! -f "$REQ_PATH" ]]; then
           REQ_PATH="${ACTION_PATH}/../codemender/requirements.txt"
         fi
-        PKG_DIR="${ACTION_PATH}/../../../packages"
-        if [[ ! -d "${PKG_DIR}/repohost" ]]; then
-          PKG_DIR="${ACTION_PATH}/../../codemender-runner/packages"
-        fi
-        if [[ ! -d "${PKG_DIR}/repohost" ]]; then
-          PKG_DIR="${ACTION_PATH}/packages"
-        fi
-        if [[ ! -d "${PKG_DIR}/repohost" ]]; then
-          PKG_DIR="${ACTION_PATH}/../codemender/packages"
+        if [[ -d "${GITHUB_WORKSPACE:-}/packages/repohost" ]]; then
+          PKG_DIR="${GITHUB_WORKSPACE}/packages"
+        else
+          PKG_DIR="$(cd "${ACTION_PATH}/../../../packages" && pwd)"
         fi
         python -m pip install --quiet \
           -r "$REQ_PATH" \
@@ -203,19 +200,20 @@ runs:
           || { echo "::error::Docker did not register the runsc runtime."; exit 1; }
         echo "::notice::gVisor ${GVISOR_RELEASE} (${ARCH}) installed in $((SECONDS - START))s."
 
+    # Governing: docs/openspec/specs/distribute/spec.md#req-0003, SPEC-DIST, ADR-0008
     - name: Pull cm-runner image
       if: steps.preflight.outputs.should_run == 'true'
       id: pull-image
       shell: bash
       env:
         IMAGE: ${{ inputs.runner_image }}
+        DEFAULT_IMAGE: ghcr.io/${{ github.action_repository || github.repository }}:latest
         TOKEN: ${{ inputs.registry_token || github.token }}
         ACTOR: ${{ github.actor }}
       run: |
-        if [[ -z "$IMAGE" ]]; then
-          echo "::error::The 'runner_image' input is required for codemender-local."
-          exit 1
-        fi
+        set -euo pipefail
+        IMAGE="${IMAGE// }"
+        IMAGE="${IMAGE:-$DEFAULT_IMAGE}"
         if [[ "$IMAGE" == ghcr.io/* ]]; then
           repo_part="${IMAGE%:*}"
           tag_part="${IMAGE##*:}"

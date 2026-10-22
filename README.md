@@ -1,62 +1,102 @@
-# CodeMender Runner: Canonical CodeMender Deployment Scenarios
+# CodeMender Runner
 
-> [!NOTE] While we hold this code to a high standard, this is example code and
-> should not be blindly applied in a customer repo. Use these canoncial examples
-> as the foundation to build your deployed code upon rather than as ready to
-> deploy. Your scenario will likely differ in subtle ways that will require
-> modifications to the presented code before it it fit for purpose.
+> [!NOTE]
+> While we hold this code to a high standard, these are canonical reference
+> implementations and should not be blindly applied in a production repository.
+> Review and adapt the workflows, container configurations, and Terraform
+> modules to fit your organization's security and infrastructure requirements.
 
-This repository contains a set of opinionated deployment scenarioes for
-CodeMender.
+`codemender-runner` provides reference CI/CD integrations, sandbox launchers
+(Google Cloud Run Jobs and Local Docker + gVisor), and Terraform modules for
+running Google CodeMender automated security scanning (`find-diff`) and
+automated patching (`fix`) on pull and merge requests.
 
-Our philosophy for this repo is two fold:
+## Quickstart by Deployment Platform
 
-1. The deployment scenario and associated workflow should work out of the box
-   for most customers most of the time.
-1. For customers with unique situtations, the scenario must provide the basic
-   building blocks that can be used to solve these unique needs.
+Choose the setup guide for your CI/CD platform or execution environment:
 
-For example, while our github actions only runners are the ideal way to deploy
-exclusively the github actions when there are no additional constraints, the
-overall worklow still provides all the basic building blocks (chaining workflow,
-on demand execution, parallel running) to solve most constraints that would
-arise and necessitate a slightly different setup.
+| Platform / Use Case | Setup & Usage Guide | Execution Modes Supported |
+| :--- | :--- | :--- |
+| **GitHub Actions** (Organization Rulesets, `workflow_call`, or Composite Action) | [**GitHub Actions Setup & Usage Guide (`.github/README.md`)**](.github/README.md) | Cloud Run Jobs (default) or Local Docker + gVisor |
+| **GitLab CI** (Merge Request Pipelines) | [**GitLab CI Setup & Usage Guide (`gitlab-ci/README.md`)**](gitlab-ci/README.md) | Local Docker + gVisor on a dedicated runner |
+| **Standalone CLI / Custom CI** (`cm-runner`) | [**Calling `cm-runner` Directly (`docs/guides/calling_cm_runner.md`)**](docs/guides/calling_cm_runner.md) | Container (`Dockerfile`) or local Python CLI |
 
-## Deployment Scenarios (Repo Organization)
+- **GitHub Organization Repository Rulesets (0 files in target repos):** Enforces `pull_request` diff scanning (`find-diff`) and automatic inline fix suggestions (`fix`) across an organization. Run `make init-fork` in your fork (or pin `@<ref>` to a tag/SHA) to isolate your workflows from live upstream `@main` changes.
+- **GitHub Per-Repository Caller Workflows (`workflow_call` / composite action `uses:`):** Used for personal accounts, single-repository rollouts, or PR-comment-triggered verification (`@cm-runner verify` on `pull_request_review_comment`, which GitHub Organization Rulesets do not trigger) while keeping `.github/actions/*` and `packages/` centralized in `codemender-runner`.
 
-We organize this repo using the following folders and meanings:
+## Shared Infrastructure & Container Packaging
 
-- `packages/codemender/`: Scenario-independent CodeMender orchestrator package
-  (`codemender.runner`, `codemender.cm`, `codemender.sarif`, `codemender.vcs`).
-  Install with `pip install -e ./packages/codemender` or run via
-  `uvx --from ./packages/codemender cm-runner`. See
-  `docs/guides/calling_cm_runner.md` for more details.
-- `packages/launcher/`: Sandbox execution backends (`launcher.local`,
-  `launcher.cloudrun`) and parallel container execution interface
-  (`launcher.base`). Install with `pip install -e ./packages/launcher`.
-- `packages/repohost/`: Repository hosting platform integrations
-  (`repohost.github`, `repohost.gitlab`) for PR sticky comments, review
-  suggestions, fix routing, and remote branch helpers. Install with
-  `pip install -e "./packages/repohost[github,gitlab]"`.
-- `codemender-runner/`: Legacy GitHub/Cloud Run batch pipeline modules and
-  compatibility shims (`python3 codemender-runner`, `bin/cm-runner`).
-- `.github/`: Deployment for running CM directly inside github action
-  runners.
-- `cloud-run-jobs/`: Runs codemender inside cloud run jobs. Implements
-  architecture from
-  [Scaling CodeMender in CI/CD Pipeline](https://docs.google.com/document/d/1dAzVngHN409VYC2Z7Dgx01GJGCudij5gDW9kPhmZf2U).
-  Contains code for orchstrating the runtime from different repo hosting sites
-  (github first).
+### 1. Provisioning Google Cloud & Workload Identity Federation (`terraform/`)
+
+The root [`terraform/`](terraform/) configuration provisions keyless Workload
+Identity Federation (`terraform/modules/wif`) and, when `execution_mode = "cloud_run"`,
+Google Cloud Run Jobs, a GCS transit bucket, and least-privilege service
+accounts (`terraform/modules/gcp`):
+
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your gcp_project_id, github_scope_type, github_owner, and execution_mode
+terraform init
+terraform plan
+terraform apply
+```
+
+See the [GitHub Actions Setup & Usage Guide (`.github/README.md`)](.github/README.md#step-1--provision-google-cloud--workload-identity-federation-terraform)
+for full variable documentation and manual secret/variable setup.
+
+### 2. Building the `cm-runner` Container Image (`Dockerfile`)
+
+The root [`Dockerfile`](Dockerfile) builds the universal `cm-runner` container
+image (`ENTRYPOINT ["cm-runner"]`, `CMD ["version"]`) pre-baked with Python 3.11,
+Node.js 22, OpenJDK 17, Go 1.22, and C/C++ toolchains:
+
+```bash
+COMMIT_SHA="$(git rev-parse HEAD)"
+IMAGE_URI="us-docker.pkg.dev/<GCP_PROJECT_ID>/<AR_REPO>/codemender-runner:${COMMIT_SHA}"
+
+docker build -t "${IMAGE_URI}" .
+docker run --rm "${IMAGE_URI}" version
+```
+
+For automated GitHub Container Registry (`ghcr.io`) builds or customizing
+project dependencies in the [`Dockerfile`](Dockerfile), see
+[`.github/README.md`](.github/README.md#step-3--build--publish-the-cm-runner-container-image).
+
+## Repository Layout
+
+| Path | Description |
+| :--- | :--- |
+| [`.github/`](.github/README.md) | GitHub Actions workflows (`.github/workflows/cm-merge-scan.yml`, `.github/workflows/build_runner_image.yml`) and composite actions (`.github/actions/codemender`, `.github/actions/codemender-local`). |
+| [`gitlab-ci/`](gitlab-ci/README.md) | GitLab CI merge request pipeline template (`gitlab-ci/templates/codemender-scan.yml`) and setup guide. |
+| [`terraform/`](terraform/) | Root Terraform module and child modules (`terraform/modules/wif`, `terraform/modules/gcp`) for GCP Workload Identity Federation, Cloud Run Jobs, and GitHub repository secret/variable bootstrapping. |
+| [`packages/codemender/`](packages/codemender/) | Scenario-independent `cm-runner` CLI orchestrator (`codemender.runner`, `codemender.cm`, `codemender.sarif`, `codemender.vcs`). See [`docs/guides/calling_cm_runner.md`](docs/guides/calling_cm_runner.md). |
+| [`packages/launcher/`](packages/launcher/) | Sandbox execution backends (`launcher.local` for Docker + gVisor, `launcher.cloudrun` for Google Cloud Run Jobs) and parallel execution interface (`launcher.base`). |
+| [`packages/repohost/`](packages/repohost/) | Repository hosting integrations (`repohost.github`, `repohost.gitlab`) and the `cm-github` CLI entrypoint for PR sticky comments, inline review suggestions, and patch routing. |
+| [`scripts/`](scripts/) | Operational helper scripts, including `scripts/set-fork-owner.sh` (`make init-fork`) for re-pointing workflow action references in forks. |
+| [`docs/`](docs/) | Architecture Decision Records (`docs/adr/`), OpenSpec specifications (`docs/openspec/specs/`), and CLI guides (`docs/guides/`). |
+
+## Development & Testing
+
+Run the full unit test suite across all workspace packages:
+
+```bash
+make test
+```
+
+When operating a fork of this repository, re-point workflow action references
+to your fork owner (so workflows resolve actions from your fork rather than
+upstream `@main` live):
+
+```bash
+make init-fork
+# or explicitly:
+./scripts/set-fork-owner.sh <your-org>
+```
 
 ## Contributing
 
-1. Get access to this repo. Reach out to an existing Admin and ask to be added
-   as a contributor.
-1. Open a PR.
-1. Ask an admin or maintainer to review the PR. All code in this PR must be
-   treated as if will be blindly applied to prod (even though we warn against
-   doing so).
-
-All code must be reviewed by a maintainer or admin.
-
-All code must maintain 90%+ code coverage via the test suites.
+1. Reach out to an existing administrator to be added as a contributor.
+2. Open a pull request and request review from a maintainer or administrator.
+3. All code must be reviewed by a maintainer or administrator and maintain 90%+
+   test coverage across the test suites.

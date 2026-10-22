@@ -14,8 +14,7 @@ env/
 venv/
 ENV/
 build/
-dist/*
-!dist/README.md
+dist/
 *.egg-info/
 
 # CodeMender Local Workspace Output

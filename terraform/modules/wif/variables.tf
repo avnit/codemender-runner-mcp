@@ -103,7 +103,7 @@ variable "github_owner" {
 variable "github_repositories" {
   type        = list(string)
   default     = []
-  description = "List of target GitHub repositories in 'repo' or 'owner/repo' format."
+  description = "List of target GitHub repositories in 'repo', 'owner/repo', or 'https://github.com/owner/repo' format."
 
   validation {
     condition     = var.github_scope_type != "repositories" || length(var.github_repositories) > 0

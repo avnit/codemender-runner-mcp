@@ -73,17 +73,36 @@ resource "google_iam_workload_identity_pool" "github_pool" {
 
 # 4. Workload Identity Pool OIDC Provider with Scoping Conditions (REQ-0001)
 locals {
-  full_repo_names = [for r in var.github_repositories : strcontains(trimspace(r), "/") ? trimspace(r) : "${var.github_owner}/${trimspace(r)}"]
+  normalized_github_owner = trimsuffix(
+    replace(replace(trimspace(var.github_owner), "https://github.com/", ""), "http://github.com/", ""),
+    "/"
+  )
+
+  normalized_repos = [
+    for r in var.github_repositories :
+    trimsuffix(
+      trimsuffix(
+        replace(replace(trimspace(r), "https://github.com/", ""), "http://github.com/", ""),
+        "/"
+      ),
+      ".git"
+    )
+  ]
+
+  full_repo_names = [
+    for r in local.normalized_repos :
+    strcontains(r, "/") ? r : "${local.normalized_github_owner}/${r}"
+  ]
 
   # Build attribute condition based on selected scope type
   attribute_condition = (
     var.github_scope_type == "org" || var.github_scope_type == "user"
-    ? "assertion.repository_owner == '${var.github_owner}'"
+    ? "assertion.repository_owner == '${local.normalized_github_owner}'"
     : "assertion.repository in ${jsonencode(local.full_repo_names)}"
   )
 
   # Principal set for user or org wide scope
-  owner_principal_set = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_pool.name}/attribute.repository_owner/${var.github_owner}"
+  owner_principal_set = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_pool.name}/attribute.repository_owner/${local.normalized_github_owner}"
 }
 
 resource "google_iam_workload_identity_pool_provider" "github_provider" {

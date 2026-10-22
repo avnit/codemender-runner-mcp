@@ -19,6 +19,10 @@ gitlab = [
     "requests>=2.31.0,<3",
 ]
 
+# Governing: docs/openspec/specs/distribute/spec.md#req-0005, SPEC-DIST, ADR-0008
+[project.scripts]
+cm-github = "repohost.github.__main__:main"
+
 [tool.uv.sources]
 codemender = { workspace = true }
 

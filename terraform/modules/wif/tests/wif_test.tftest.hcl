@@ -197,12 +197,18 @@ run "repository_list_scoping" {
   command = plan
 
   variables {
-    github_scope_type   = "repositories"
-    github_repositories = ["repo-a", "test-org/repo-b"]
+    github_scope_type = "repositories"
+    github_repositories = [
+      "repo-a",
+      "test-org/repo-b",
+      "https://github.com/test-org/repo-c",
+      "http://github.com/test-org/repo-d.git",
+      "https://github.com/test-org/repo-e/",
+    ]
   }
 
   assert {
-    condition     = google_iam_workload_identity_pool_provider.github_provider.attribute_condition == "assertion.repository in [\"test-org/repo-a\",\"test-org/repo-b\"]"
+    condition     = google_iam_workload_identity_pool_provider.github_provider.attribute_condition == "assertion.repository in [\"test-org/repo-a\",\"test-org/repo-b\",\"test-org/repo-c\",\"test-org/repo-d\",\"test-org/repo-e\"]"
     error_message = "Provider attribute condition does not match expected repository list scoping."
   }
 
@@ -212,12 +218,12 @@ run "repository_list_scoping" {
   }
 
   assert {
-    condition     = length(google_service_account_iam_member.wif_repo_binding) == 2 && contains(keys(google_service_account_iam_member.wif_repo_binding), "test-org/repo-a") && contains(keys(google_service_account_iam_member.wif_repo_binding), "test-org/repo-b")
+    condition     = length(google_service_account_iam_member.wif_repo_binding) == 5 && contains(keys(google_service_account_iam_member.wif_repo_binding), "test-org/repo-a") && contains(keys(google_service_account_iam_member.wif_repo_binding), "test-org/repo-b") && contains(keys(google_service_account_iam_member.wif_repo_binding), "test-org/repo-c") && contains(keys(google_service_account_iam_member.wif_repo_binding), "test-org/repo-d") && contains(keys(google_service_account_iam_member.wif_repo_binding), "test-org/repo-e")
     error_message = "Per-repository WIF IAM bindings must be created for each normalized full repository name."
   }
 
   assert {
-    condition     = length(github_issue_label.codemender_scan) == 2 && contains(keys(github_issue_label.codemender_scan), "repo-a") && contains(keys(github_issue_label.codemender_scan), "repo-b")
+    condition     = length(github_issue_label.codemender_scan) == 5 && contains(keys(github_issue_label.codemender_scan), "repo-a") && contains(keys(github_issue_label.codemender_scan), "repo-b") && contains(keys(github_issue_label.codemender_scan), "repo-c") && contains(keys(github_issue_label.codemender_scan), "repo-d") && contains(keys(github_issue_label.codemender_scan), "repo-e")
     error_message = "Labels must be created based on short_repo_names."
   }
 }

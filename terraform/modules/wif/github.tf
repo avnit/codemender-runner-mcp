@@ -15,9 +15,9 @@
 # Governing: SPEC-WIF, REQ-0006
 
 locals {
-  # Extract pure repository name if formatted as "owner/repo" or "repo"
+  # Extract pure repository name if formatted as "owner/repo", "repo", or full GitHub URL
   short_repo_names = toset([
-    for r in var.github_repositories : element(reverse(split("/", trimspace(r))), 0)
+    for r in local.normalized_repos : element(reverse(split("/", r)), 0)
   ])
 }
 

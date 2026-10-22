@@ -34,6 +34,10 @@ terraform {
 
 locals {
   use_github_app_auth = (var.github_app_id != "" && var.github_app_installation_id != "" && var.github_app_pem_file != "")
+  normalized_github_owner = trimsuffix(
+    replace(replace(trimspace(var.github_owner), "https://github.com/", ""), "http://github.com/", ""),
+    "/"
+  )
 }
 
 provider "google" {
@@ -47,7 +51,7 @@ provider "google-beta" {
 }
 
 provider "github" {
-  owner = var.github_owner != "" ? var.github_owner : null
+  owner = local.normalized_github_owner != "" ? local.normalized_github_owner : null
   token = !local.use_github_app_auth && var.github_mgmt_token != null && var.github_mgmt_token != "" ? var.github_mgmt_token : null
 
   dynamic "app_auth" {

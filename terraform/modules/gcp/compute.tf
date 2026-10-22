@@ -17,6 +17,12 @@ resource "time_sleep" "wait_for_apis_and_iam" {
 
   depends_on = [
     google_project_service.enabled_services,
+    google_storage_bucket_iam_member.runner_reports_admin,
+    google_project_iam_member.service_accounts_log_writer,
+    google_project_iam_member.runner_aiplatform_user,
+    google_secret_manager_secret_version.github_app_token_initial,
+    google_secret_manager_secret_iam_member.worker_secret_accessor,
+    google_project_iam_member.worker_aiplatform_user,
   ]
 }
 
@@ -122,6 +128,8 @@ resource "google_cloud_run_v2_job" "worker" {
   }
 
   depends_on = [
-    time_sleep.wait_for_apis_and_iam
+    time_sleep.wait_for_apis_and_iam,
+    google_secret_manager_secret_version.github_app_token_initial,
+    google_secret_manager_secret_iam_member.worker_secret_accessor,
   ]
 }

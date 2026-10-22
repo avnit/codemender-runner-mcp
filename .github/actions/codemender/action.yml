@@ -82,19 +82,18 @@ runs:
       with:
         python-version: '3.11'
 
-    # Governing: ADR-0008, SPEC-GHA, SPEC-GHA-FIX
+    # Governing: docs/openspec/specs/distribute/spec.md#req-0001, ADR-0008, SPEC-DIST, SPEC-GHA, SPEC-GHA-FIX
     - name: Install action dependencies
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
+        GITHUB_WORKSPACE: ${{ github.workspace }}
       run: |
         set -euo pipefail
-        PKG_DIR="${ACTION_PATH}/../../../packages"
-        if [[ ! -d "${PKG_DIR}/repohost" ]]; then
-          PKG_DIR="${ACTION_PATH}/../../codemender-runner/packages"
-        fi
-        if [[ ! -d "${PKG_DIR}/repohost" ]]; then
-          PKG_DIR="${ACTION_PATH}/packages"
+        if [[ -d "${GITHUB_WORKSPACE:-}/packages/repohost" ]]; then
+          PKG_DIR="${GITHUB_WORKSPACE}/packages"
+        else
+          PKG_DIR="$(cd "${ACTION_PATH}/../../../packages" && pwd)"
         fi
         python -m pip install --quiet \
           -r "${ACTION_PATH}/requirements.txt" \

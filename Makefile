@@ -1,4 +1,4 @@
-.PHONY: test test-cov build-runner build-cloudrun build-gitlab
+.PHONY: test test-cov build-runner build-cloudrun build-gitlab init-fork
 
 RUNNER_IMAGE ?= codemender-runner:local
 CLOUDRUN_IMAGE ?= codemender-cloudrun:local
@@ -25,3 +25,7 @@ build-cloudrun:
 
 build-gitlab:
 	docker build -f docker/gitlab.Dockerfile -t $(GITLAB_IMAGE) .
+
+# Governing: docs/openspec/specs/distribute/spec.md#req-0004, SPEC-DIST
+init-fork:
+	./scripts/set-fork-owner.sh $(OWNER)

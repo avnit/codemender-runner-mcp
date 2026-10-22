@@ -791,9 +791,10 @@ class TestM2FixConfigAndOrchestration(unittest.TestCase):
       self.assertIn("**Fixes:** ✅ 1 suggested · ❌ 1 no fix.", final_body)
 
 
+# Governing: docs/openspec/specs/distribute/spec.md#req-0002, SPEC-DIST, SPEC-GHA
 class TestWorkflowConfigGuard(unittest.TestCase):
 
-  def test_cm_merge_scan_workflow_has_check_config_guard_and_conditions(self):
+  def test_cm_merge_scan_check_config_behavior(self):
     workflow_path = os.path.normpath(
         os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
@@ -804,10 +805,6 @@ class TestWorkflowConfigGuard(unittest.TestCase):
             "cm-merge-scan.yml",
         )
     )
-    self.assertTrue(
-        os.path.isfile(workflow_path),
-        f"Expected workflow file at {workflow_path}",
-    )
     with open(workflow_path, "r", encoding="utf-8") as f:
       content = f.read()
 
@@ -815,48 +812,68 @@ class TestWorkflowConfigGuard(unittest.TestCase):
         "github.event.pull_request.head.repo.full_name == github.repository",
         content,
     )
-    self.assertIn("- name: Check CodeMender configuration", content)
-    self.assertIn("id: check-config", content)
-    self.assertIn("shell: bash", content)
-    self.assertIn("GCP_PROJECT_ID: ${{ vars.CODEMENDER_GCP_PROJECT_ID }}", content)
-    self.assertIn(
-        "GCP_WIF_PROVIDER: ${{ secrets.CODEMENDER_WORKLOAD_IDENTITY_PROVIDER }}",
-        content,
-    )
-    self.assertIn(
-        "GCP_SERVICE_ACCOUNT: ${{ secrets.CODEMENDER_SERVICE_ACCOUNT }}",
-        content,
-    )
-    self.assertIn(
-        'if [[ -z "${GCP_PROJECT_ID// }" || -z "${GCP_WIF_PROVIDER// }" || -z "${GCP_SERVICE_ACCOUNT// }" ]]; then',
-        content,
-    )
-    self.assertIn(
-        'echo "::notice::CodeMender is not configured for this repository (missing CODEMENDER_GCP_PROJECT_ID, CODEMENDER_WORKLOAD_IDENTITY_PROVIDER, or CODEMENDER_SERVICE_ACCOUNT); skipping scan."',
-        content,
-    )
-    self.assertIn('echo "configured=false" >> "$GITHUB_OUTPUT"', content)
-    self.assertIn('echo "configured=true" >> "$GITHUB_OUTPUT"', content)
-    self.assertIn(
-        "- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-        content,
-    )
 
-    check_idx = content.index("- name: Check CodeMender configuration")
-    checkout_idx = content.index("- uses: actions/checkout@")
-    action_idx = content.index("- uses: ./.github/actions/codemender")
-    self.assertLess(check_idx, checkout_idx)
-    self.assertLess(checkout_idx, action_idx)
+    import re
+    import subprocess
+    import textwrap
 
-    check_step_block = content[check_idx:checkout_idx]
-    run_section = check_step_block.split("run: |", 1)[1]
-    self.assertNotIn("${{", run_section)
+    match = re.search(
+        r"- name: Check CodeMender configuration\n(.*?)(?=\n      - |\Z)",
+        content,
+        re.DOTALL,
+    )
+    self.assertIsNotNone(match, "Check CodeMender configuration step not found")
+    run_match = re.search(
+        r"        run: \|\n((?:          .*\n?)+)", match.group(1)
+    )
+    self.assertIsNotNone(run_match, "run: | block not found in check-config")
+    run_script = textwrap.dedent(run_match.group(1))
 
-    cond = "if: steps.check-config.outputs.configured == 'true'"
-    checkout_step_block = content[checkout_idx:action_idx]
-    action_step_block = content[action_idx:]
-    self.assertIn(cond, checkout_step_block)
-    self.assertIn(cond, action_step_block)
+    with tempfile.TemporaryDirectory() as tmp:
+      # 1. Unconfigured repository (missing credentials): exits 0, emits notice, sets configured=false
+      for missing_case in (
+          {"GCP_PROJECT_ID": "", "GCP_WIF_PROVIDER": "p", "GCP_SERVICE_ACCOUNT": "sa"},
+          {"GCP_PROJECT_ID": "proj", "GCP_WIF_PROVIDER": "   ", "GCP_SERVICE_ACCOUNT": "sa"},
+          {"GCP_PROJECT_ID": "proj", "GCP_WIF_PROVIDER": "p", "GCP_SERVICE_ACCOUNT": ""},
+      ):
+        with self.subTest(env_vars=missing_case):
+          gh_out = os.path.join(tmp, "gh_out_unconfigured.txt")
+          with open(gh_out, "w", encoding="utf-8"):
+            pass
+          env = dict(os.environ, GITHUB_OUTPUT=gh_out, **missing_case)
+          res = subprocess.run(
+              ["bash", "-c", run_script],
+              env=env,
+              capture_output=True,
+              text=True,
+              check=False,
+          )
+          self.assertEqual(res.returncode, 0, msg=res.stderr)
+          self.assertIn("::notice::", res.stdout)
+          with open(gh_out, "r", encoding="utf-8") as f:
+            self.assertEqual(f.read().strip(), "configured=false")
+
+      # 2. Configured repository (all credentials present): exits 0, sets configured=true
+      gh_out_ok = os.path.join(tmp, "gh_out_configured.txt")
+      with open(gh_out_ok, "w", encoding="utf-8"):
+        pass
+      env_ok = dict(
+          os.environ,
+          GITHUB_OUTPUT=gh_out_ok,
+          GCP_PROJECT_ID="my-project",
+          GCP_WIF_PROVIDER="projects/123/locations/global/workloadIdentityPools/p/providers/prov",
+          GCP_SERVICE_ACCOUNT="cm@my-project.iam.gserviceaccount.com",
+      )
+      res_ok = subprocess.run(
+          ["bash", "-c", run_script],
+          env=env_ok,
+          capture_output=True,
+          text=True,
+          check=False,
+      )
+      self.assertEqual(res_ok.returncode, 0, msg=res_ok.stderr)
+      with open(gh_out_ok, "r", encoding="utf-8") as f:
+        self.assertEqual(f.read().strip(), "configured=true")
 
 
 class TestM3OnDemandVerify(unittest.TestCase):
