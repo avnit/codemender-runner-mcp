@@ -13,6 +13,7 @@
 # limitations under the License.
 
 # Governing: docs/openspec/specs/github-actions/spec.md#req-0003
+# Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
 # Governing: docs/adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md
 
 """In-process Cloud Run client SDK for GitHub Actions and CI platforms.
@@ -309,39 +310,72 @@ def _gcloud_cancel_execution(
 class CloudRunClient:
   """Orchestrates CodeMender execution inside Google Cloud Run Jobs."""
 
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
   def __init__(self, config: Optional[CloudRunConfig] = None):
     self.config = config or CloudRunConfig()
     self.current_execution: Optional[str] = None
     self.current_process: Optional[Any] = None
+    self._lock = threading.RLock()
+    self._payload_lock = threading.RLock()
+    self._staged_payloads: Dict[str, str] = {}
+    self._active_executions: set[str] = set()
+    self._active_processes: set[Any] = set()
 
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
   def cancel(self, execution_name: Optional[str] = None) -> bool:
-    """Cancels the active or specified Cloud Run Job execution."""
-    target_name = execution_name or self.current_execution
-    if not target_name and self.current_process and self.current_process.poll() is None:
-      # If the process is still starting, wait briefly for the execution name to appear
-      for _ in range(25):
-        if self.current_execution:
-          target_name = self.current_execution
-          break
-        time.sleep(0.1)
-
-    cancelled = False
-    if target_name:
-      cancelled = _gcloud_cancel_execution(
-          target_name,
+    """Cancels the active or specified Cloud Run Job execution(s)."""
+    if execution_name:
+      with self._lock:
+        self._active_executions.discard(execution_name)
+      return _gcloud_cancel_execution(
+          execution_name,
           region=self.config.region,
           project=self.config.project,
       )
+
+    if not self._active_executions and not self.current_execution:
+      has_running_proc = (
+          (self.current_process and self.current_process.poll() is None)
+          or any(p.poll() is None for p in list(self._active_processes))
+      )
+      if has_running_proc:
+        # If a process is still starting, wait briefly for the execution name to appear
+        for _ in range(25):
+          if self._active_executions or self.current_execution:
+            break
+          time.sleep(0.1)
+
+    with self._lock:
+      target_names = list(self._active_executions)
+      if not target_names and self.current_execution:
+        target_names = [self.current_execution]
+      self._active_executions.clear()
+
+    cancelled = False
+    if target_names:
+      for target_name in target_names:
+        if _gcloud_cancel_execution(
+            target_name,
+            region=self.config.region,
+            project=self.config.project,
+        ):
+          cancelled = True
     else:
       logger.warning("No Cloud Run execution name available to cancel.")
 
-    if self.current_process and self.current_process.poll() is None:
-      try:
-        self.current_process.terminate()
-      except OSError:
-        pass
+    with self._lock:
+      procs = list(self._active_processes)
+      if self.current_process and self.current_process not in procs:
+        procs.append(self.current_process)
+    for proc in procs:
+      if proc and proc.poll() is None:
+        try:
+          proc.terminate()
+        except OSError:
+          pass
     return cancelled
 
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
   def run(
       self,
       command: str,
@@ -385,15 +419,17 @@ class CloudRunClient:
         self.config.diff_workers or os.environ.get("CODEMENDER_DIFF_WORKERS", "8"),
     )
 
-    out_dir = self.config.out_dir or os.environ.get("CODEMENDER_OUT_DIR", "").strip()
-    if not out_dir:
-      raw_out = _parse_cli_arg(args, "--out", "")
-      if (
-          raw_out
-          and raw_out != "/out"
-          and os.path.exists(os.path.dirname(os.path.abspath(raw_out)))
-      ):
-        out_dir = raw_out
+    raw_out = _parse_cli_arg(args, "--out", "")
+    if (
+        raw_out
+        and raw_out != "/out"
+        and os.path.exists(os.path.dirname(os.path.abspath(raw_out)))
+    ):
+      out_dir = raw_out
+    else:
+      out_dir = self.config.out_dir or os.environ.get("CODEMENDER_OUT_DIR", "").strip()
+
+    raw_finding = _parse_cli_arg(args, "--finding", "")
 
     run_id = self.config.run_id or os.environ.get("GITHUB_RUN_ID", "manual")
     attempt = self.config.run_attempt or os.environ.get("GITHUB_RUN_ATTEMPT", "1")
@@ -405,20 +441,40 @@ class CloudRunClient:
     output_uri = f"{gcs_prefix}/output"
     receipt_gcs_uri = f"{output_uri}/receipt.json"
     sarif_gcs_uri = f"{output_uri}/report.sarif"
+    diff_gcs_uri = f"{output_uri}/finding.diff"
     log_gcs_uri = f"{output_uri}/runner.log"
     manifest_gcs_uri = f"{gcs_prefix}/input/manifest.json"
 
     with tempfile.TemporaryDirectory(prefix="cm-cr-") as temp_dir:
-      # Stage source payload if running find-diff or full scan
+      # Stage source payload once per repository directory across find-diff and parallel fixes
       if command not in ("version",):
-        tarball_path = os.path.join(temp_dir, "code.tar.gz")
-        logger.info("Packaging repository snapshot from %s...", repo_dir)
-        _package_workspace(repo_dir, tarball_path)
-        logger.info("Uploading repository snapshot to %s...", payload_uri)
-        _gcloud_transfer(tarball_path, payload_uri)
+        repo_key = os.path.abspath(repo_dir)
+        with self._payload_lock:
+          cached_payload_uri = self._staged_payloads.get(repo_key)
+          if cached_payload_uri:
+            payload_uri = cached_payload_uri
+          else:
+            tarball_path = os.path.join(temp_dir, "code.tar.gz")
+            logger.info("Packaging repository snapshot from %s...", repo_dir)
+            _package_workspace(repo_dir, tarball_path)
+            logger.info("Uploading repository snapshot to %s...", payload_uri)
+            _gcloud_transfer(tarball_path, payload_uri)
+            self._staged_payloads[repo_key] = payload_uri
+
+      finding_gcs_uri = ""
+      if (
+          command in ("fix", "verify")
+          and raw_finding
+          and os.path.isfile(raw_finding)
+      ):
+        finding_gcs_uri = f"{gcs_prefix}/input/finding.sarif"
+        logger.info(
+            "Uploading finding SARIF %s to %s...", raw_finding, finding_gcs_uri
+        )
+        _gcloud_transfer(raw_finding, finding_gcs_uri)
 
       # Stage manifest.json
-      manifest_data = {
+      manifest_data: Dict[str, Any] = {
           "command": command,
           "payload_uri": payload_uri if command != "version" else "",
           "output_prefix": output_uri,
@@ -427,6 +483,9 @@ class CloudRunClient:
           "diff_workers": diff_workers,
           "log_level": log_level,
       }
+      if finding_gcs_uri:
+        manifest_data["finding_uri"] = finding_gcs_uri
+
       manifest_path = os.path.join(temp_dir, "manifest.json")
       with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest_data, f, indent=2)
@@ -462,19 +521,26 @@ class CloudRunClient:
       except FileNotFoundError as exc:
         raise CloudRunError(f"gcloud CLI not found: {exc}") from exc
 
-      self.current_process = proc
+      with self._lock:
+        self.current_process = proc
+        self._active_processes.add(proc)
+      run_exec_name: Optional[str] = None
       stdout_lines: List[str] = []
       stderr_lines: List[str] = []
 
       def _stream_output(stream: Any, storage: List[str]):
+        nonlocal run_exec_name
         if not stream:
           return
         for line in iter(stream.readline, ""):
           storage.append(line)
-          if not self.current_execution:
+          if not run_exec_name:
             exec_name = _extract_execution_name(line)
             if exec_name:
-              self.current_execution = exec_name
+              run_exec_name = exec_name
+              with self._lock:
+                self.current_execution = exec_name
+                self._active_executions.add(exec_name)
         try:
           stream.close()
         except Exception:
@@ -493,12 +559,14 @@ class CloudRunClient:
         proc.wait(timeout=timeout_seconds)
       except subprocess.TimeoutExpired as exc:
         exec_name = (
-            self.current_execution
+            run_exec_name
             or _extract_execution_name("".join(stderr_lines))
             or _extract_execution_name("".join(stdout_lines))
         )
         if exec_name:
-          self.current_execution = exec_name
+          run_exec_name = exec_name
+          with self._lock:
+            self.current_execution = exec_name
           try:
             self.cancel(exec_name)
           except Exception as cancel_exc:  # pylint: disable=broad-exception-caught
@@ -507,29 +575,36 @@ class CloudRunClient:
                 exec_name,
                 cancel_exc,
             )
-        else:
-          if self.current_process and self.current_process.poll() is None:
-            try:
-              self.current_process.kill()
-            except OSError:
-              pass
+        if proc.poll() is None:
+          try:
+            proc.kill()
+          except OSError:
+            pass
         raise CloudRunTimeoutError(
             f"Cloud Run Job execution timed out after {timeout_seconds} seconds."
         ) from exc
       finally:
         err_thread.join(timeout=5)
         out_thread.join(timeout=5)
-        self.current_process = None
+        with self._lock:
+          self._active_processes.discard(proc)
+          if self.current_process is proc:
+            self.current_process = None
+          if run_exec_name:
+            self._active_executions.discard(run_exec_name)
 
       stderr_text = "".join(stderr_lines)
       stdout_text = "".join(stdout_lines)
-      if not self.current_execution:
+      if not run_exec_name:
         exec_name = (
             _extract_execution_name(stderr_text)
             or _extract_execution_name(stdout_text)
         )
         if exec_name:
-          self.current_execution = exec_name
+          run_exec_name = exec_name
+          with self._lock:
+            self.current_execution = exec_name
+            self._active_executions.discard(exec_name)
 
       logger.info(
           "Cloud Run Job dispatch finished with returncode %d.", proc.returncode
@@ -539,24 +614,45 @@ class CloudRunClient:
       local_receipt = os.path.join(temp_dir, "receipt.json")
       receipt_ok = _gcloud_transfer(receipt_gcs_uri, local_receipt, check=False)
 
-      # Retrieve SARIF report
-      local_sarif = os.path.join(temp_dir, "report.sarif")
-      _gcloud_transfer(sarif_gcs_uri, local_sarif, check=False)
-      sarif_bytes = b""
-      if os.path.isfile(local_sarif):
-        with open(local_sarif, "rb") as f:
-          sarif_bytes = f.read()
-
-      # Stage artifacts into CODEMENDER_OUT_DIR if configured
-      if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
-        if os.path.isfile(local_receipt):
-          shutil.copy2(local_receipt, os.path.join(out_dir, "receipt.json"))
+      output_bytes = b""
+      if command == "fix":
+        local_diff = os.path.join(temp_dir, "finding.diff")
+        _gcloud_transfer(diff_gcs_uri, local_diff, check=False)
+        if os.path.isfile(local_diff):
+          with open(local_diff, "rb") as f:
+            output_bytes = f.read()
+        if out_dir:
+          os.makedirs(out_dir, exist_ok=True)
+          if os.path.isfile(local_receipt):
+            shutil.copy2(local_receipt, os.path.join(out_dir, "receipt.json"))
+          if os.path.isfile(local_diff):
+            if raw_finding:
+              stem = os.path.splitext(os.path.basename(raw_finding))[0]
+              diff_name = f"{stem}.diff"
+            else:
+              diff_name = "finding.diff"
+            shutil.copy2(local_diff, os.path.join(out_dir, diff_name))
+          _gcloud_transfer(
+              log_gcs_uri, os.path.join(out_dir, "runner.log"), check=False
+          )
+      else:
+        # Retrieve SARIF report
+        local_sarif = os.path.join(temp_dir, "report.sarif")
+        _gcloud_transfer(sarif_gcs_uri, local_sarif, check=False)
         if os.path.isfile(local_sarif):
-          shutil.copy2(local_sarif, os.path.join(out_dir, "report.sarif"))
-        _gcloud_transfer(
-            log_gcs_uri, os.path.join(out_dir, "runner.log"), check=False
-        )
+          with open(local_sarif, "rb") as f:
+            output_bytes = f.read()
+
+        # Stage artifacts into CODEMENDER_OUT_DIR if configured
+        if out_dir:
+          os.makedirs(out_dir, exist_ok=True)
+          if os.path.isfile(local_receipt):
+            shutil.copy2(local_receipt, os.path.join(out_dir, "receipt.json"))
+          if os.path.isfile(local_sarif):
+            shutil.copy2(local_sarif, os.path.join(out_dir, "report.sarif"))
+          _gcloud_transfer(
+              log_gcs_uri, os.path.join(out_dir, "runner.log"), check=False
+          )
 
       if not receipt_ok or not os.path.isfile(local_receipt):
         if proc.returncode != 0:
@@ -574,8 +670,14 @@ class CloudRunClient:
       # Log spill if non-zero exit code
       raw_exit = receipt_data.get("exit_code", proc.returncode)
       if raw_exit != 0:
-        local_log = os.path.join(temp_dir, "runner.log")
-        if _gcloud_transfer(log_gcs_uri, local_log, check=False) and os.path.isfile(local_log):
+        local_log = (
+            os.path.join(out_dir, "runner.log")
+            if out_dir and os.path.isfile(os.path.join(out_dir, "runner.log"))
+            else os.path.join(temp_dir, "runner.log")
+        )
+        if not os.path.isfile(local_log):
+          _gcloud_transfer(log_gcs_uri, local_log, check=False)
+        if os.path.isfile(local_log):
           with open(local_log, "r", encoding="utf-8", errors="replace") as f:
             sys.stderr.write(
                 f"\n--- [Cloud Run Job runner.log] ---\n{f.read()}\n--- [End runner.log] ---\n"
@@ -591,6 +693,6 @@ class CloudRunClient:
           finding_count=int(receipt_data.get("finding_count", 0)),
           artifacts=receipt_data.get("artifacts", {}),
           error=receipt_data.get("error"),
-          stdout=sarif_bytes,
+          stdout=output_bytes,
           events=receipt_data.get("events", []),
       )

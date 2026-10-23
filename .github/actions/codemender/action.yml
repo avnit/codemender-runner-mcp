@@ -67,6 +67,11 @@ inputs:
       Whether CodeMender tries a fix for each finding and posts it on the PR.
     required: false
     default: 'true'
+  max_parallel_fixes:
+    description: >-
+      Maximum number of `cm-runner fix` jobs running at the same time.
+    required: false
+    default: '4'
   artifact_retention_days:
     description: >-
       Number of days to retain the uploaded workflow artifacts: `report.sarif`,
@@ -145,6 +150,7 @@ runs:
         CODEMENDER_LOG_LEVEL: ${{ inputs.log_level }}
         CODEMENDER_DIFF_WORKERS: ${{ inputs.diff_workers }}
         CODEMENDER_FIX: ${{ inputs.fix }}
+        CODEMENDER_MAX_PARALLEL_FIXES: ${{ inputs.max_parallel_fixes }}
         CODEMENDER_VERIFY_REPLY_ID: ${{ steps.preflight.outputs.verify_reply_id }}
         CODEMENDER_OUT_DIR: ${{ runner.temp }}/codemender-out-${{ github.run_id }}-${{ github.run_attempt }}
         GOOGLE_CLOUD_PROJECT: ${{ inputs.gcp_project_id }}

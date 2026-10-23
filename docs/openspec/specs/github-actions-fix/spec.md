@@ -24,10 +24,9 @@ sdd_cujspec_product: codemender-runner
 ## Overview
 
 After `find-diff` (SPEC-GHA, M1), the action runs `cm-runner fix`
-([SPEC-FIX](../fix/spec.md)) once per finding. All fixes run at the same time,
-each in its own gVisor container on the runner VM. The action posts each patch
-on the PR next to the code it changes, and adds a Fix column to the sticky
-comment.
+([SPEC-FIX](../fix/spec.md)) once per finding. All fixes run in parallel.
+The action posts each patch on the PR next to the code it changes, and adds
+a Fix column to the sticky comment.
 
 The reasons behind each requirement are in [design.md](design.md).
 

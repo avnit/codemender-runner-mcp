@@ -1,5 +1,5 @@
 <!--*
-freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-06' }
+freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-23' }
 *-->
 
 <!--
@@ -34,8 +34,6 @@ Who owns what:
   per call and doesn't post anything.
 - Everything in this document belongs to the action: running `fix` once per
   finding, keeping the runs apart, and posting the results.
-- Cloud Run (SPEC-GHA REQ-0003) is out of scope. Every hand-off in this design
-  is a file, so Cloud Run can follow later.
 
 Governed by [SPEC-GHA-FIX](spec.md), [SPEC-GHA](../github-actions/spec.md),
 [SPEC-FIX](../fix/spec.md),
@@ -82,7 +80,7 @@ Governed by [SPEC-GHA-FIX](spec.md), [SPEC-GHA](../github-actions/spec.md),
 - Installing dependencies or opening the network so fixes can be built and
   tested ([Decision 7](#decision-7)).
 - Limits on cost, time or the number of fixes ([Decision 6](#decision-6)).
-- Cloud Run, and verifying fixes with `cm-runner verify`.
+- Verifying fixes with `cm-runner verify` (covered by SPEC-GHA-VERIFY, M3).
 
 ## Decisions
 

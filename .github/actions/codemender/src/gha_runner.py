@@ -461,10 +461,9 @@ def run_pr(
         backend=backend,
     )
 
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0001, SPEC-GHA-FIX
   if runner_ok and findings and fix_enabled(env):
-    if backend == "cloudrun":
-      print("::notice::Automatic fixes in Cloud Run mode are not yet supported; skipping.")
-    elif env.get("GITHUB_WORKSPACE"):
+    if env.get("GITHUB_WORKSPACE"):
       return _run_fixes(
           findings,
           env,

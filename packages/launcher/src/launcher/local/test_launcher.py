@@ -378,6 +378,177 @@ class TestCloudRunLauncher(unittest.TestCase):
     launcher.stop()
     mock_client.cancel.assert_called_once()
 
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
+  def test_run_isolated_rewrites_container_paths_and_returns_diff_and_log(self):
+    mock_client = MagicMock()
+    diff_bytes = b"--- a/f.py\n+++ b/f.py\n"
+    observed = {}
+
+    def _fake_client_run(command, args, log_level="info", timeout_seconds=3600):
+      observed["command"] = command
+      observed["args"] = list(args)
+      observed["log_level"] = log_level
+      observed["timeout_seconds"] = timeout_seconds
+      out_idx = args.index("--out") + 1
+      out_dir = args[out_idx]
+      finding_idx = args.index("--finding") + 1
+      finding_path = args[finding_idx]
+      observed["finding_exists"] = os.path.isfile(finding_path)
+      with open(os.path.join(out_dir, "finding-001.diff"), "wb") as df:
+        df.write(diff_bytes)
+      with open(os.path.join(out_dir, "runner.log"), "w", encoding="utf-8") as lf:
+        lf.write("cloudrun fix log\n")
+      return MagicMock(exit_code=0, stdout=diff_bytes, error=None)
+
+    mock_client.run.side_effect = _fake_client_run
+    launcher = CloudRunLauncher(client=mock_client, log_level="debug", timeout_seconds=1800)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+      src_ws = os.path.join(temp_dir, "src-repo")
+      os.makedirs(src_ws)
+      task = ParallelTask(
+          key="finding-001",
+          command="fix",
+          args=[
+              "--repo",
+              "/workspace",
+              "--finding",
+              "/out/finding-001.sarif",
+              "--out",
+              "/out",
+          ],
+          input_files={"finding-001.sarif": b"{}"},
+          output_file="finding-001.diff",
+      )
+      result = launcher.run_isolated(
+          task,
+          src_workspace=src_ws,
+          temp_root=temp_dir,
+          timeout_seconds=1200,
+      )
+
+    self.assertTrue(result.ok)
+    self.assertEqual(result.key, "finding-001")
+    self.assertEqual(result.exit_code, 0)
+    self.assertEqual(result.output, diff_bytes)
+    self.assertEqual(result.log, "cloudrun fix log\n")
+    self.assertEqual(result.error, "")
+    self.assertEqual(observed["command"], "fix")
+    self.assertEqual(observed["timeout_seconds"], 1200)
+    self.assertTrue(observed["finding_exists"])
+    args = observed["args"]
+    self.assertEqual(args[args.index("--repo") + 1], src_ws)
+    self.assertNotEqual(args[args.index("--out") + 1], "/out")
+    self.assertTrue(args[args.index("--finding") + 1].endswith("finding-001.sarif"))
+    self.assertNotEqual(args[args.index("--finding") + 1], "/out/finding-001.sarif")
+
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
+  def test_run_isolated_exit_code_3_no_fix(self):
+    mock_client = MagicMock()
+
+    def _fake_client_run(command, args, log_level="info", timeout_seconds=3600):
+      del command, log_level, timeout_seconds
+      out_dir = args[args.index("--out") + 1]
+      with open(os.path.join(out_dir, "runner.log"), "w", encoding="utf-8") as lf:
+        lf.write("no patch produced\n")
+      return MagicMock(exit_code=3, stdout=b"", error="No fix found")
+
+    mock_client.run.side_effect = _fake_client_run
+    launcher = CloudRunLauncher(client=mock_client)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+      task = ParallelTask(
+          key="finding-001",
+          command="fix",
+          args=["--repo", "/workspace", "--finding", "/out/finding-001.sarif", "--out", "/out"],
+          input_files={"finding-001.sarif": b"{}"},
+          output_file="finding-001.diff",
+      )
+      result = launcher.run_isolated(task, src_workspace=temp_dir, temp_root=temp_dir)
+
+    self.assertFalse(result.ok)
+    self.assertEqual(result.key, "finding-001")
+    self.assertEqual(result.exit_code, 3)
+    self.assertEqual(result.output, b"")
+    self.assertEqual(result.log, "no patch produced\n")
+    self.assertTrue(bool(result.error))
+
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
+  def test_run_isolated_catches_cloudrun_errors(self):
+    for err in (CloudRunError("Job execution failed"), CloudRunTimeoutError("Job timed out")):
+      with self.subTest(error=type(err).__name__):
+        mock_client = MagicMock()
+        mock_client.run.side_effect = err
+        launcher = CloudRunLauncher(client=mock_client)
+        with tempfile.TemporaryDirectory() as temp_dir:
+          task = ParallelTask(
+              key="finding-001",
+              command="fix",
+              args=["--repo", "/workspace", "--finding", "/out/finding-001.sarif", "--out", "/out"],
+              input_files={"finding-001.sarif": b"{}"},
+              output_file="finding-001.diff",
+          )
+          result = launcher.run_isolated(task, src_workspace=temp_dir, temp_root=temp_dir)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.key, "finding-001")
+        self.assertIsNone(result.exit_code)
+        self.assertTrue(bool(result.error))
+
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
+  def test_run_parallel_executes_multiple_tasks(self):
+    mock_client = MagicMock()
+
+    def _fake_client_run(command, args, log_level="info", timeout_seconds=3600):
+      del command, log_level, timeout_seconds
+      out_dir = args[args.index("--out") + 1]
+      finding_path = args[args.index("--finding") + 1]
+      stem = os.path.splitext(os.path.basename(finding_path))[0]
+      diff_bytes = f"--- a/{stem}.py\n+++ b/{stem}.py\n".encode("utf-8")
+      with open(os.path.join(out_dir, f"{stem}.diff"), "wb") as df:
+        df.write(diff_bytes)
+      with open(os.path.join(out_dir, "runner.log"), "w", encoding="utf-8") as lf:
+        lf.write(f"log for {stem}\n")
+      return MagicMock(exit_code=0, stdout=diff_bytes, error=None)
+
+    mock_client.run.side_effect = _fake_client_run
+    launcher = CloudRunLauncher(client=mock_client)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+      tasks = [
+          ParallelTask(
+              key=f"finding-{i:03d}",
+              command="fix",
+              args=[
+                  "--repo",
+                  "/workspace",
+                  "--finding",
+                  f"/out/finding-{i:03d}.sarif",
+                  "--out",
+                  "/out",
+              ],
+              input_files={f"finding-{i:03d}.sarif": b"{}"},
+              output_file=f"finding-{i:03d}.diff",
+          )
+          for i in (1, 2)
+      ]
+      results = list(
+          launcher.run_parallel(
+              tasks,
+              src_workspace=temp_dir,
+              temp_root=temp_dir,
+              max_workers=2,
+          )
+      )
+
+    self.assertEqual(sorted(r.key for r in results), ["finding-001", "finding-002"])
+    for r in results:
+      self.assertTrue(r.ok)
+      self.assertEqual(r.exit_code, 0)
+      self.assertEqual(r.output, f"--- a/{r.key}.py\n+++ b/{r.key}.py\n".encode("utf-8"))
+      self.assertEqual(r.log, f"log for {r.key}\n")
+      self.assertEqual(r.error, "")
+
 
 if __name__ == "__main__":
   unittest.main()
+

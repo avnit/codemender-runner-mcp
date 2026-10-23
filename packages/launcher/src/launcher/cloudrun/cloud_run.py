@@ -13,12 +13,15 @@
 # limitations under the License.
 
 # Governing: docs/openspec/specs/github-actions/spec.md#req-0003
+# Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
 
 """Cloud Run launcher: runs cm-runner in Google Cloud Run via in-process SDK."""
 
 import json
 import logging
 import os
+import shutil
+import tempfile
 from typing import Any, Optional, Sequence
 
 try:
@@ -37,11 +40,33 @@ except ImportError:
 
   CloudRunClient = Any  # type: ignore
 
-from launcher.base import Launcher, LauncherError, RunResult
+from launcher.base import (
+    Launcher,
+    LauncherError,
+    ParallelResult,
+    ParallelTask,
+    RunResult,
+)
 
 logger = logging.getLogger("codemender-github-actions")
 
 _DEFAULT_TIMEOUT_SECONDS = 60 * 60
+
+
+def _read_bytes(path: str) -> bytes:
+  try:
+    with open(path, "rb") as f:
+      return f.read()
+  except OSError:
+    return b""
+
+
+def _read_text(path: str) -> str:
+  try:
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+      return f.read()
+  except OSError:
+    return ""
 
 
 class CloudRunLauncher(Launcher):
@@ -70,14 +95,119 @@ class CloudRunLauncher(Launcher):
     self.client = client
     self.log_level = log_level
     self.timeout_seconds = timeout_seconds
+    self._stopped = False
 
   def stop(self) -> None:
     """Stops any in-flight Cloud Run Job execution."""
+    self._stopped = True
     if hasattr(self.client, "cancel"):
       try:
         self.client.cancel()
       except Exception as e:  # pylint: disable=broad-exception-caught
         logger.warning("Error cancelling Cloud Run client: %s", e)
+
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
+  def run_isolated(
+      self,
+      task: ParallelTask,
+      src_workspace: str,
+      temp_root: Optional[str] = None,
+      timeout_seconds: Optional[int] = None,
+  ) -> ParallelResult:
+    """Runs one task in an isolated Cloud Run Job execution."""
+    if self._stopped:
+      return ParallelResult(key=task.key, error="Launcher was stopped.")
+    if not os.path.isdir(src_workspace):
+      return ParallelResult(
+          key=task.key,
+          error=f"Source workspace does not exist: {src_workspace!r}",
+      )
+
+    limit = (
+        self.timeout_seconds if timeout_seconds is None else timeout_seconds
+    )
+    folder = tempfile.mkdtemp(
+        prefix="codemender-cr-task-", dir=temp_root or None
+    )
+    try:
+      out_dir = os.path.join(folder, "out")
+      os.makedirs(out_dir, exist_ok=True)
+      for name, data in task.input_files.items():
+        path = os.path.join(out_dir, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+          f.write(data)
+
+      rewritten_args = []
+      for arg in task.args:
+        if arg == "/workspace":
+          rewritten_args.append(src_workspace)
+        elif arg == "/out":
+          rewritten_args.append(out_dir)
+        elif arg.startswith("/out/"):
+          rewritten_args.append(os.path.join(out_dir, arg[len("/out/") :]))
+        else:
+          rewritten_args.append(arg)
+
+      try:
+        receipt = self.client.run(
+            command=task.command,
+            args=rewritten_args,
+            log_level=self.log_level,
+            timeout_seconds=limit,
+        )
+      except (CloudRunTimeoutError, CloudRunError, LauncherError) as e:
+        return ParallelResult(
+            key=task.key,
+            exit_code=None,
+            log=_read_text(os.path.join(out_dir, "runner.log")),
+            error=str(e),
+        )
+
+      raw_exit_code = getattr(receipt, "exit_code", None)
+      status = getattr(receipt, "status", None)
+      if isinstance(raw_exit_code, int):
+        exit_code = raw_exit_code
+      elif isinstance(raw_exit_code, (str, float)):
+        try:
+          exit_code = int(raw_exit_code)
+        except (ValueError, TypeError):
+          exit_code = 0 if status == "SUCCESS" else 1
+      elif status == "FAILURE":
+        exit_code = 1
+      else:
+        exit_code = 0
+
+      log_text = _read_text(os.path.join(out_dir, "runner.log"))
+      output = b""
+      if task.output_file:
+        output = _read_bytes(os.path.join(out_dir, task.output_file))
+      if not output:
+        raw_stdout = getattr(receipt, "stdout", None)
+        if isinstance(raw_stdout, bytes) and raw_stdout:
+          output = raw_stdout
+
+      if exit_code == 0 and (not task.output_file or output.strip()):
+        error = ""
+      elif exit_code == 0:
+        error = "cm-runner exited with code 0 but wrote no output."
+      else:
+        receipt_err = getattr(receipt, "error", None)
+        error = (
+            str(receipt_err)
+            if receipt_err
+            else f"cm-runner exited with code {exit_code}."
+        )
+
+      return ParallelResult(
+          key=task.key,
+          exit_code=exit_code,
+          output=output,
+          log=log_text,
+          error=error,
+      )
+    finally:
+      shutil.rmtree(folder, ignore_errors=True)
 
   def run(self, command: str, args: Sequence[str] = ()) -> RunResult:
     """Runs a command via the in-process CloudRunClient and waits for completion."""

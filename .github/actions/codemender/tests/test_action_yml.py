@@ -230,6 +230,24 @@ class TestCompositeActionsDualModeAndDefaultImage(unittest.TestCase):
           gh_out_2.read_text(encoding="utf-8"),
       )
 
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0001, SPEC-GHA-FIX
+  def test_codemender_cloudrun_action_max_parallel_fixes_input_and_env(self):
+    content = _CODEMENDER_YML.read_text(encoding="utf-8")
+    input_match = re.search(
+        r"  max_parallel_fixes:\n((?:    .*\n)+)", content
+    )
+    self.assertIsNotNone(
+        input_match, "max_parallel_fixes input not found in .github/actions/codemender/action.yml"
+    )
+    input_block = input_match.group(1)
+    self.assertIn("required: false", input_block)
+    self.assertIn("default: '4'", input_block)
+    self.assertIn(
+        "CODEMENDER_MAX_PARALLEL_FIXES: ${{ inputs.max_parallel_fixes }}",
+        content,
+    )
+
 
 if __name__ == "__main__":
   unittest.main()
+

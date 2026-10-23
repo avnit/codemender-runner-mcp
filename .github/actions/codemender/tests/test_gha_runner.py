@@ -370,47 +370,99 @@ class TestRunPr(unittest.TestCase):
     body_posted_ok = mock_post.call_args.args[3]
     self.assertIn("✅ **No vulnerabilities found**", body_posted_ok)
 
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0001, SPEC-GHA-FIX
+  @patch.object(gha_runner, "list_finding_comments", return_value={})
+  @patch.object(gha_runner.fix_comments, "checked_out_commit", return_value="aaaabbbbccccdddd")
+  @patch.object(gha_runner.fix_comments, "FixPoster")
+  def test_M2CloudRunParallelFixes(
+      self,
+      mock_poster_cls,
+      _mock_head,
+      _mock_earlier,
+      mock_post,
+  ):
+    with tempfile.TemporaryDirectory() as temp_dir:
+      workspace = os.path.join(temp_dir, "workspace")
+      os.makedirs(workspace)
+      out_dir = os.path.join(temp_dir, "out")
+
+      env = dict(
+          _ENV,
+          CODEMENDER_BACKEND="cloudrun",
+          CODEMENDER_FIX="true",
+          CODEMENDER_MAX_PARALLEL_FIXES="2",
+          GITHUB_WORKSPACE=workspace,
+          RUNNER_TEMP=temp_dir,
+      )
+      launcher = _launcher(scan_result=_scan_result(_SARIF_WITH_FINDINGS))
+      findings = gha_runner.SarifDocument(data=_SARIF_WITH_FINDINGS).to_findings()
+      launcher.run_parallel.return_value = (
+          r
+          for r in (
+              ParallelResult(
+                  key=findings[0],
+                  exit_code=0,
+                  output=b"diff --git a/x b/x\n",
+                  log="cloudrun fix 1 log\n",
+              ),
+              ParallelResult(
+                  key=findings[1],
+                  exit_code=3,
+                  output=b"",
+                  log="cloudrun fix 2 log\n",
+                  error="cm-runner exited with code 3.",
+              ),
+          )
+      )
+      mock_poster_cls.return_value.post.side_effect = [
+          gha_runner.FixCell(
+              gha_runner.fix_comments.SUGGESTED,
+              "https://github.com/o/r/pull/7#review-1",
+          ),
+          gha_runner.FixCell(gha_runner.fix_comments.NO_FIX),
+      ]
+
+      with patch("builtins.print"):
+        rc = gha_runner.run_pr(_pr_event(), env, launcher, out_dir=out_dir)
+
+      self.assertEqual(rc, 0)
+      launcher.run_parallel.assert_called_once()
+      self.assertEqual(launcher.run_parallel.call_args.kwargs["max_workers"], 2)
+      self.assertTrue(
+          os.path.isfile(os.path.join(out_dir, "findings", "finding-001.sarif"))
+      )
+      self.assertTrue(
+          os.path.isfile(os.path.join(out_dir, "fixes", "finding-001.diff"))
+      )
+      bodies = [c.args[3] for c in mock_post.call_args_list]
+      self.assertGreaterEqual(len(bodies), 2)
+      self.assertIn("⏳ Generating fixes for 2 findings.", bodies[0])
+      self.assertIn("| ⏳ Working |", bodies[0])
+      final_body = bodies[-1]
+      self.assertIn(
+          "[✅ Suggested](https://github.com/o/r/pull/7#review-1)", final_body
+      )
+      self.assertIn("| ❌ No fix |", final_body)
+      self.assertIn("**Fixes:** ✅ 1 suggested · ❌ 1 no fix.", final_body)
+
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0001, SPEC-GHA-FIX
   def test_cloudrun_fixes_skipped_without_workspace_warning(self, mock_post):
-    launcher = MagicMock()
-    sarif = {
-        "version": "2.1.0",
-        "runs": [
-            {
-                "results": [
-                    {
-                        "ruleId": "CWE-89",
-                        "level": "error",
-                        "message": {"text": "SQL Injection"},
-                        "locations": [{
-                            "physicalLocation": {
-                                "artifactLocation": {"uri": "src/db.py"},
-                                "region": {"startLine": 10},
-                            }
-                        }],
-                    }
-                ]
-            }
-        ],
-    }
-    launcher.run.return_value = _scan_result(sarif)
+    launcher = _launcher(scan_result=_scan_result(_SARIF_WITH_FINDINGS))
     env = dict(
         _ENV,
         CODEMENDER_BACKEND="cloudrun",
         CODEMENDER_FIX="true",
-        GITHUB_WORKSPACE="/workspace",
+        GITHUB_WORKSPACE="",
     )
 
     with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
       rc = gha_runner.run_pr(_pr_event(), env, launcher)
 
     self.assertEqual(rc, 0)
+    launcher.run_parallel.assert_not_called()
     stdout_val = mock_stdout.getvalue()
-    self.assertIn(
-        "::notice::Automatic fixes in Cloud Run mode are not yet supported;"
-        " skipping.",
-        stdout_val,
-    )
-    self.assertNotIn("GITHUB_WORKSPACE is not set", stdout_val)
+    self.assertIn("GITHUB_WORKSPACE is not set", stdout_val)
+
 
 class TestFormatting(unittest.TestCase):
 

@@ -20,6 +20,7 @@ import os
 import subprocess
 import tarfile
 import tempfile
+import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -330,6 +331,294 @@ class TestCloudRunClient(unittest.TestCase):
     with self.assertRaises(CloudRunError) as ctx:
       client.run("find-diff")
     self.assertIn("Cloud Run Job execution failed", str(ctx.exception))
+
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
+  @patch("gcp_sandboxing.client.subprocess.Popen")
+  @patch("gcp_sandboxing.client._package_workspace")
+  @patch("gcp_sandboxing.client._gcloud_transfer")
+  def test_run_fix_stages_finding_and_downloads_diff_and_log(
+      self, mock_transfer, mock_package, mock_popen
+  ):
+    with tempfile.TemporaryDirectory() as repo_dir, tempfile.TemporaryDirectory() as out_dir:
+      finding_path = os.path.join(out_dir, "finding-001.sarif")
+      with open(finding_path, "wb") as f:
+        f.write(b'{"version": "2.1.0", "runs": []}')
+
+      cfg = CloudRunConfig(
+          project="test-project",
+          bucket="test-bucket",
+          job_name="codemender-runner",
+          region="us-central1",
+      )
+      client = CloudRunClient(cfg)
+      mock_popen.return_value = _fake_popen(returncode=0)
+
+      uploaded_manifests = []
+      transfer_calls = []
+      diff_bytes = b"--- a/src/app.py\n+++ b/src/app.py\n"
+
+      def fake_transfer(src, dest, check=True):
+        del check
+        transfer_calls.append((src, dest))
+        if src.endswith("manifest.json"):
+          with open(src, "r", encoding="utf-8") as mf:
+            uploaded_manifests.append(json.load(mf))
+          return True
+        if dest.endswith("receipt.json"):
+          with open(dest, "w", encoding="utf-8") as rf:
+            json.dump(
+                {
+                    "status": "SUCCESS",
+                    "exit_code": 0,
+                    "command": "fix",
+                    "artifacts": {"diff": "output/finding.diff"},
+                },
+                rf,
+            )
+          return True
+        if src.endswith("/output/finding.diff"):
+          os.makedirs(os.path.dirname(dest), exist_ok=True)
+          with open(dest, "wb") as df:
+            df.write(diff_bytes)
+          return True
+        if src.endswith("/output/runner.log"):
+          os.makedirs(os.path.dirname(dest), exist_ok=True)
+          with open(dest, "w", encoding="utf-8") as lf:
+            lf.write("fix runner log\n")
+          return True
+        return True
+
+      mock_transfer.side_effect = fake_transfer
+
+      receipt = client.run(
+          "fix",
+          [
+              "--repo",
+              repo_dir,
+              "--finding",
+              finding_path,
+              "--out",
+              out_dir,
+          ],
+      )
+
+      self.assertEqual(receipt.status, "SUCCESS")
+      self.assertEqual(receipt.exit_code, 0)
+      self.assertEqual(receipt.command, "fix")
+      self.assertEqual(len(uploaded_manifests), 1)
+      manifest = uploaded_manifests[0]
+      self.assertEqual(manifest.get("command"), "fix")
+      self.assertIn("finding_uri", manifest)
+      self.assertTrue(
+          manifest["finding_uri"].startswith("gs://test-bucket/"),
+          f"Unexpected finding_uri: {manifest.get('finding_uri')}",
+      )
+      self.assertTrue(
+          manifest["finding_uri"].endswith("/input/finding.sarif"),
+          f"Unexpected finding_uri: {manifest.get('finding_uri')}",
+      )
+      self.assertTrue(
+          any(
+              src == finding_path and dest == manifest["finding_uri"]
+              for src, dest in transfer_calls
+          ),
+          f"Expected finding_path upload to {manifest['finding_uri']}, got {transfer_calls}",
+      )
+      diff_out_path = os.path.join(out_dir, "finding-001.diff")
+      self.assertTrue(os.path.isfile(diff_out_path))
+      with open(diff_out_path, "rb") as df:
+        self.assertEqual(df.read(), diff_bytes)
+      log_out_path = os.path.join(out_dir, "runner.log")
+      self.assertTrue(os.path.isfile(log_out_path))
+      with open(log_out_path, "r", encoding="utf-8") as lf:
+        self.assertEqual(lf.read(), "fix runner log\n")
+
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
+  @patch("gcp_sandboxing.client.subprocess.Popen")
+  @patch("gcp_sandboxing.client._package_workspace")
+  @patch("gcp_sandboxing.client._gcloud_transfer")
+  def test_workspace_tarball_reused_across_find_diff_and_fix_runs(
+      self, mock_transfer, mock_package, mock_popen
+  ):
+    with tempfile.TemporaryDirectory() as repo_dir, tempfile.TemporaryDirectory() as out_dir:
+      finding_path = os.path.join(out_dir, "finding-001.sarif")
+      with open(finding_path, "wb") as f:
+        f.write(b"{}")
+
+      cfg = CloudRunConfig(
+          project="test-project",
+          bucket="test-bucket",
+          job_name="codemender-runner",
+          region="us-central1",
+      )
+      client = CloudRunClient(cfg)
+      mock_popen.side_effect = [
+          _fake_popen(returncode=0),
+          _fake_popen(returncode=0),
+      ]
+
+      uploaded_manifests = []
+      code_tarball_uploads = []
+
+      def fake_transfer(src, dest, check=True):
+        del check
+        if dest.endswith("/input/code.tar.gz"):
+          code_tarball_uploads.append(dest)
+          return True
+        if src.endswith("manifest.json"):
+          with open(src, "r", encoding="utf-8") as mf:
+            uploaded_manifests.append(json.load(mf))
+          return True
+        if dest.endswith("receipt.json"):
+          with open(dest, "w", encoding="utf-8") as rf:
+            json.dump({"status": "SUCCESS", "exit_code": 0}, rf)
+          return True
+        return True
+
+      mock_transfer.side_effect = fake_transfer
+
+      client.run("find-diff", ["--repo", repo_dir, "--out", out_dir])
+      client.run(
+          "fix",
+          ["--repo", repo_dir, "--finding", finding_path, "--out", out_dir],
+      )
+
+      mock_package.assert_called_once_with(repo_dir, unittest.mock.ANY)
+      self.assertEqual(len(code_tarball_uploads), 1)
+      self.assertEqual(len(uploaded_manifests), 2)
+      self.assertEqual(
+          uploaded_manifests[0]["payload_uri"],
+          uploaded_manifests[1]["payload_uri"],
+      )
+      self.assertNotEqual(
+          uploaded_manifests[0]["output_prefix"],
+          uploaded_manifests[1]["output_prefix"],
+      )
+
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
+  @patch("gcp_sandboxing.client._gcloud_cancel_execution", return_value=True)
+  def test_cancel_cancels_all_active_executions(self, mock_cancel_exec):
+    cfg = CloudRunConfig(
+        project="test-proj",
+        bucket="test-bucket",
+        job_name="codemender-runner",
+        region="us-central1",
+    )
+    client = CloudRunClient(cfg)
+    client._active_executions = {  # pylint: disable=protected-access
+        "codemender-runner-exec-1",
+        "codemender-runner-exec-2",
+    }
+
+    res = client.cancel()
+    self.assertTrue(res)
+    cancelled_names = {c.args[0] for c in mock_cancel_exec.call_args_list}
+    self.assertEqual(
+        cancelled_names,
+        {"codemender-runner-exec-1", "codemender-runner-exec-2"},
+    )
+
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
+  @patch("gcp_sandboxing.client._gcloud_cancel_execution", return_value=True)
+  @patch("gcp_sandboxing.client.subprocess.Popen")
+  @patch("gcp_sandboxing.client._package_workspace")
+  @patch("gcp_sandboxing.client._gcloud_transfer")
+  def test_run_timeout_without_own_exec_name_does_not_cancel_other_thread_execution(
+      self, mock_transfer, mock_package, mock_popen, mock_cancel_exec
+  ):
+    cfg = CloudRunConfig(
+        project="test-proj",
+        bucket="test-bucket",
+        job_name="codemender-runner",
+        region="us-central1",
+    )
+    client = CloudRunClient(cfg)
+    client.current_execution = "codemender-runner-other-thread"
+
+    timed_out_proc = _fake_popen(stderr="", stdout="", timeout=True)
+    timed_out_proc.poll.return_value = None
+    mock_popen.return_value = timed_out_proc
+
+    with self.assertRaises(CloudRunTimeoutError):
+      client.run("fix", timeout_seconds=1)
+
+    mock_cancel_exec.assert_not_called()
+    timed_out_proc.kill.assert_called_once()
+
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
+  @patch("gcp_sandboxing.client._gcloud_cancel_execution", return_value=True)
+  @patch("gcp_sandboxing.client.subprocess.Popen")
+  @patch("gcp_sandboxing.client._package_workspace")
+  @patch("gcp_sandboxing.client._gcloud_transfer")
+  def test_run_timeout_with_own_exec_name_kills_own_proc_without_terminating_other_current_process(
+      self, mock_transfer, mock_package, mock_popen, mock_cancel_exec
+  ):
+    cfg = CloudRunConfig(
+        project="test-proj",
+        bucket="test-bucket",
+        job_name="codemender-runner",
+        region="us-central1",
+    )
+    client = CloudRunClient(cfg)
+
+    timed_out_proc = _fake_popen(
+        stderr="Execution [codemender-runner-own123] has successfully started running.\n",
+        timeout=True,
+    )
+    timed_out_proc.poll.return_value = None
+    other_thread_proc = MagicMock()
+    other_thread_proc.poll.return_value = None
+
+    def wait_and_simulate_other_thread_popen(timeout=None):
+      client.current_process = other_thread_proc
+      raise subprocess.TimeoutExpired(cmd="gcloud", timeout=timeout or 1)
+
+    timed_out_proc.wait.side_effect = wait_and_simulate_other_thread_popen
+    mock_popen.return_value = timed_out_proc
+
+    with self.assertRaises(CloudRunTimeoutError):
+      client.run("fix", timeout_seconds=1)
+
+    mock_cancel_exec.assert_called_once_with(
+        "codemender-runner-own123",
+        region="us-central1",
+        project="test-proj",
+    )
+    timed_out_proc.kill.assert_called_once()
+    other_thread_proc.terminate.assert_not_called()
+
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
+  @patch("gcp_sandboxing.client._gcloud_cancel_execution", return_value=True)
+  def test_cancel_does_not_block_on_payload_lock(self, mock_cancel_exec):
+    cfg = CloudRunConfig(
+        project="test-proj",
+        bucket="test-bucket",
+        job_name="codemender-runner",
+        region="us-central1",
+    )
+    client = CloudRunClient(cfg)
+    client._active_executions = {"codemender-runner-exec-1"}  # pylint: disable=protected-access
+
+    # Simulate another thread holding _payload_lock while packaging/uploading
+    payload_lock_held = threading.Event()
+    release_payload_lock = threading.Event()
+
+    def hold_payload_lock():
+      with client._payload_lock:  # pylint: disable=protected-access
+        payload_lock_held.set()
+        release_payload_lock.wait(timeout=5)
+
+    holder = threading.Thread(target=hold_payload_lock, daemon=True)
+    holder.start()
+    self.assertTrue(payload_lock_held.wait(timeout=2))
+    try:
+      res = client.cancel()
+      self.assertTrue(res)
+      mock_cancel_exec.assert_called_once()
+    finally:
+      release_payload_lock.set()
+      holder.join(timeout=2)
+
 
 
 class TestPackageWorkspace(unittest.TestCase):
