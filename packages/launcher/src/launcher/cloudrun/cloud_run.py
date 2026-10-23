@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Governing: ADR-0008, SPEC-GHA/REQ-0003
 # Governing: docs/openspec/specs/github-actions/spec.md#req-0003
 # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
 
@@ -24,28 +25,19 @@ import shutil
 import tempfile
 from typing import Any, Optional, Sequence
 
-try:
-  from gcp_sandboxing.client import (  # type: ignore
-      CloudRunClient,
-      CloudRunError,
-      CloudRunTimeoutError,
-  )
-except ImportError:
-  # Fallback definitions for environments where gcp_sandboxing is not installed
-  class CloudRunError(Exception):
-    """Exception raised when Cloud Run execution fails."""
-
-  class CloudRunTimeoutError(CloudRunError):
-    """Exception raised when Cloud Run execution times out."""
-
-  CloudRunClient = Any  # type: ignore
-
 from launcher.base import (
     Launcher,
     LauncherError,
     ParallelResult,
     ParallelTask,
     RunResult,
+)
+from launcher.cloudrun.client import (
+    CloudRunClient,
+    CloudRunConfig,
+    CloudRunError,
+    CloudRunTimeoutError,
+    ExecutionReceipt,
 )
 
 logger = logging.getLogger("codemender-github-actions")

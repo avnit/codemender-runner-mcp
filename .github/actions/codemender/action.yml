@@ -14,15 +14,11 @@
 # Security boundary: GitHub tokens are used only by host steps below (posting
 # PR comments). They are never passed into a cm-runner container (ADR-0003).
 
+# Governing: ADR-0008, SPEC-GHA/REQ-0001, SPEC-GHA/REQ-0002, SPEC-GHA/REQ-0007, SPEC-GHA-FIX/REQ-0001, SPEC-DIST/REQ-0001
 name: CodeMender
 description: Run CodeMender (cm-runner) on pull requests via Cloud Run and report back on the PR.
 
 inputs:
-  backend:
-    description: >-
-      Target execution backend: 'cloudrun' (default).
-    required: false
-    default: 'cloudrun'
   gcp_project_id:
     description: >-
       Google Cloud project ID used by CodeMender (`GOOGLE_CLOUD_PROJECT`).
@@ -101,9 +97,8 @@ runs:
           PKG_DIR="$(cd "${ACTION_PATH}/../../../packages" && pwd)"
         fi
         python -m pip install --quiet \
-          -r "${ACTION_PATH}/requirements.txt" \
           "${PKG_DIR}/codemender" \
-          "${PKG_DIR}/launcher" \
+          "${PKG_DIR}/launcher[cloudrun]" \
           "${PKG_DIR}/repohost[github]"
 
     - name: Pre-flight check
@@ -111,26 +106,9 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
-        PYTHONDONTWRITEBYTECODE: '1'
-      run: python "${{ github.action_path }}/src/gha_runner.py" --preflight
-
-    - name: Verify PR base commit is present
-      if: steps.preflight.outputs.should_run == 'true' && github.event_name == 'pull_request'
-      shell: bash
-      env:
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
-      run: |
-        set -euo pipefail
-        if [[ -z "${BASE_SHA}" ]]; then
-          exit 0
-        fi
-        if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-          echo "Base commit ${BASE_SHA} not in shallow clone; attempting git fetch..."
-          git fetch --no-tags --depth=1 origin "${BASE_SHA}" || {
-            echo "::error::Base commit ${BASE_SHA} is not present in the local checkout. Set 'fetch-depth: 0' on actions/checkout."
-            exit 1
-          }
-        fi
+        PYTHONDONTWRITEBYTECODE: '1'
+      run: cm-github --preflight
 
     - name: Authenticate to Google Cloud (WIF)
       if: steps.preflight.outputs.should_run == 'true'
@@ -146,7 +124,7 @@ runs:
       if: steps.preflight.outputs.should_run == 'true'
       shell: bash
       env:
-        CODEMENDER_BACKEND: ${{ inputs.backend || 'cloudrun' }}
+        CODEMENDER_BACKEND: "cloudrun"
         CODEMENDER_LOG_LEVEL: ${{ inputs.log_level }}
         CODEMENDER_DIFF_WORKERS: ${{ inputs.diff_workers }}
         CODEMENDER_FIX: ${{ inputs.fix }}
@@ -160,9 +138,7 @@ runs:
         CLOUD_RUN_REGION: ${{ inputs.cloud_run_region }}
         GITHUB_TOKEN: ${{ github.token }}
         PYTHONDONTWRITEBYTECODE: '1'
-      run: |
-        chmod a+r "${GOOGLE_GHA_CREDS_PATH}"
-        exec python "${{ github.action_path }}/src/gha_runner.py"
+      run: exec cm-github
 
     - name: Upload CodeMender report artifacts
       if: always() && steps.preflight.outputs.should_run == 'true'

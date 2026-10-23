@@ -330,6 +330,7 @@ jobs:
 | `gcp_workload_identity_provider` | Both | — (**required**) | Full Workload Identity Provider resource name (`projects/<num>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`). |
 | `gcp_service_account` | Both | — (**required**) | Service account email impersonated via Workload Identity Federation. |
 | `fix` | Both | `'true'` | Run `cm-runner fix` for each finding and post suggestions/patches on the PR (`'false'` to scan only). |
+| `max_parallel_fixes` | Both | `'4'` | Maximum number of `cm-runner fix` jobs/containers to run concurrently. |
 | `diff_workers` | Both | `'8'` | Number of concurrent workers for `cm-runner find-diff` (`1`..`16`). |
 | `log_level` | Both | `'info'` | `cm-runner` log level (`debug`, `info`, `warning`, `error`). |
 | `artifact_retention_days` | Both | `'3'` | Days to retain the uploaded `codemender-report-pr-<N>` artifact (`report.sarif`, `report.md`, `findings/*.sarif`, `fixes/*.diff`, `verified/*.sarif`). |
@@ -340,7 +341,6 @@ jobs:
 | `registry_token` | `codemender-local` | *(workflow token)* | Optional token used only to pull `runner_image` from GHCR when the workflow token cannot read the package. |
 | `container_runtime` | `codemender-local` | `'runsc'` | `'runsc'` installs gVisor (`runsc`) required by `cm`'s inner sandbox; `'runc'` opts out to plain Docker. |
 | `gvisor_release` | `codemender-local` | `'20260921.0'` | Pinned gVisor release (`yyyymmdd` or `yyyymmdd.N`) installed when `container_runtime` is `'runsc'`. |
-| `max_parallel_fixes` | `codemender-local` | `'4'` | Maximum number of `cm-runner fix` containers to run concurrently on the runner VM. |
 
 ### Required Workflow Permissions
 
@@ -372,6 +372,6 @@ code.)*
 ## Running the Unit Tests
 
 ```bash
-pip install ./packages/*
-python3 -m unittest discover -s .github/actions/codemender/tests -v
+pip install -e ./packages/codemender -e "./packages/launcher[cloudrun]" -e "./packages/repohost[github,gitlab]"
+make test
 ```

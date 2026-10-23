@@ -15,10 +15,12 @@ sdd_cujspec_product: codemender-runner
 
 ## Context
 
-The CodeMender GitHub Action (`github-actions/actions/codemender/`) runs on
-pull requests. Milestone 1 (M1) runs `cm-runner init` and `cm-runner find-diff`
-and posts one PR comment, the *sticky comment*: a table of the findings in the
-PR's changes, with a drill-down. It edits that comment on every push.
+The CodeMender GitHub Actions (`.github/actions/codemender/` and
+`.github/actions/codemender-local/`) run on pull requests via the `cm-github`
+orchestrator (`packages/repohost/src/repohost/github/`). Milestone 1 (M1) runs
+`cm-runner init` and `cm-runner find-diff` and posts one PR comment, the *sticky
+comment*: a table of the findings in the PR's changes, with a drill-down. It
+edits that comment on every push.
 
 M2 adds fixes. For each finding, the action runs `cm-runner fix`
 ([SPEC-FIX](../fix/spec.md)) and puts the patch on the PR, next to the code it
@@ -325,8 +327,8 @@ Findings and failed fixes never fail the job, the same as findings in M1.
 | `packages/launcher/src/launcher/base.py`, `packages/launcher/src/launcher/local/local_docker.py` | Raw stdout, `run_parallel()`, per-run log file, container names, `docker kill` on timeout, `stop()`, and `with_dirs()`. |
 | `packages/repohost/src/repohost/github/fix_comments.py` | Deduplicating findings (`plan_fixes`) and posting review suggestions or fallback patch comments (`FixPoster`). |
 | `packages/repohost/src/repohost/github/client.py` | Reviews, patch comments, the PR diff's line ranges, and reading earlier tags. |
-| `src/gha_runner.py` | The `fix` input, the parallel runs, posting, and the Fix column. |
-| `action.yml`, `workflows/cm-merge-scan.yml`, `README.md` | The input, the head checkout, the 60-minute timeout, the artifacts and the documentation. |
+| `packages/repohost/src/repohost/github/__main__.py` (`cm-github`) | The `fix` and `max_parallel_fixes` inputs, the parallel runs, posting, and the Fix column. |
+| `.github/actions/codemender/action.yml`, `.github/actions/codemender-local/action.yml`, `.github/workflows/cm-merge-scan.yml`, `dist/README.md` | The inputs, the head checkout, the 60-minute timeout, the artifacts and the documentation. |
 
 ## Security
 

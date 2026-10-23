@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Governing: ADR-0008, SPEC-GHA/REQ-0003
 # Governing: docs/openspec/specs/github-actions/spec.md#req-0003
 # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
 # Governing: docs/adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md
 
 """In-process Cloud Run client SDK for GitHub Actions and CI platforms.
 
-Governed by ADR-0005, ADR-0007 (Option 3), and SPEC-GHA REQ-0003.
+Governed by ADR-0005, ADR-0007 (Option 3), ADR-0008, and SPEC-GHA REQ-0003.
 """
 
 from __future__ import annotations

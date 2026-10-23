@@ -24,26 +24,21 @@ import types
 import unittest
 from unittest.mock import patch
 
-_ACTION_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_GITHUB_DIR = os.path.dirname(os.path.dirname(_ACTION_DIR))
-_REPO_ROOT = os.path.dirname(_GITHUB_DIR)
-sys.path.insert(0, os.path.join(_ACTION_DIR, "src"))
-for _pkg_root in (
-    os.path.join(_REPO_ROOT, "packages"),
-    os.path.join(_GITHUB_DIR, "codemender-runner", "packages"),
-    os.path.join(_ACTION_DIR, "packages"),
-):
-  for _pkg in ("codemender", "launcher", "repohost"):
-    _pkg_src = os.path.join(_pkg_root, _pkg, "src")
-    if os.path.isdir(_pkg_src) and _pkg_src not in sys.path:
-      sys.path.append(_pkg_src)
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.abspath(
+    os.path.join(_THIS_DIR, "..", "..", "..", "..", "..")
+)
+for _pkg in ("codemender", "launcher", "repohost"):
+  _pkg_src = os.path.join(_REPO_ROOT, "packages", _pkg, "src")
+  if os.path.isdir(_pkg_src) and _pkg_src not in sys.path:
+    sys.path.insert(0, _pkg_src)
 
-import gha_runner  # pylint: disable=g-import-not-at-top
 from launcher.cloudrun import (  # pylint: disable=g-import-not-at-top
     CloudRunError,
     CloudRunLauncher,
     CloudRunTimeoutError,
 )
+from repohost.github import gha_runner  # pylint: disable=g-import-not-at-top
 
 _ENTRYPOINT_PY = os.path.join(_REPO_ROOT, "cloud-run-jobs", "entrypoint.py")
 _BIN_DIR = os.path.join(_REPO_ROOT, "codemender-runner", "bin")
@@ -233,7 +228,7 @@ class MockFailingCloudRunClient(MockCloudRunClient):
 
 
 def _make_mock_client_module(client_cls=MockCloudRunClient):
-  client_mod = types.ModuleType("gcp_sandboxing.client")
+  client_mod = types.ModuleType("launcher.cloudrun.client")
   client_mod.CloudRunClient = client_cls
   client_mod.CloudRunConfig = MockCloudRunConfig
   client_mod.CloudRunError = CloudRunError
@@ -242,6 +237,7 @@ def _make_mock_client_module(client_cls=MockCloudRunClient):
   pkg_mod = types.ModuleType("gcp_sandboxing")
   pkg_mod.client = client_mod
   return {
+      "launcher.cloudrun.client": client_mod,
       "gcp_sandboxing": pkg_mod,
       "gcp_sandboxing.client": client_mod,
   }

@@ -99,7 +99,7 @@ Governed by [SPEC-GHA-VERIFY](spec.md), [SPEC-VERIFY](../verify/spec.md),
      that don't contain `@cm-runner verify`, comments by bots, and comments on
      fork PRs before GitHub Actions even allocates a runner VM.
   2. **Composite Action Pre-Flight Step (`action.yml`):** Runs a fast Python
-     pre-flight check (`gha_runner.py --preflight`) right after `setup-python`
+     pre-flight check (`cm-github --preflight`) right after `setup-python`
      and `pip install`, **before** `Authenticate to Google Cloud (WIF)`,
      `Install gVisor`, and `Pull cm-runner image`.
 - **Why:** Installing gVisor and pulling the multi-toolchain runner image takes
@@ -175,7 +175,7 @@ Governed by [SPEC-GHA-VERIFY](spec.md), [SPEC-VERIFY](../verify/spec.md),
 flowchart TD
     A["pull_request_review_comment (action: created)"] --> B{"Job if: gate\n(@cm-runner verify, non-bot, non-fork)"}
     B -->|"No"| Z["Job skipped (0 VM minutes)"]
-    B -->|"Yes"| C["Pre-flight step (gha_runner.py --preflight)"]
+    B -->|"Yes"| C["Pre-flight step (cm-github --preflight)"]
     C --> D{"Authorized collaborator &\nparent is CodeMender fix?"}
     D -->|"No"| E["should_run=false (skip WIF, gVisor, docker pull)"]
     D -->|"Yes"| F{"Check PR verify markers\nfor finding_id & active count"}

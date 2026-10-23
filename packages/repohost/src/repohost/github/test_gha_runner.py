@@ -12,35 +12,35 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for the gha_runner entry point (M1 find-diff + M2 parallel fixes)."""
+# Governing: ADR-0008, SPEC-GHA/REQ-0001, SPEC-GHA/REQ-0002, SPEC-GHA/REQ-0004, SPEC-GHA/REQ-0007, SPEC-GHA-FIX/REQ-0001, SPEC-GHA-VERIFY
+
+"""Unit tests for the gha_runner entry point (M1 find-diff + M2 parallel fixes + M3 verify)."""
 
 import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import MagicMock, call, patch
 
-_ACTION_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_GITHUB_DIR = os.path.dirname(os.path.dirname(_ACTION_DIR))
-_REPO_ROOT = os.path.dirname(_GITHUB_DIR)
-sys.path.insert(0, os.path.join(_ACTION_DIR, "src"))
-for _pkg_root in (
-    os.path.join(_REPO_ROOT, "packages"),
-    os.path.join(_GITHUB_DIR, "codemender-runner", "packages"),
-    os.path.join(_ACTION_DIR, "packages"),
-):
-  for _pkg in ("codemender", "launcher", "repohost"):
-    _pkg_src = os.path.join(_pkg_root, _pkg, "src")
-    if os.path.isdir(_pkg_src) and _pkg_src not in sys.path:
-      sys.path.append(_pkg_src)
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.abspath(
+    os.path.join(_THIS_DIR, "..", "..", "..", "..", "..")
+)
+for _pkg in ("codemender", "launcher", "repohost"):
+  _pkg_src = os.path.join(_REPO_ROOT, "packages", _pkg, "src")
+  if os.path.isdir(_pkg_src) and _pkg_src not in sys.path:
+    sys.path.insert(0, _pkg_src)
 
-import gha_runner  # pylint: disable=g-import-not-at-top
 from launcher.base import LauncherError, ParallelResult, RunResult  # pylint: disable=g-import-not-at-top
 from launcher.cloudrun import CloudRunLauncher  # pylint: disable=g-import-not-at-top
 from launcher.local import LocalDockerLauncher  # pylint: disable=g-import-not-at-top
+from repohost.github import __main__ as github_main  # pylint: disable=g-import-not-at-top
+from repohost.github import gha_runner  # pylint: disable=g-import-not-at-top
 
 _VERSION_EVENT = {
     "event": "version",
@@ -651,8 +651,7 @@ class TestMain(unittest.TestCase):
       with patch.dict(
           "sys.modules",
           {
-              "gcp_sandboxing": MagicMock(),
-              "gcp_sandboxing.client": mock_client_module,
+              "launcher.cloudrun.client": mock_client_module,
           },
       ):
         rc = gha_runner.main(env)
@@ -702,8 +701,7 @@ class TestMain(unittest.TestCase):
       with patch.dict(
           "sys.modules",
           {
-              "gcp_sandboxing": MagicMock(),
-              "gcp_sandboxing.client": mock_client_module,
+              "launcher.cloudrun.client": mock_client_module,
           },
       ):
         rc = gha_runner.main(env)
@@ -847,15 +845,8 @@ class TestM2FixConfigAndOrchestration(unittest.TestCase):
 class TestWorkflowConfigGuard(unittest.TestCase):
 
   def test_cm_merge_scan_check_config_behavior(self):
-    workflow_path = os.path.normpath(
-        os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "..",
-            "..",
-            "..",
-            "workflows",
-            "cm-merge-scan.yml",
-        )
+    workflow_path = os.path.join(
+        _REPO_ROOT, ".github", "workflows", "cm-merge-scan.yml"
     )
     with open(workflow_path, "r", encoding="utf-8") as f:
       content = f.read()
@@ -930,6 +921,90 @@ class TestWorkflowConfigGuard(unittest.TestCase):
       self.assertEqual(res_ok.returncode, 0, msg=res_ok.stderr)
       with open(gh_out_ok, "r", encoding="utf-8") as f:
         self.assertEqual(f.read().strip(), "configured=true")
+
+  def test_cm_github_entrypoint_and_pyproject_contract(self):
+    """Verify repohost.github.__main__.main delegates to gha_runner.main and pyproject.toml contract (SPEC-GHA REQ-0001, REQ-0004)."""
+    with patch.object(gha_runner, "main", return_value=0) as mock_main:
+      rc = github_main.main({"GITHUB_EVENT_NAME": "push"})
+    self.assertEqual(rc, 0)
+    mock_main.assert_called_once_with({"GITHUB_EVENT_NAME": "push"})
+
+    pyproject_path = os.path.join(_REPO_ROOT, "packages", "repohost", "pyproject.toml")
+    with open(pyproject_path, "rb") as f:
+      pyproject = tomllib.load(f)
+    deps = pyproject.get("project", {}).get("dependencies", [])
+    self.assertIn("codemender-launcher", deps)
+    scripts = pyproject.get("project", {}).get("scripts", {})
+    self.assertEqual(scripts.get("cm-github"), "repohost.github.__main__:main")
+
+  def test_composite_actions_and_workflow_contracts(self):
+    """Verify composite action manifests and workflow template contracts (SPEC-GHA REQ-0001, REQ-0002, REQ-0007; SPEC-GHA-FIX REQ-0001)."""
+    cloudrun_action_path = os.path.join(
+        _REPO_ROOT, ".github", "actions", "codemender", "action.yml"
+    )
+    local_action_path = os.path.join(
+        _REPO_ROOT, ".github", "actions", "codemender-local", "action.yml"
+    )
+    workflow_path = os.path.join(
+        _REPO_ROOT, ".github", "workflows", "cm-merge-scan.yml"
+    )
+
+    with open(cloudrun_action_path, "r", encoding="utf-8") as f:
+      cloudrun_yml = f.read()
+    with open(local_action_path, "r", encoding="utf-8") as f:
+      local_yml = f.read()
+    with open(workflow_path, "r", encoding="utf-8") as f:
+      workflow_yml = f.read()
+
+    # Neither action defines a `backend:` input under `inputs:`
+    self.assertNotRegex(cloudrun_yml, r"(?m)^  backend\s*:")
+    self.assertNotRegex(local_yml, r"(?m)^  backend\s*:")
+
+    # .github/actions/codemender/action.yml contract
+    self.assertRegex(cloudrun_yml, r"(?m)^  max_parallel_fixes\s*:")
+    self.assertIn("CODEMENDER_MAX_PARALLEL_FIXES", cloudrun_yml)
+    self.assertRegex(
+        cloudrun_yml, r'CODEMENDER_BACKEND:\s*["\']cloudrun["\']'
+    )
+    self.assertIn('"${PKG_DIR}/launcher[cloudrun]"', cloudrun_yml)
+    self.assertIn("cm-github", cloudrun_yml)
+    self.assertNotIn("gha_runner.py", cloudrun_yml)
+    self.assertNotIn("requirements.txt", cloudrun_yml)
+    self.assertNotIn("docker pull", cloudrun_yml)
+    self.assertNotIn("runsc", cloudrun_yml)
+
+    # .github/actions/codemender-local/action.yml contract
+    self.assertRegex(local_yml, r"(?m)^  runner_image\s*:")
+    self.assertRegex(local_yml, r"(?m)^  max_parallel_fixes\s*:")
+    self.assertRegex(local_yml, r'CODEMENDER_BACKEND:\s*["\']local["\']')
+    self.assertIn('"${PKG_DIR}/launcher"', local_yml)
+    self.assertNotIn("launcher[cloudrun]", local_yml)
+    self.assertIn("cm-github", local_yml)
+    self.assertNotIn("gha_runner.py", local_yml)
+    self.assertNotIn("requirements.txt", local_yml)
+
+    # Neither action directory contains a requirements.txt
+    self.assertFalse(
+        os.path.exists(
+            os.path.join(
+                _REPO_ROOT, ".github", "actions", "codemender", "requirements.txt"
+            )
+        )
+    )
+    self.assertFalse(
+        os.path.exists(
+            os.path.join(
+                _REPO_ROOT,
+                ".github",
+                "actions",
+                "codemender-local",
+                "requirements.txt",
+            )
+        )
+    )
+
+    # .github/workflows/cm-merge-scan.yml does not pass `backend:` in `with:`
+    self.assertNotRegex(workflow_yml, r"(?m)^\s*#?\s*backend\s*:")
 
 
 class TestM3OnDemandVerify(unittest.TestCase):
@@ -1160,6 +1235,67 @@ class TestM3OnDemandVerify(unittest.TestCase):
     updated_body = mock_update.call_args.args[3]
     self.assertIn("<!-- codemender-verify:done finding:aabbcc112233 status:DISMISSED -->", updated_body)
     self.assertIn("Input is sanitized upstream.", updated_body)
+
+  @patch("subprocess.run")
+  def test_preflight_pull_request_verifies_base_commit_present(self, mock_run):
+    mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+    env = self._env(GITHUB_EVENT_NAME="pull_request", BASE_SHA="abc123commit")
+    rc = gha_runner.run_preflight(env)
+    self.assertEqual(rc, 0)
+    self.assertEqual(self._read_outputs().get("should_run"), "true")
+    mock_run.assert_called_once_with(
+        ["git", "cat-file", "-e", "abc123commit^{commit}"],
+        capture_output=True,
+        check=False,
+    )
+
+  @patch("subprocess.run")
+  def test_preflight_pull_request_fetches_missing_base_commit(self, mock_run):
+    # First cat-file fails, subsequent fetch succeeds
+    mock_run.side_effect = [
+        subprocess.CompletedProcess(args=[], returncode=1),
+        subprocess.CompletedProcess(args=[], returncode=0),
+    ]
+    env = self._env(GITHUB_EVENT_NAME="pull_request", BASE_SHA="abc123commit")
+    rc = gha_runner.run_preflight(env)
+    self.assertEqual(rc, 0)
+    self.assertEqual(self._read_outputs().get("should_run"), "true")
+    self.assertEqual(mock_run.call_count, 2)
+    mock_run.assert_any_call(
+        ["git", "fetch", "--no-tags", "--depth=1", "origin", "abc123commit"],
+        capture_output=True,
+        check=False,
+    )
+
+  @patch("subprocess.run")
+  def test_preflight_pull_request_fails_when_base_commit_unreachable(self, mock_run):
+    # Both cat-file and fetch fail
+    mock_run.side_effect = [
+        subprocess.CompletedProcess(args=[], returncode=1),
+        subprocess.CompletedProcess(args=[], returncode=1),
+    ]
+    env = self._env(GITHUB_EVENT_NAME="pull_request", BASE_SHA="abc123commit")
+    rc = gha_runner.run_preflight(env)
+    self.assertEqual(rc, 1)
+    self.assertEqual(self._read_outputs().get("should_run"), "false")
+
+  def test_preflight_pull_request_no_base_sha_succeeds(self):
+    env = self._env(GITHUB_EVENT_NAME="pull_request")
+    rc = gha_runner.run_preflight(env)
+    self.assertEqual(rc, 0)
+    self.assertEqual(self._read_outputs().get("should_run"), "true")
+
+  def test_main_chmods_credentials_file_if_present(self):
+    creds_file = os.path.join(self._temp_dir, "fake_creds.json")
+    with open(creds_file, "w", encoding="utf-8") as f:
+      f.write("{}")
+    os.chmod(creds_file, 0o600)
+    env = self._env(
+        GITHUB_EVENT_NAME="other_event",
+        GOOGLE_GHA_CREDS_PATH=creds_file,
+    )
+    gha_runner.main(env)
+    self.assertEqual(os.stat(creds_file).st_mode & 0o777, 0o644)
 
 
 if __name__ == "__main__":

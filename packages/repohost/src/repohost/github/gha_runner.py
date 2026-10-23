@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Governing: ADR-0008, SPEC-GHA/REQ-0004, SPEC-GHA/REQ-0005, SPEC-GHA/REQ-0006, SPEC-GHA/REQ-0008, SPEC-GHA-FIX/REQ-0001, SPEC-GHA-VERIFY
+
 """Entry point for the CodeMender GitHub Action (M1 scan + M2 parallel fixes).
 
 Flow:
@@ -60,6 +62,7 @@ import re
 import secrets
 import shutil
 import signal
+import subprocess
 import sys
 import tempfile
 import threading
@@ -195,7 +198,7 @@ def create_launcher(
     backend = "cloudrun"
 
   if backend == "cloudrun":
-    from gcp_sandboxing.client import CloudRunClient, CloudRunConfig  # type: ignore
+    from launcher.cloudrun.client import CloudRunClient, CloudRunConfig  # pylint: disable=g-import-not-at-top
 
     project = env.get("GOOGLE_CLOUD_PROJECT", "").strip()
     bucket = (
@@ -263,6 +266,17 @@ def main(
   args = sys.argv[1:] if argv is None else list(argv)
   if "--preflight" in args or env.get("CODEMENDER_PREFLIGHT") == "1":
     return run_preflight(env)
+
+  creds_path = (
+      env.get("GOOGLE_GHA_CREDS_PATH")
+      or env.get("GOOGLE_APPLICATION_CREDENTIALS")
+      or ""
+  ).strip()
+  if creds_path and os.path.isfile(creds_path):
+    try:
+      os.chmod(creds_path, 0o644)
+    except OSError:
+      pass
 
   event_name = env.get("GITHUB_EVENT_NAME", "")
   if event_name not in _PR_EVENTS:
@@ -650,10 +664,69 @@ def _extract_parent_finding_id(
   return match.group(1) if match else None
 
 
+def _verify_pr_base_commit(env: Mapping[str, str]) -> bool:
+  """Verifies that the PR base commit is present in the local git clone.
+
+  Attempts a shallow fetch of the base commit if absent. Emits an error notice
+  and returns False if the base commit cannot be found or fetched.
+  """
+  base_sha = env.get("BASE_SHA", "").strip()
+  if not base_sha:
+    event_path = env.get("GITHUB_EVENT_PATH", "")
+    if event_path and os.path.isfile(event_path):
+      try:
+        with open(event_path, encoding="utf-8") as f:
+          event = json.load(f)
+          base_sha = str(
+              ((event.get("pull_request") or {}).get("base") or {}).get("sha")
+              or ""
+          ).strip()
+      except Exception:  # pylint: disable=broad-exception-caught
+        pass
+
+  if not base_sha:
+    return True
+
+  try:
+    cat_res = subprocess.run(
+        ["git", "cat-file", "-e", f"{base_sha}^{{commit}}"],
+        capture_output=True,
+        check=False,
+    )
+    if cat_res.returncode == 0:
+      return True
+  except Exception:  # pylint: disable=broad-exception-caught
+    return True
+
+  print(
+      f"Base commit {base_sha} not in shallow clone; attempting git fetch...",
+      file=sys.stderr,
+  )
+  try:
+    fetch_res = subprocess.run(
+        ["git", "fetch", "--no-tags", "--depth=1", "origin", base_sha],
+        capture_output=True,
+        check=False,
+    )
+    if fetch_res.returncode == 0:
+      return True
+  except Exception:  # pylint: disable=broad-exception-caught
+    pass
+
+  print(
+      f"::error::Base commit {base_sha} is not present in the local checkout."
+      " Set 'fetch-depth: 0' on actions/checkout."
+  )
+  return False
+
+
 def run_preflight(env: Mapping[str, str]) -> int:
   """Fast pre-flight gate executed before WIF auth, gVisor, and Docker pull."""
   event_name = env.get("GITHUB_EVENT_NAME", "")
   if event_name == "pull_request":
+    if not _verify_pr_base_commit(env):
+      _write_github_output(env, should_run="false")
+      return 1
     _write_github_output(env, should_run="true")
     return 0
   if event_name != "pull_request_review_comment":

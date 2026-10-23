@@ -56,7 +56,7 @@ This specification is governed by:
 
 - **CUJ UUID:** `cuj-gha-verify-workflow-trigger`
 
-1. The workflow template (`github-actions/workflows/cm-merge-scan.yml`) MUST
+1. The workflow template (`.github/workflows/cm-merge-scan.yml`) MUST
    trigger on both `pull_request` (`types: [opened, synchronize, reopened]`) and
    `pull_request_review_comment` (`types: [created]`).
 2. To prevent normal human review comments, top-level comments, unauthorized
@@ -96,10 +96,11 @@ This specification is governed by:
 
 1. Once the workflow's job-level `if:` condition (`REQ-0001`) passes and a runner
    VM is provisioned for `GITHUB_EVENT_NAME == 'pull_request_review_comment'`,
-   the composite action (`github-actions/actions/codemender/action.yml`) MUST
-   execute a lightweight pre-flight validation step **before** authenticating to
-   Google Cloud (WIF), installing gVisor (`runsc`), or pulling the `cm-runner`
-   Docker image.
+   the composite action (`.github/actions/codemender/action.yml` or
+   `.github/actions/codemender-local/action.yml`) MUST
+   execute a lightweight pre-flight validation step (`cm-github --preflight`)
+   **before** authenticating to Google Cloud (WIF), installing gVisor (`runsc`),
+   or pulling the `cm-runner` Docker image.
 2. If the pre-flight step determines that verification should not run, it MUST
    write `should_run=false` to `$GITHUB_OUTPUT`, and all subsequent heavy steps
    (WIF authentication, gVisor installation, Docker image pull, and container
@@ -372,6 +373,6 @@ file required by `cm-runner verify --finding` using a two-tier strategy:
 2. All strings extracted from `cm-runner verify` output (including
    `dismiss_reason`) and from PR comments MUST be sanitized before rendering
    into Markdown replies.
-3. `github-actions/README.md` MUST document how to trigger on-demand
+3. `.github/README.md` MUST document how to trigger on-demand
    verification (`@cm-runner verify` in a fix comment thread), who can trigger
    it, the concurrency cap (`4`), and what each verification status means.

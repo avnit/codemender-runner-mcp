@@ -12,29 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: docs/openspec/specs/distribute/spec.md#req-0005, SPEC-DIST, ADR-0008
+# Governing: ADR-0008, SPEC-GHA/REQ-0004, SPEC-DIST/REQ-0005
 
-"""CLI entrypoint shim for the `cm-github` console script."""
+"""CLI entrypoint for the `cm-github` console script."""
 
-from pathlib import Path
 import sys
+from typing import Mapping, Optional, Sequence
+
+from repohost.github import gha_runner
 
 
-def main() -> int:
-  """Locates and delegates to `gha_runner.main()`."""
-  # TODO(b/575573750): Remove sys.path manipulation once gha_runner.py is migrated to packages/repohost per ADR-0008.
-  action_src = (
-      Path(__file__).resolve().parents[5]
-      / ".github"
-      / "actions"
-      / "codemender"
-      / "src"
-  )
-  if action_src.is_dir() and str(action_src) not in sys.path:
-    sys.path.insert(0, str(action_src))
-  import gha_runner  # pylint: disable=g-import-not-at-top
-
-  return gha_runner.main()
+def main(
+    env: Optional[Mapping[str, str]] = None,
+    argv: Optional[Sequence[str]] = None,
+) -> int:
+  """Dispatches the `cm-github` CLI entrypoint to `gha_runner.main`."""
+  if env is None and argv is None:
+    return gha_runner.main()
+  if argv is None:
+    return gha_runner.main(env)  # type: ignore[arg-type]
+  if env is None:
+    return gha_runner.main(argv=argv)
+  return gha_runner.main(env, argv=argv)
 
 
 if __name__ == "__main__":

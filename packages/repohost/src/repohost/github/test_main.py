@@ -12,16 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: docs/openspec/specs/distribute/spec.md#req-0005, SPEC-DIST, ADR-0008
+# Governing: docs/openspec/specs/distribute/spec.md#req-0005, SPEC-DIST, SPEC-GHA, ADR-0008
 
-"""Unit tests for the cm-github CLI entrypoint shim (repohost.github.__main__)."""
+"""Unit tests for the cm-github CLI entrypoint (repohost.github.__main__)."""
 
 from pathlib import Path
-import sys
 import tomllib
-import types
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
+from repohost.github import __main__ as github_main
+from repohost.github import gha_runner
 
 
 _THIS_DIR = Path(__file__).resolve().parent
@@ -43,40 +44,24 @@ class TestCmGithubEntrypoint(unittest.TestCase):
     )
 
   def test_main_delegates_to_gha_runner_main_and_returns_exit_code(self):
-    from repohost.github import __main__ as github_main  # pylint: disable=g-import-not-at-top
-
-    fake_gha_runner = types.ModuleType("gha_runner")
-    fake_gha_runner.main = MagicMock(return_value=0)
-    with patch.dict(sys.modules, {"gha_runner": fake_gha_runner}):
+    with patch.object(gha_runner, "main", return_value=0) as mock_main:
       rc = github_main.main()
     self.assertEqual(rc, 0)
-    fake_gha_runner.main.assert_called_once_with()
+    mock_main.assert_called_once_with()
 
-    fake_gha_runner.main.reset_mock()
-    fake_gha_runner.main.return_value = 3
-    with patch.dict(sys.modules, {"gha_runner": fake_gha_runner}):
+    with patch.object(gha_runner, "main", return_value=3) as mock_main:
       rc_nonzero = github_main.main()
     self.assertEqual(rc_nonzero, 3)
-    fake_gha_runner.main.assert_called_once_with()
+    mock_main.assert_called_once_with()
 
-  def test_main_locates_gha_runner_from_repo_root_when_not_on_sys_path(self):
-    from repohost.github import __main__ as github_main  # pylint: disable=g-import-not-at-top
-
-    saved_module = sys.modules.pop("gha_runner", None)
-    saved_path = list(sys.path)
-    try:
-      sys.path = [p for p in sys.path if "actions/codemender" not in p]
-      with patch.dict(
-          "os.environ",
-          {"GITHUB_EVENT_NAME": "push"},
-          clear=False,
-      ):
-        rc = github_main.main()
-      self.assertEqual(rc, 0)
-    finally:
-      sys.path = saved_path
-      if saved_module is not None:
-        sys.modules["gha_runner"] = saved_module
+  def test_main_executes_co_located_gha_runner(self):
+    with patch.dict(
+        "os.environ",
+        {"GITHUB_EVENT_NAME": "push"},
+        clear=False,
+    ):
+      rc = github_main.main()
+    self.assertEqual(rc, 0)
 
 
 if __name__ == "__main__":

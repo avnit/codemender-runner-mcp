@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for gcp_sandboxing.client module."""
+"""Unit tests for launcher.cloudrun.client module."""
 
 import io
 import json
@@ -24,7 +24,7 @@ import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
-from gcp_sandboxing.client import (
+from launcher.cloudrun.client import (
     CloudRunClient,
     CloudRunConfig,
     CloudRunError,
@@ -98,9 +98,9 @@ class TestCloudRunClient(unittest.TestCase):
         client.run("version")
       self.assertIn("GOOGLE_CLOUD_PROJECT", str(ctx.exception))
 
-  @patch("gcp_sandboxing.client.subprocess.Popen")
-  @patch("gcp_sandboxing.client._package_workspace")
-  @patch("gcp_sandboxing.client._gcloud_transfer")
+  @patch("launcher.cloudrun.client.subprocess.Popen")
+  @patch("launcher.cloudrun.client._package_workspace")
+  @patch("launcher.cloudrun.client._gcloud_transfer")
   def test_run_success(self, mock_transfer, mock_package, mock_popen):
     cfg = CloudRunConfig(
         project="test-project",
@@ -147,9 +147,9 @@ class TestCloudRunClient(unittest.TestCase):
     self.assertEqual(receipt.stdout, b'{"version": "2.1.0", "runs": []}')
     mock_package.assert_called_once_with(os.getcwd(), unittest.mock.ANY)
 
-  @patch("gcp_sandboxing.client.subprocess.Popen")
-  @patch("gcp_sandboxing.client._package_workspace")
-  @patch("gcp_sandboxing.client._gcloud_transfer")
+  @patch("launcher.cloudrun.client.subprocess.Popen")
+  @patch("launcher.cloudrun.client._package_workspace")
+  @patch("launcher.cloudrun.client._gcloud_transfer")
   def test_run_hermetic_config_no_environ(
       self, mock_transfer, mock_package, mock_popen
   ):
@@ -189,9 +189,9 @@ class TestCloudRunClient(unittest.TestCase):
       self.assertEqual(receipt.status, "SUCCESS")
       mock_package.assert_called_once_with(ws_dir, unittest.mock.ANY)
 
-  @patch("gcp_sandboxing.client.subprocess.Popen")
-  @patch("gcp_sandboxing.client._package_workspace")
-  @patch("gcp_sandboxing.client._gcloud_transfer")
+  @patch("launcher.cloudrun.client.subprocess.Popen")
+  @patch("launcher.cloudrun.client._package_workspace")
+  @patch("launcher.cloudrun.client._gcloud_transfer")
   def test_run_timeout_raises_timeout_error(
       self, mock_transfer, mock_package, mock_popen
   ):
@@ -202,9 +202,9 @@ class TestCloudRunClient(unittest.TestCase):
     with self.assertRaises(CloudRunTimeoutError):
       client.run("find-diff", timeout_seconds=10)
 
-  @patch("gcp_sandboxing.client.subprocess.Popen")
-  @patch("gcp_sandboxing.client._package_workspace")
-  @patch("gcp_sandboxing.client._gcloud_transfer")
+  @patch("launcher.cloudrun.client.subprocess.Popen")
+  @patch("launcher.cloudrun.client._package_workspace")
+  @patch("launcher.cloudrun.client._gcloud_transfer")
   def test_run_timeout_triggers_remote_cancel(
       self, mock_transfer, mock_package, mock_popen
   ):
@@ -228,9 +228,9 @@ class TestCloudRunClient(unittest.TestCase):
       mock_cancel.assert_called_once_with("codemender-runner-ab12cd34")
       self.assertEqual(client.current_execution, "codemender-runner-ab12cd34")
 
-  @patch("gcp_sandboxing.client.subprocess.Popen")
-  @patch("gcp_sandboxing.client._package_workspace")
-  @patch("gcp_sandboxing.client._gcloud_transfer")
+  @patch("launcher.cloudrun.client.subprocess.Popen")
+  @patch("launcher.cloudrun.client._package_workspace")
+  @patch("launcher.cloudrun.client._gcloud_transfer")
   def test_run_captures_execution_name_up_front_and_cancel_terminates_process(
       self, mock_transfer, mock_package, mock_popen
   ):
@@ -276,7 +276,7 @@ class TestCloudRunClient(unittest.TestCase):
     self.assertEqual(client.current_execution, "codemender-runner-early99")
     self.assertEqual(receipt.status, "SUCCESS")
 
-  @patch("gcp_sandboxing.client.subprocess.run")
+  @patch("launcher.cloudrun.client.subprocess.run")
   def test_cancel_executes_gcloud_executions_cancel(self, mock_subproc):
     cfg = CloudRunConfig(
         project="test-proj",
@@ -314,9 +314,9 @@ class TestCloudRunClient(unittest.TestCase):
     client = CloudRunClient(cfg)
     self.assertFalse(client.cancel())
 
-  @patch("gcp_sandboxing.client.subprocess.run")
-  @patch("gcp_sandboxing.client._package_workspace")
-  @patch("gcp_sandboxing.client._gcloud_transfer")
+  @patch("launcher.cloudrun.client.subprocess.run")
+  @patch("launcher.cloudrun.client._package_workspace")
+  @patch("launcher.cloudrun.client._gcloud_transfer")
   def test_run_failed_without_receipt_raises_error(
       self, mock_transfer, mock_package, mock_subproc
   ):
@@ -333,9 +333,9 @@ class TestCloudRunClient(unittest.TestCase):
     self.assertIn("Cloud Run Job execution failed", str(ctx.exception))
 
   # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
-  @patch("gcp_sandboxing.client.subprocess.Popen")
-  @patch("gcp_sandboxing.client._package_workspace")
-  @patch("gcp_sandboxing.client._gcloud_transfer")
+  @patch("launcher.cloudrun.client.subprocess.Popen")
+  @patch("launcher.cloudrun.client._package_workspace")
+  @patch("launcher.cloudrun.client._gcloud_transfer")
   def test_run_fix_stages_finding_and_downloads_diff_and_log(
       self, mock_transfer, mock_package, mock_popen
   ):
@@ -434,9 +434,9 @@ class TestCloudRunClient(unittest.TestCase):
         self.assertEqual(lf.read(), "fix runner log\n")
 
   # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
-  @patch("gcp_sandboxing.client.subprocess.Popen")
-  @patch("gcp_sandboxing.client._package_workspace")
-  @patch("gcp_sandboxing.client._gcloud_transfer")
+  @patch("launcher.cloudrun.client.subprocess.Popen")
+  @patch("launcher.cloudrun.client._package_workspace")
+  @patch("launcher.cloudrun.client._gcloud_transfer")
   def test_workspace_tarball_reused_across_find_diff_and_fix_runs(
       self, mock_transfer, mock_package, mock_popen
   ):
@@ -496,7 +496,7 @@ class TestCloudRunClient(unittest.TestCase):
       )
 
   # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
-  @patch("gcp_sandboxing.client._gcloud_cancel_execution", return_value=True)
+  @patch("launcher.cloudrun.client._gcloud_cancel_execution", return_value=True)
   def test_cancel_cancels_all_active_executions(self, mock_cancel_exec):
     cfg = CloudRunConfig(
         project="test-proj",
@@ -519,10 +519,10 @@ class TestCloudRunClient(unittest.TestCase):
     )
 
   # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
-  @patch("gcp_sandboxing.client._gcloud_cancel_execution", return_value=True)
-  @patch("gcp_sandboxing.client.subprocess.Popen")
-  @patch("gcp_sandboxing.client._package_workspace")
-  @patch("gcp_sandboxing.client._gcloud_transfer")
+  @patch("launcher.cloudrun.client._gcloud_cancel_execution", return_value=True)
+  @patch("launcher.cloudrun.client.subprocess.Popen")
+  @patch("launcher.cloudrun.client._package_workspace")
+  @patch("launcher.cloudrun.client._gcloud_transfer")
   def test_run_timeout_without_own_exec_name_does_not_cancel_other_thread_execution(
       self, mock_transfer, mock_package, mock_popen, mock_cancel_exec
   ):
@@ -546,10 +546,10 @@ class TestCloudRunClient(unittest.TestCase):
     timed_out_proc.kill.assert_called_once()
 
   # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
-  @patch("gcp_sandboxing.client._gcloud_cancel_execution", return_value=True)
-  @patch("gcp_sandboxing.client.subprocess.Popen")
-  @patch("gcp_sandboxing.client._package_workspace")
-  @patch("gcp_sandboxing.client._gcloud_transfer")
+  @patch("launcher.cloudrun.client._gcloud_cancel_execution", return_value=True)
+  @patch("launcher.cloudrun.client.subprocess.Popen")
+  @patch("launcher.cloudrun.client._package_workspace")
+  @patch("launcher.cloudrun.client._gcloud_transfer")
   def test_run_timeout_with_own_exec_name_kills_own_proc_without_terminating_other_current_process(
       self, mock_transfer, mock_package, mock_popen, mock_cancel_exec
   ):
@@ -588,7 +588,7 @@ class TestCloudRunClient(unittest.TestCase):
     other_thread_proc.terminate.assert_not_called()
 
   # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
-  @patch("gcp_sandboxing.client._gcloud_cancel_execution", return_value=True)
+  @patch("launcher.cloudrun.client._gcloud_cancel_execution", return_value=True)
   def test_cancel_does_not_block_on_payload_lock(self, mock_cancel_exec):
     cfg = CloudRunConfig(
         project="test-proj",

@@ -1,5 +1,5 @@
 <!--*
-freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-06' }
+freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-23' }
 *-->
 
 <!--
@@ -32,7 +32,7 @@ The reasons behind each requirement are in [design.md](design.md).
 
 This specification is governed by:
 - [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md): stdout carries each command's result in its standard format.
-- [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md): the GitHub token stays on the host.
+- [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md): the GitHub token stays on the host (`packages/repohost`).
 - [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md): containers get only explicit environment variables.
 - [ADR-0006](../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md): remediation routing (inline suggestions and collapsible patch comment fallback).
 
@@ -44,7 +44,7 @@ This specification is governed by:
 
 - **CUJ UUID:** `cuj-gha-fix-toggle`
 
-1. `action.yml` MUST add two optional inputs:
+1. Both `.github/actions/codemender/action.yml` and `.github/actions/codemender-local/action.yml` MUST define two optional inputs:
    - `fix`: default `'true'`.
    - `max_parallel_fixes`: default `'4'`.
 2. For `fix`, the action MUST treat `false`, `0` and `no` as off, ignoring case
@@ -53,11 +53,11 @@ This specification is governed by:
 3. With fixes off, the action MUST behave as in M1: only scanning and posting
    the sticky comment without the Fix column.
 4. For `max_parallel_fixes`, the action MUST accept a positive integer (`>= 1`)
-   to bound the number of concurrent fix containers on the runner VM. If unset,
+   to bound the number of concurrent fix workers. If unset,
    empty, or invalid (`<= 0` or non-integer), it MUST fall back to `4` (emitting
    a `::warning::` when an explicit non-empty value is invalid) so a
    misconfigured workflow still runs safely with bounded concurrency.
-5. The workflow template MUST show `# fix: false` and `# max_parallel_fixes: '4'`
+5. The workflow template (`.github/workflows/cm-merge-scan.yml`) MUST show `# fix: false` and `# max_parallel_fixes: '4'`
    as commented-out examples in the action's `with:` block.
 
 #### Scenario: Fixes run by default

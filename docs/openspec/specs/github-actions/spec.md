@@ -1,5 +1,5 @@
 <!--*
-freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-14' }
+freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-21' }
 *-->
 
 <!--
@@ -23,13 +23,16 @@ sdd_cujspec_product: codemender-runner
 
 ## Overview
 
-This specification defines the functional requirements, configuration interface, launcher abstraction, and execution routing for the CodeMender GitHub Actions integration (`.github/actions` and `.github/workflows`; repository distribution and GitHub deployment models are governed by [SPEC-DIST](../distribute/spec.md)).
+This specification defines the functional requirements, configuration interface, launcher abstraction, and execution routing for the CodeMender GitHub Actions integration (`.github/actions/`, `.github/workflows/`, `packages/repohost`, and `packages/launcher`; repository distribution and GitHub deployment models are governed by [SPEC-DIST](../distribute/spec.md)).
 
-The integration allows repositories to run CodeMender during pull request workflows. It supports dual execution backends:
-1. **Local Docker Mode (`local`)**: Runs `cm-runner` natively on the GitHub Actions runner VM inside a throwaway Docker container with zero external cloud dependencies.
-2. **Cloud Run Mode (`cloudrun`)**: Delegates command execution to Google Cloud Run microVMs via in-process integration with the `gcp_sandboxing.client.CloudRunClient` Python SDK (governed by [ADR-0007](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md) Option 3). All Cloud Run infrastructure configuration details (GCP project, job name, region, transit storage) are resolved from ambient environment variables and authenticated via Workload Identity Federation (WIF).
+The integration allows repositories to run CodeMender during pull request workflows via two dedicated composite actions paired with a unified `cm-github` CLI orchestrator (`packages/repohost`):
+1. **Cloud Run Action (`.github/actions/codemender/action.yml`, `CODEMENDER_BACKEND="cloudrun"`)**: Delegates command execution to Google Cloud Run microVMs via in-process integration with the `launcher.cloudrun.client.CloudRunClient` Python SDK in `packages/launcher[cloudrun]` (governed by [ADR-0007](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md) Option 3 and [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md)). All Cloud Run infrastructure configuration details (GCP project, job name, region, transit storage) are resolved from action inputs or ambient environment variables and authenticated via Workload Identity Federation (WIF).
+2. **Local Docker Action (`.github/actions/codemender-local/action.yml`, `CODEMENDER_BACKEND="local"`)**: Runs `cm-runner` natively on the GitHub Actions runner VM inside a throwaway gVisor (`runsc`) Docker container via `LocalDockerLauncher` in `packages/launcher` with zero external cloud job dependencies.
 
-Both backends adhere to an identical, symmetric execution interface: CLI arguments, NDJSON stream contracts, and file-based workspace inputs and outputs (e.g. `output/receipt.json`, diff patches, reports) are placed in identical workspace locations. This minimizes operational differences and ensures downstream action steps operate transparently without backend branching.
+Both actions install the required workspace packages (`packages/codemender`, `packages/launcher[cloudrun]` or `packages/launcher`, and `packages/repohost[github]`) and invoke the `cm-github` CLI entrypoint (`repohost.github.__main__:main`). Both backends adhere to an identical, symmetric execution interface: CLI arguments, NDJSON stream contracts, and file-based workspace inputs and outputs (e.g. `output/receipt.json`, diff patches, reports) are placed in identical workspace locations. This minimizes operational differences and ensures downstream orchestrator steps operate transparently without backend branching.
+
+> [!NOTE]
+> **Action Granularity & Workflow Evolution:** Packaging these execution modes into two composite actions (`.github/actions/codemender` and `.github/actions/codemender-local`) represents the current design choice to cleanly isolate host provisioning dependencies (gVisor/Docker vs. GCP client SDKs). As workflow requirements mature—particularly when introducing more granular lifecycle phase actions (such as separate scan, fix, and verify actions)—this action split may be revisited. The normative requirements in this specification govern the underlying execution contracts, dependency isolation, and backend routing rather than cementing the two-action split as a permanent invariant.
 
 This specification is governed by:
 - [SPEC-DIST: Customer Repository Distribution, GitHub Deployment Models & Cross-Repo Action Resolution](../distribute/spec.md)
@@ -37,7 +40,7 @@ This specification is governed by:
 - [ADR-0003: Environment Variable Scrubbing](../../../adr/ADR-0003-environment-scrubbing.md)
 - [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
 - [ADR-0007: Cloud Run Job Invocation Interface: CLI vs. Python Library](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)
-- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md) (Host token boundary; credentials never enter the container)
+- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md) (Three-package workspace, `cm-github` CLI entrypoint, and host token boundary)
 - [Proposal: gha-cloudrun-launcher](../../proposals/gha-cloudrun-launcher/proposal.md)
 - [Proposal: Cloud Run Jobs Container Bootstrapper & Execution Harness](../../proposals/cloudrun-job-bootstrapper/proposal.md)
 
@@ -45,64 +48,66 @@ This specification is governed by:
 
 ## Requirements
 
-### REQ-0001: Simplified Dual Backend Action Inputs {#req-0001}
+### REQ-0001: Declarative Action Boundaries & Scoped Dependencies (`codemender` vs. `codemender-local`) {#req-0001}
 
 - **CUJ UUID:** cuj-gha-backend-config
 
-The GitHub Action metadata (`.github/actions`) MUST support configurable execution backends through a unified input schema:
+The GitHub Actions integration MUST provide declarative composite action entrypoints containing only YAML step definitions without embedded Python source files or `requirements.txt` files (governed by [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md)):
 
-| Input | Type | Required | Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `backend` | string | No | `'local'` | Target execution backend: `'local'` (Docker on runner VM) or `'cloudrun'` (Cloud Run via in-process CloudRunClient SDK). |
-| `runner_image` | string | Conditional | `''` | Container image tag. Required when `backend == 'local'`; optional when `backend == 'cloudrun'`. |
-| `registry_token` | string | No | `''` | Token to authenticate to container registry for `docker pull`. Used only when `backend == 'local'`. |
-| `log_level` | string | No | `'info'` | Log verbosity level passed to the orchestrator. |
-| `gcp_project_id` | string | Yes | — | Google Cloud project ID used by CodeMender (`GOOGLE_CLOUD_PROJECT`). |
-| `gcp_workload_identity_provider` | string | Yes | — | Full GCP Workload Identity Provider resource name for WIF authentication. |
-| `gcp_service_account` | string | Yes | — | Google Cloud service account email for Workload Identity Federation. |
-| `gcs_transit_bucket` | string | No | `''` | GCS transit storage bucket. Defaults to `codemender-reports-<project>`. |
-| `cloud_run_job_name` | string | No | `'codemender-runner'` | Target Cloud Run Job name in Cloud Run mode. |
-| `cloud_run_region` | string | No | `'us-central1'` | Target GCP region for the Cloud Run Job. |
+1. **Pure-YAML Action Boundary:**
+   - Both `.github/actions/codemender/action.yml` and `.github/actions/codemender-local/action.yml` MUST execute as pure composite actions that install workspace packages and delegate execution to the `cm-github` CLI orchestrator (`packages/repohost`).
+   - Neither action MUST expose a redundant `backend` input (`codemender` hardcodes `CODEMENDER_BACKEND: "cloudrun"`; `codemender-local` hardcodes `CODEMENDER_BACKEND: "local"`).
 
-Cloud-specific execution parameters MAY be passed explicitly via action inputs or resolved from ambient environment variables on the runner. When inputs are omitted, the action and CloudRunClient SDK MUST resolve defaults automatically from ambient environment variables and ADC credentials.
+2. **Scoped Dependency Isolation:**
+   - `.github/actions/codemender/action.yml` MUST install `codemender`, `launcher[cloudrun]`, and `repohost[github]` to provide Google Cloud SDKs for remote Cloud Run Job dispatch without installing local Docker or gVisor tools.
+   - `.github/actions/codemender-local/action.yml` MUST install `codemender`, `launcher` (omitting `[cloudrun]`), and `repohost[github]`, avoiding unused GCP SDK dependencies during local Docker execution.
 
-#### Scenario: Defaulting to local Docker backend
-- **GIVEN** a workflow step invokes `.github/actions/codemender` without specifying `backend`
-- **WHEN** the action executes
-- **THEN** `backend` MUST default to `'local'`
-- **AND** `runner_image` MUST be validated as present and non-empty.
+3. **Pre-Flight Base Commit Verification:**
+   - Before executing compute-intensive tasks, WIF authentication, or container provisioning, `cm-github --preflight` MUST verify that the pull request's base commit is present in the local git clone (attempting a shallow fetch of the base commit if absent), exiting with code `1` and an error notice if the base commit cannot be resolved.
 
-#### Scenario: Missing runner_image in local mode
-- **GIVEN** a workflow step specifies `backend: 'local'` (or omits `backend`)
-- **WHEN** `runner_image` is empty or not provided
-- **THEN** the action MUST fail with exit code `1` and an error message requiring `runner_image`.
+4. **Action Input Contracts:**
+   - Both actions MUST expose shared configuration for GCP project and Workload Identity Federation authentication (`gcp_project_id`, `gcp_workload_identity_provider`, `gcp_service_account`), log verbosity (`log_level`), diff parallelism (`diff_workers`), remediation controls (`fix`, `max_parallel_fixes`), and artifact retention (`artifact_retention_days`).
+   - `.github/actions/codemender/action.yml` MUST support Cloud Run execution overrides (`cloud_run_region`, `gcs_transit_bucket`, `cloud_run_job_name`).
+   - `.github/actions/codemender-local/action.yml` MUST support local container runtime configuration (`runner_image`, `registry_token`, `container_runtime`, `gvisor_release`).
 
-#### Scenario: Successful validation with Cloud Run backend
-- **GIVEN** a workflow step specifies `backend: 'cloudrun'`
-- **WHEN** `runner_image` is empty or omitted
-- **THEN** input validation MUST succeed without requiring `runner_image` or external client input parameters.
+#### Scenario: Cloud Run composite action installs cloudrun extra and sets cloudrun backend
+- **GIVEN** a workflow step invokes `./.github/actions/codemender`
+- **WHEN** the composite action executes
+- **THEN** it MUST install `codemender`, `launcher[cloudrun]`, and `repohost[github]`
+- **AND** it MUST invoke `cm-github` with `CODEMENDER_BACKEND="cloudrun"` without requiring `runner_image`.
+
+#### Scenario: Local composite action installs base launcher and resolves runner_image
+- **GIVEN** a workflow step invokes `./.github/actions/codemender-local`
+- **WHEN** the composite action executes
+- **THEN** it MUST install `codemender`, `launcher` (without `[cloudrun]`), and `repohost[github]`
+- **AND** it MUST invoke `cm-github` with `CODEMENDER_BACKEND="local"` and `CODEMENDER_RUNNER_IMAGE` set to the resolved runner image.
+
+#### Scenario: Base commit verification succeeds or fetches missing base commit
+- **GIVEN** a pull request event where the base commit is absent from a shallow checkout
+- **WHEN** `cm-github --preflight` executes
+- **THEN** it MUST attempt a shallow fetch of the base commit
+- **AND** emit an error notice and exit with code `1` if the base commit cannot be retrieved.
 
 ---
 
-### REQ-0002: Conditional Docker Pull Bypass {#req-0002}
+### REQ-0002: Backend-Isolated Host Provisioning & Docker Pull Bypass {#req-0002}
 
 - **CUJ UUID:** cuj-gha-skip-docker-pull
 
-To prevent unnecessary bandwidth usage, image download latency, and runner disk consumption:
+To prevent unnecessary bandwidth usage, image download latency, gVisor installation overhead, and runner disk consumption:
 
-1. The composite step pulling the container image (`docker pull "$IMAGE"`) and any associated Docker registry login/logout commands MUST execute **ONLY IF** `inputs.backend == 'local'`.
-2. When `inputs.backend == 'cloudrun'`, the action MUST bypass all Docker CLI commands on the host runner.
+1. `.github/actions/codemender-local/action.yml` MUST install the gVisor `runsc` runtime on the host runner VM (when `container_runtime == 'runsc'`), resolve `runner_image` (defaulting to the distributed repository image per [SPEC-DIST](../distribute/spec.md)), normalize image repository names to lowercase, and pull the container image before executing `cm-github`.
+2. `.github/actions/codemender/action.yml` MUST NOT install gVisor or execute any Docker CLI login, pull, or logout commands on the host runner.
 
-#### Scenario: Bypassing Docker pull in Cloud Run mode
-- **GIVEN** `inputs.backend` is set to `'cloudrun'`
+#### Scenario: Cloud Run action bypasses gVisor and Docker pull
+- **GIVEN** a workflow step invokes `./.github/actions/codemender`
 - **WHEN** the action executes
-- **THEN** the `Pull cm-runner image` step MUST be skipped
-- **AND** Docker MUST NOT attempt to authenticate or pull any image.
+- **THEN** no gVisor installation or `docker pull` step MUST be executed on the host runner.
 
-#### Scenario: Executing Docker pull in local mode
-- **GIVEN** `inputs.backend` is `'local'` (or omitted) and `inputs.runner_image` is specified
+#### Scenario: Local action installs gVisor and pulls runner image
+- **GIVEN** a workflow step invokes `./.github/actions/codemender-local` with `inputs.runner_image` specified
 - **WHEN** the action executes
-- **THEN** the `Pull cm-runner image` step MUST execute
+- **THEN** the `Install gVisor (runsc)` and `Pull cm-runner image` steps MUST execute
 - **AND** `docker pull "$IMAGE"` MUST be invoked.
 
 ---
@@ -145,7 +150,7 @@ The orchestrator MUST provide a launcher component (`CloudRunLauncher`) that rea
      - Inspect `receipt.artifacts` for `"sarif"` paths/URIs.
      - Inspect standard candidate locations including `CODEMENDER_OUT_DIR`, `output/report.sarif`, and `report.sarif`.
      - Read the staged artifact bytes and populate `RunResult.stdout`.
-   - This ensures downstream consumers (such as `_parse_scan_findings` in `gha_runner.py`) receive valid SARIF bytes identically across both local Docker and Cloud Run backends.
+   - This ensures downstream consumers (such as `_parse_scan_findings` in `repohost.github`) receive valid SARIF bytes identically across both local Docker and Cloud Run backends.
 
 #### Scenario: Successful execution via CloudRunLauncher
 - **GIVEN** a configured `CloudRunLauncher` with a valid `CloudRunClient`
@@ -193,50 +198,44 @@ The orchestrator MUST provide a launcher component (`CloudRunLauncher`) that rea
 
 ---
 
-### REQ-0004: Entrypoint Launcher Factory Routing {#req-0004}
+### REQ-0004: Entrypoint Launcher Factory Routing (`cm-github`) {#req-0004}
 
 - **CUJ UUID:** cuj-gha-launcher-factory
 
-The action entrypoint (`gha_runner.py`) MUST implement dynamic launcher factory routing based on environment variables:
+The GitHub orchestrator CLI entrypoint (`cm-github`, mapped to `repohost.github.__main__:main` in `packages/repohost`) MUST implement dynamic launcher factory routing based on environment variables:
 
-1. Inspect `CODEMENDER_BACKEND` using truthy defaulting to `"local"`. Normalization MUST accept `"local"` and `"cloudrun"` (with `"cloud_run"` accepted as a normalized alias).
+1. Inspect `CODEMENDER_BACKEND` using truthy defaulting to `"cloudrun"` (with `"local"` supported for local runner execution). Normalization MUST accept `"local"` and `"cloudrun"` (with `"cloud_run"` accepted as a normalized alias).
 2. If normalized backend is `"local"`:
    - Validate that `CODEMENDER_RUNNER_IMAGE` is set; exit with code `1` and a GitHub error notice if missing.
-   - Instantiate `LocalDockerLauncher`.
+   - Instantiate the local Docker launcher (`LocalDockerLauncher`).
 3. If normalized backend is `"cloudrun"`:
    - Resolve Cloud Run configuration from ambient environment variables (`GOOGLE_CLOUD_PROJECT`, `GCS_TRANSIT_BUCKET`, `CLOUD_RUN_JOB_NAME`, `CLOUD_RUN_REGION`) and ambient credentials.
-   - Instantiate `CloudRunClient` in-process (or use an injected client instance) and pass it to `CloudRunLauncher`.
+   - Instantiate the Cloud Run client (`CloudRunClient`) in-process and pass it to `CloudRunLauncher`.
 4. If `CODEMENDER_BACKEND` has an unsupported value:
    - Exit with code `1` and print an error notice naming the unsupported backend.
 
 #### Scenario: Launcher factory selects CloudRunLauncher with in-process client
 - **GIVEN** environment variable `CODEMENDER_BACKEND="cloudrun"`
-- **WHEN** `gha_runner.main()` executes
+- **WHEN** `cm-github` (`repohost.github.__main__.main()`) executes
 - **THEN** `CloudRunLauncher` MUST be instantiated with an in-process `CloudRunClient`
 - **AND** dispatched to `run_pr`.
 
 #### Scenario: Normalized backend alias selects CloudRunLauncher
 - **GIVEN** environment variable `CODEMENDER_BACKEND="cloud_run"`
-- **WHEN** `gha_runner.main()` executes
+- **WHEN** `cm-github` (`repohost.github.__main__.main()`) executes
 - **THEN** `CloudRunLauncher` MUST be instantiated with an in-process `CloudRunClient`
 - **AND** dispatched to `run_pr`.
 
 #### Scenario: Unsupported backend exits with error
 - **GIVEN** environment variable `CODEMENDER_BACKEND="unsupported_engine"`
-- **WHEN** `gha_runner.main()` executes
+- **WHEN** `cm-github` (`repohost.github.__main__.main()`) executes
 - **THEN** the entrypoint MUST exit with code `1`
 - **AND** output a GitHub Actions error notice naming `'unsupported_engine'`.
 
-#### Scenario: Default backend selects LocalDockerLauncher
-- **GIVEN** environment variable `CODEMENDER_BACKEND` is unset (or set to `"local"`)
-- **AND** `CODEMENDER_RUNNER_IMAGE="img:sha"` is set
-- **WHEN** `gha_runner.main()` executes
-- **THEN** `LocalDockerLauncher` MUST be instantiated and dispatched to `run_pr`.
-
 #### Scenario: Missing runner image in Local mode exits with error
-- **GIVEN** environment variable `CODEMENDER_BACKEND="local"` (or unset)
+- **GIVEN** environment variable `CODEMENDER_BACKEND="local"`
 - **AND** `CODEMENDER_RUNNER_IMAGE` is unset or empty
-- **WHEN** `gha_runner.main()` executes
+- **WHEN** `cm-github` (`repohost.github.__main__.main()`) executes
 - **THEN** the entrypoint MUST exit with code `1`
 - **AND** output a GitHub Actions error notice `::error::Missing required environment variable CODEMENDER_RUNNER_IMAGE.`.
 
@@ -292,14 +291,14 @@ In compliance with [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md) an
 
 - **CUJ UUID:** cuj-workflow-template-config
 
-The workflow template (`github-actions/workflows/cm-merge-scan.yml`) MUST provide documented reference configurations for both `local` and `cloudrun` execution:
-1. Provide the default configuration targeting local Docker execution with `runner_image`.
-2. Provide commented configuration examples illustrating Cloud Run invocation via `backend: cloudrun`.
+The workflow template (`.github/workflows/cm-merge-scan.yml`) MUST provide documented reference configurations for both `.github/actions/codemender` (Cloud Run) and `.github/actions/codemender-local` (Local Docker + gVisor) execution without passing a `backend` input:
+1. Provide the active Mode 1 configuration targeting Cloud Run execution via `uses: ./.github/actions/codemender`.
+2. Provide commented Mode 2 configuration examples illustrating local Docker + gVisor invocation via `uses: ./.github/actions/codemender-local` with `runner_image`.
 
-#### Scenario: Template contains documented Cloud Run configuration
-- **GIVEN** a user inspects `github-actions/workflows/cm-merge-scan.yml`
+#### Scenario: Template contains documented Cloud Run and Local action configurations
+- **GIVEN** a user inspects `.github/workflows/cm-merge-scan.yml`
 - **WHEN** reviewing the configuration options
-- **THEN** the file MUST contain documented comments explaining how to enable `backend: cloudrun` without requiring runner images or client paths.
+- **THEN** the file MUST contain documented steps for both `./.github/actions/codemender` (Cloud Run) and `./.github/actions/codemender-local` (Local Docker + gVisor) without passing a redundant `backend` input.
 
 ---
 
@@ -354,7 +353,7 @@ To minimize differences between actions that execute via Cloud Run and those tha
 - **THEN** both launchers MUST dispatch equivalent command structures and flags to their respective execution environments.
 
 #### Scenario: Single consolidated remote command dispatched in Cloud Run mode
-- **GIVEN** `backend == 'cloudrun'`
-- **WHEN** `gha_runner.py` executes PR analysis
+- **GIVEN** `CODEMENDER_BACKEND == 'cloudrun'`
+- **WHEN** `cm-github` (`repohost.github`) executes PR analysis
 - **THEN** the orchestrator MUST invoke `launcher.run("find-diff", ...)` as a single consolidated remote task
 - **AND** MUST NOT issue a preliminary standalone remote `init` job invocation.

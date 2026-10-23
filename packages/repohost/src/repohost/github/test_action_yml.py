@@ -25,8 +25,9 @@ import unittest
 
 
 _TESTS_DIR = Path(__file__).resolve().parent
-_CODEMENDER_ACTION_DIR = _TESTS_DIR.parent
-_ACTIONS_DIR = _CODEMENDER_ACTION_DIR.parent
+_REPO_ROOT = _TESTS_DIR.parents[4]
+_ACTIONS_DIR = _REPO_ROOT / ".github" / "actions"
+_CODEMENDER_ACTION_DIR = _ACTIONS_DIR / "codemender"
 _CODEMENDER_LOCAL_ACTION_DIR = _ACTIONS_DIR / "codemender-local"
 _CODEMENDER_YML = _CODEMENDER_ACTION_DIR / "action.yml"
 _CODEMENDER_LOCAL_YML = _CODEMENDER_LOCAL_ACTION_DIR / "action.yml"

@@ -17,15 +17,11 @@
 # the image and posting PR comments). They are never passed into a cm-runner
 # container (ADR-0003).
 
+# Governing: ADR-0008, SPEC-GHA/REQ-0001, SPEC-GHA/REQ-0002, SPEC-GHA-FIX/REQ-0001, SPEC-DIST/REQ-0001, SPEC-DIST/REQ-0003
 name: CodeMender (Local Runner)
 description: Run CodeMender (cm-runner) on pull requests using Docker and gVisor on the GitHub Actions runner VM.
 
 inputs:
-  backend:
-    description: >-
-      Target execution backend: 'local' (default).
-    required: false
-    default: 'local'
   runner_image:
     description: >-
       Universal cm-runner container image (pre-baked with Python 3.11, Node 22,
@@ -115,17 +111,12 @@ runs:
         GITHUB_WORKSPACE: ${{ github.workspace }}
       run: |
         set -euo pipefail
-        REQ_PATH="${ACTION_PATH}/requirements.txt"
-        if [[ ! -f "$REQ_PATH" ]]; then
-          REQ_PATH="${ACTION_PATH}/../codemender/requirements.txt"
-        fi
         if [[ -d "${GITHUB_WORKSPACE:-}/packages/repohost" ]]; then
           PKG_DIR="${GITHUB_WORKSPACE}/packages"
         else
           PKG_DIR="$(cd "${ACTION_PATH}/../../../packages" && pwd)"
         fi
         python -m pip install --quiet \
-          -r "$REQ_PATH" \
           "${PKG_DIR}/codemender" \
           "${PKG_DIR}/launcher" \
           "${PKG_DIR}/repohost[github]"
@@ -135,31 +126,9 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
-        PYTHONDONTWRITEBYTECODE: '1'
-      run: |
-        SCRIPT_PATH="${{ github.action_path }}/src/gha_runner.py"
-        if [[ ! -f "$SCRIPT_PATH" ]]; then
-          SCRIPT_PATH="${{ github.action_path }}/../codemender/src/gha_runner.py"
-        fi
-        python "$SCRIPT_PATH" --preflight
-
-    - name: Verify PR base commit is present
-      if: steps.preflight.outputs.should_run == 'true' && github.event_name == 'pull_request'
-      shell: bash
-      env:
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
-      run: |
-        set -euo pipefail
-        if [[ -z "${BASE_SHA}" ]]; then
-          exit 0
-        fi
-        if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-          echo "Base commit ${BASE_SHA} not in shallow clone; attempting git fetch..."
-          git fetch --no-tags --depth=1 origin "${BASE_SHA}" || {
-            echo "::error::Base commit ${BASE_SHA} is not present in the local checkout. Set 'fetch-depth: 0' on actions/checkout."
-            exit 1
-          }
-        fi
+        PYTHONDONTWRITEBYTECODE: '1'
+      run: cm-github --preflight
 
     - name: Authenticate to Google Cloud (WIF)
       if: steps.preflight.outputs.should_run == 'true'
@@ -232,7 +201,7 @@ runs:
       if: steps.preflight.outputs.should_run == 'true'
       shell: bash
       env:
-        CODEMENDER_BACKEND: ${{ inputs.backend || 'local' }}
+        CODEMENDER_BACKEND: "local"
         CODEMENDER_RUNNER_IMAGE: ${{ steps.pull-image.outputs.image || inputs.runner_image }}
         CODEMENDER_LOG_LEVEL: ${{ inputs.log_level }}
         CODEMENDER_CONTAINER_RUNTIME: ${{ inputs.container_runtime }}
@@ -245,13 +214,7 @@ runs:
         GOOGLE_GHA_CREDS_PATH: ${{ steps.gcp_auth.outputs.credentials_file_path }}
         GITHUB_TOKEN: ${{ github.token }}
         PYTHONDONTWRITEBYTECODE: '1'
-      run: |
-        chmod a+r "${GOOGLE_GHA_CREDS_PATH}"
-        SCRIPT_PATH="${{ github.action_path }}/src/gha_runner.py"
-        if [[ ! -f "$SCRIPT_PATH" ]]; then
-          SCRIPT_PATH="${{ github.action_path }}/../codemender/src/gha_runner.py"
-        fi
-        exec python "$SCRIPT_PATH"
+      run: exec cm-github
 
     - name: Upload CodeMender report artifacts
       if: always() && steps.preflight.outputs.should_run == 'true'
