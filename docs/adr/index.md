@@ -14,3 +14,4 @@ CodeMender Orchestrator and its deployment scenarios.
 | [ADR-0007](ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md) | Cloud Run Job Invocation Interface: CLI vs. Python Library | Proposed | 2026-10-02 |
 | [ADR-0008](ADR-0008-repository-layout-and-package-structure.md) | Repository Layout, Three-Package Workspace, and Runtime Architecture | Proposed | 2026-10-08 |
 | [ADR-0009](ADR-0009-abstraction-layers-and-dependency-injection.md) | Abstraction Layers, Dependency Injection, and Asynchronous Workflows | Proposed | 2026-10-09 |
+| [ADR-0010](ADR-0010-permission-isolation-and-authn-authz.md) | Three-Zone Permission Isolation and Runtime AuthN/AuthZ Split | Proposed | 2026-10-14 |
