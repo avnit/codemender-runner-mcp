@@ -200,9 +200,9 @@ findings to those relevant to the diff:
    - `--fail-on NONE` so that `cm find --diff` does not exit with code `1` when
      vulnerabilities are discovered, allowing `cm-runner` to distinguish clean
      scan completion (exit `0`) from genuine execution errors (exit `3`).
-   - Fixed outer circuit-breaker timeout `_FIND_DIFF_TIMEOUT_SEC = 360.0` passed
-     as `timeout_sec=360.0` (providing a 60-second grace buffer beyond
-     `cm find --diff`'s internal 5-minute ceiling).
+   - Fixed outer circuit-breaker timeout `_FIND_DIFF_TIMEOUT_SEC = 1800.0` passed
+     as `timeout_sec=1800.0` (providing a 30-minute outer ceiling above
+     `cm find --diff`'s per-file `--diff-job-timeout` of 10–20 minutes).
    - All human-readable progress output produced by `cm find --diff` on
      `CmResult`'s `stdout` and `stderr` MUST be forwarded to `cm-runner`'s
      `stderr`.
@@ -219,7 +219,7 @@ findings to those relevant to the diff:
 - **WHEN** `cm-runner find-diff --repo /workspace --base origin/main` executes
 - **THEN** `CmAdapter.run()` is first called with
   `["find", "/workspace", "-y", "--diff=origin/main", "--diff-workers=8", "--fail-on", "NONE"]`,
-  `cwd="/workspace"`, and `timeout_sec=360.0`, and upon exit code `0` is next
+  `cwd="/workspace"`, and `timeout_sec=1800.0`, and upon exit code `0` is next
   called with `["report", "--format", "sarif"]`, `cwd="/workspace"`, and
   `timeout_sec=60.0`.
 
@@ -244,10 +244,10 @@ findings to those relevant to the diff:
 
 #### Scenario: Enforcing Outer Timeout Bounds
 
-- **GIVEN** `cm find --diff` hangs beyond `_FIND_DIFF_TIMEOUT_SEC` (`360.0`
+- **GIVEN** `cm find --diff` hangs beyond `_FIND_DIFF_TIMEOUT_SEC` (`1800.0`
   seconds)
 - **WHEN** `CmAdapter.run()` returns
-  `CmResult(exit_code=None, error="timed out after 360s")`
+  `CmResult(exit_code=None, error="timed out after 1800.0 s")`
 - **THEN** `cm-runner find-diff` logs a timeout diagnostic to `stderr`, does not
   call `cm report`, emits zero bytes to `stdout`, and exits with code `3`.
 
@@ -302,14 +302,14 @@ a **single, compact (non-pretty-printed) UTF-8 JSON line** terminated by ` `:
 SARIF 2.1.0 output):**
 
 ```json
-{"$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json", "version": "2.1.0", "runs": [{"tool": {"driver": {"name": "CodeMender", "version": "0.9.0"}}, "results": [{"ruleId": "CWE-78", "level": "error", "message": {"text": "OS Command Injection in archive extractor: Untrusted filename user_archive is passed directly to os.system('/bin/sh -c'), allowing shell metacharacter injection."}, "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/archive/unpack.py"}, "region": {"startLine": 18, "endLine": 19}}}]}, {"ruleId": "CWE-89", "level": "error", "message": {"text": "SQL Injection in user lookup query: User-supplied user_id is interpolated directly into the SQL query string without parameterization."}, "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/db/users.py"}, "region": {"startLine": 42, "endLine": 45}}}]}]}]}
+{"$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json", "version": "2.1.0", "runs": [{"tool": {"driver": {"name": "CodeMender", "version": "0.16.0"}}, "results": [{"ruleId": "CWE-78", "level": "error", "message": {"text": "OS Command Injection in archive extractor: Untrusted filename user_archive is passed directly to os.system('/bin/sh -c'), allowing shell metacharacter injection."}, "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/archive/unpack.py"}, "region": {"startLine": 18, "endLine": 19}}}]}, {"ruleId": "CWE-89", "level": "error", "message": {"text": "SQL Injection in user lookup query: User-supplied user_id is interpolated directly into the SQL query string without parameterization."}, "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/db/users.py"}, "region": {"startLine": 42, "endLine": 45}}}]}]}]}
 ```
 
 **Example 2 — Raw `stdout` when 0 findings are discovered (exact 1-line compact
 SARIF 2.1.0 output with empty `results`):**
 
 ```json
-{"$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json", "version": "2.1.0", "runs": [{"tool": {"driver": {"name": "CodeMender", "version": "0.9.0"}}, "results": []}]}
+{"$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json", "version": "2.1.0", "runs": [{"tool": {"driver": {"name": "CodeMender", "version": "0.16.0"}}, "results": []}]}
 ```
 
 #### Scenario: Emitting Compact Single-Line SARIF on `stdout`
@@ -397,7 +397,7 @@ output for downstream CI stages.
 #### Scenario: Non-Zero `cm` Exit Code on Backend or Scan Failure
 
 - **GIVEN** `cm find --diff` encounters a backend gRPC error or hits its
-  5-minute internal ceiling
+  per-file `--diff-job-timeout` session limit
 - **WHEN** `cm find --diff` exits with return code `1` and writes an error to
   `stderr`
 - **THEN** `cm-runner find-diff` forwards the error details to `stderr`, skips

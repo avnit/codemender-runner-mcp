@@ -41,9 +41,11 @@ from codemender.vcs import git
 logger = logging.getLogger(__name__)
 
 # Outer timeout circuit breakers:
-# `cm find --diff` has an internal 5-minute (300s) ceiling; 360s gives a 60s
-# grace window for server LRO cancellation before terminating the child.
-_FIND_DIFF_TIMEOUT_SEC = 360.0
+# `cm find --diff` enforces a per-file session timeout (`--diff-job-timeout`,
+# default 10m, scaling up to 20m for files >32 KB); 1800s (30m) matches
+# `_FIX_TIMEOUT_SEC` and `_VERIFY_TIMEOUT_SEC` while giving `cm` headroom to
+# cancel remote LROs cleanly before terminating the child.
+_FIND_DIFF_TIMEOUT_SEC = 1800.0
 _CM_REPORT_TIMEOUT_SEC = 60.0
 
 # Concurrent `cm find --diff` worker bounds and default (1..16 supported by cm;

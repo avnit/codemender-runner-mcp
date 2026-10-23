@@ -61,7 +61,7 @@ be added. There is no text mode; to read it by hand, pipe it through
 `python3 -m json.tool --json-lines` or `jq`.
 
 ```json
-{"ts": "2026-10-07T01:15:00Z", "event": "version", "orchestrator": "0.1.0", "cm": {"found": true, "version": "0.12.0", "path": "/usr/local/bin/cm"}, "contract": "cm-0.12.x"}
+{"ts": "2026-10-21T00:00:00Z", "event": "version", "orchestrator": "0.1.0", "cm": {"found": true, "version": "0.16.0", "path": "/usr/local/bin/cm"}}
 ```
 
 `find-diff` and `fix` are the exceptions: stdout carries their result in its
@@ -189,7 +189,8 @@ object in that repository (`git rev-parse --verify <base>^{commit}`).
 
 **What it runs.** `find-diff` runs:
 
-1. `cm find <repo> -y --diff=<base> --diff-workers=<N> --fail-on NONE`
+1. `cm find <repo> -y --diff=<base> --diff-workers=<N> --fail-on NONE`, with a
+   30-minute limit.
 1. `cm report --format sarif` (written to a temporary file and validated as
    JSON)
 1. `cm report --format md` (only when `--out` is passed)

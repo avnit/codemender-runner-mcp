@@ -471,7 +471,7 @@ class TestFindDiffAdapterExecutionAndSarifOutput(FindDiffTestBase):
                 ],
                 "cwd": repo_path.as_posix(),
                 "env": None,
-                "timeout_sec": 360.0,
+                "timeout_sec": 1800.0,
             },
             {
                 "args": ["report", "--format", "sarif"],
@@ -674,7 +674,7 @@ class TestFindDiffFailureAtomicity(FindDiffTestBase):
                 stdout="Partial scan progress...\n",
                 stderr="",
                 tokens=TokenUsage(),
-                error="timed out after 360.0 s",
+                error="timed out after 1800.0 s",
             ),
         }
     )
@@ -684,7 +684,7 @@ class TestFindDiffFailureAtomicity(FindDiffTestBase):
 
     self.assertEqual(rc, exit_codes.FAILED)
     self.assertEqual(stdout, "")
-    self.assertIn("timed out after 360.0 s", stderr)
+    self.assertIn("timed out after 1800.0 s", stderr)
     self.assertEqual(len(adapter.calls), 1)
 
   def test_cm_find_non_zero_exit_skips_report_and_emits_zero_stdout_bytes(self):

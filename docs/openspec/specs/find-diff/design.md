@@ -34,7 +34,8 @@ Scanning** (`cm find <repo> --diff[=<ref>]`), which:
    files).
 1. Dispatches bounded parallel per-file `FIND` sessions (using `cm`'s default of
    `4` workers) with 1-indexed file content inlined on Turn 1, a 5-tool-lookup
-   cap, and a 5-minute internal ceiling.
+   cap, and a per-file session timeout (`--diff-job-timeout`, defaulting to
+   `10m` and scaling up to `20m` for files `>32 KB`).
 1. Filters findings to those relevant to the diff and persists them into
    `~/.codemender/state.db`.
 1. Exports the persisted findings as
@@ -76,7 +77,8 @@ exposes this native capability as a first-class subcommand of the generic
 ### Non-Goals
 
 - Exposing the other `cm find --diff` tuning knobs (`--diff-depth`,
-  `--diff-max-neighbors`, `--fail-on-truncation`, `--staged`, `--unrestricted`)
+  `--diff-max-neighbors`, `--diff-job-timeout`, `--fail-on-truncation`,
+  `--staged`, `--unrestricted`)
   until a concrete caller use case requires overriding `cm-runner`'s defaults
   (YAGNI). `--diff-workers` is the exception (see Decision 5).
 - Executing vulnerability verification (`cm verify`) or patch synthesis
@@ -136,8 +138,8 @@ exposes this native capability as a first-class subcommand of the generic
   when vulnerabilities are discovered.
 - **Alternatives Considered:**
   - *Keep `cm`'s default `--fail-on CRITICAL,HIGH` and treat exit code `1` as
-    success in `cm-runner`:* `cm`'s runtime errors, VCS errors, and 5-minute
-    ceiling timeouts also return exit code `1`. Treating exit code `1` as
+    success in `cm-runner`:* `cm`'s runtime errors, VCS errors, and session
+    timeouts also return exit code `1`. Treating exit code `1` as
     success would mask genuine scan failures.
 - **Rationale:** In `cm`'s `find.go` (`parseFailOnSeverities`), `--fail-on NONE`
   cleanly disables the severity gate while keeping non-zero exit codes active
@@ -145,17 +147,20 @@ exposes this native capability as a first-class subcommand of the generic
   exit code contract (`0` = scan succeeded with SARIF emitted to `stdout`; `3` =
   execution failure with `0` bytes on `stdout`).
 
-### Decision 4: Fixed Outer Timeout Circuit Breakers (`_FIND_DIFF_TIMEOUT_SEC = 360.0`, `_CM_REPORT_TIMEOUT_SEC = 60.0`)
+### Decision 4: Fixed Outer Timeout Circuit Breakers (`_FIND_DIFF_TIMEOUT_SEC = 1800.0`, `_CM_REPORT_TIMEOUT_SEC = 60.0`)
 
 - **Choice:** Enforce fixed outer timeout constants
-  `_FIND_DIFF_TIMEOUT_SEC = 360.0` on `cm find --diff` and
+  `_FIND_DIFF_TIMEOUT_SEC = 1800.0` on `cm find --diff` and
   `_CM_REPORT_TIMEOUT_SEC = 60.0` on `cm report`, matching the pattern of
-  `_CM_INIT_TIMEOUT_SEC = 60.0` in `codemender/runner/commands/init.py`.
-- **Rationale:** `cm find --diff` enforces an internal `maxDiffCeiling` of `300`
-  seconds (5 minutes), after which it spends up to `3` seconds per active
-  session cancelling server LROs. Setting the outer `CmAdapter` circuit breaker
-  to `360` seconds gives `cm` a 60-second grace window to cancel remote
-  operations cleanly before `subprocess.run` terminates the child process.
+  `_FIX_TIMEOUT_SEC = 1800.0` (`fix.py`), `_VERIFY_TIMEOUT_SEC = 1800.0`
+  (`verify.py`), and `_CM_INIT_TIMEOUT_SEC = 60.0` (`init.py`).
+- **Rationale:** `cm find --diff` enforces a per-file session timeout
+  (`--diff-job-timeout`, defaulting to `10m` and scaling up to `20m` for files
+  `>32 KB`) and spends up to `3` seconds per active session cancelling server
+  LROs on interruption. Setting the outer `CmAdapter` circuit breaker to `1800`
+  seconds (30 minutes) gives multi-file diff scans and large files sufficient
+  headroom to finish deep triage and cancel remote operations cleanly before
+  `subprocess.run` terminates the child process.
 
 ### Decision 5: Configurable `--diff-workers` (Default `8`, Range `1..16`)
 
@@ -233,12 +238,12 @@ sequenceDiagram
 
     Caller->>Main: cm-runner find-diff --repo . --base origin/main --out /tmp/out
     Main->>Adapter: version() (pre-flight check)
-    Adapter-->>Main: CmVersion(0.9.0)
+    Adapter-->>Main: CmVersion(0.16.0)
     Main->>Cmd: run(cfg, adapter, emitter)
     Cmd->>Cmd: cfg.validate()
     Cmd->>Git: is_git_repository(cfg.repo) & ref_exists(cfg.repo, cfg.base)
     Git-->>Cmd: True
-    Cmd->>Adapter: run(["find", repo, "-y", "--diff=origin/main", "--diff-workers=8", "--fail-on", "NONE"], cwd=repo, timeout_sec=360.0)
+    Cmd->>Adapter: run(["find", repo, "-y", "--diff=origin/main", "--diff-workers=8", "--fail-on", "NONE"], cwd=repo, timeout_sec=1800.0)
     Adapter->>CM: spawn cm find --diff (env=None)
     CM-->>Adapter: exit 0 (persists findings to state.db)
     Adapter-->>Cmd: CmResult(exit_code=0, stdout=..., stderr=...)
@@ -273,7 +278,7 @@ sequenceDiagram
 JSON line to `stdout`:
 
 ```json
-{"$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json", "version": "2.1.0", "runs": [{"tool": {"driver": {"name": "CodeMender", "version": "0.9.0"}}, "results": [{"ruleId": "CWE-89", "level": "error", "message": {"text": "SQL Injection in user lookup query: User-supplied user_id is interpolated directly into the SQL query string without parameterization."}, "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/db/users.py"}, "region": {"startLine": 42, "endLine": 45}}}]}]}]}
+{"$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json", "version": "2.1.0", "runs": [{"tool": {"driver": {"name": "CodeMender", "version": "0.16.0"}}, "results": [{"ruleId": "CWE-89", "level": "error", "message": {"text": "SQL Injection in user lookup query: User-supplied user_id is interpolated directly into the SQL query string without parameterization."}, "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/db/users.py"}, "region": {"startLine": 42, "endLine": 45}}}]}]}]}
 ```
 
 ## Risks / Trade-offs
