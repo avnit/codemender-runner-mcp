@@ -217,11 +217,11 @@ In Step 1, `Worker` MUST read and validate `tasks/<task_id>/input/manifest.json`
 from `ArtifactCache` and deserialize it into a `RunManifest`:
 
 1. **Supported Commands:** `RunManifest.command` MUST be one of `init`,
-   `find-diff` (normalizing the alias `find` to `find-diff`), `fix`, or
-   `verify`.
+   `find-diff`, `fix`, or `verify`.
 2. **Command-Specific & Optional Field Validation:**
-   - For `find-diff`: `base_ref` (or alias `diff_base`) MUST be a non-empty
-     string specifying the Git base ref or SHA for differential scanning.
+   - For `find-diff`: `base_ref` MUST be a non-empty string specifying the Git
+     base ref or SHA for differential scanning (`None` for `init`, `fix`, and
+     `verify`).
    - For `fix` and `verify`: `finding_key` MUST be a non-empty relative cache
      key (e.g., `findings/finding-001.sarif`) without leading slashes or `..`
      segments.
@@ -232,11 +232,11 @@ from `ArtifactCache` and deserialize it into a `RunManifest`:
      `ArtifactNotFoundError`, `ArtifactIntegrityError`, or
      `InvalidCacheKeyError`, or if `manifest.json` specifies an unknown
      `command`, omits required command-specific fields, or provides an
-     out-of-range field (`ValueError`), `Worker` MUST log the validation error
-     to `stderr` and `work_dir / "out" / "runner.log"`, publish an
-     `ExecutionReceipt` with `status="FAILURE"`, `exit_code=2`, and a non-empty
-     `error` string to `tasks/<task_id>/output/receipt.json` (along with
-     `tasks/<task_id>/output/runner.log`), and return exit code `2`.
+     out-of-range field (`ValidationError` / `ValueError`), `Worker` MUST log
+     the validation error to `stderr` and `work_dir / "out" / "runner.log"`,
+     publish an `ExecutionReceipt` with `status="FAILURE"`, `exit_code=2`, and
+     a non-empty `error` string to `tasks/<task_id>/output/receipt.json` (along
+     with `tasks/<task_id>/output/runner.log`), and return exit code `2`.
    - **Exit Code `3` (`EXIT_EXECUTION_FAILURE`):** If reading `manifest.json`
      raises `CacheConfigurationError`, `CachePermissionError`, or
      `CacheTransientError`, `Worker` MUST log the error to `stderr` and

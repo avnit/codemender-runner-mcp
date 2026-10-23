@@ -8,7 +8,10 @@ name = "codemender-launcher"
 version = "0.1.0"
 description = "CodeMender sandbox execution backends and pipeline coordinator"
 requires-python = ">=3.11"
-dependencies = ["codemender"]
+dependencies = [
+    "attrs>=23.1.0",
+    "codemender",
+]
 
 [project.optional-dependencies]
 cloudrun = [

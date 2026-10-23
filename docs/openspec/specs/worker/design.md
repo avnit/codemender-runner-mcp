@@ -400,42 +400,30 @@ Section 4:
 
 ### 1. `RunManifest` (`tasks/<task_id>/input/manifest.json`)
 
-`RunManifest` is a frozen dataclass defined in `launcher.cache`
-(`SPEC-ARTIFACT-CACHE`, and re-exported by `launcher.worker`) representing the
-task input parameters staged by `Launcher` and consumed by `Worker.run_task`.
+`RunManifest` is a frozen `attrs` class (`@attrs.define(frozen=True)`) defined
+in `launcher.cache` (`SPEC-ARTIFACT-CACHE`) representing the task input
+parameters staged by `Launcher` and consumed by `Worker.run_task`.
 
 | Field | Python Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| `command` | `str` | Yes | Canonical `cm-runner` subcommand: `"init"`, `"find-diff"` (alias `"find"` is normalized to `"find-diff"`), `"fix"`, or `"verify"`. |
-| `task_id` | `str` | Yes (defaults to `run_task` `task_id` if omitted in JSON) | Logical task identifier (e.g., `"find"`, `"fix-finding-001"`). Must not match `""`, `"."`, `".."`, or contain `/` or `\`. |
-| `base_ref` | `Optional[str]` | Required when `command == "find-diff"` | Target Git base ref or commit SHA passed as `--base <base_ref>` to `cm-runner find-diff`. Also accepts JSON alias `"diff_base"`. |
-| `finding_key` | `Optional[str]` | Required when `command in ("fix", "verify")` | Relative `ArtifactCache` key for the single-finding SARIF input (e.g., `"findings/finding-001.sarif"`). Must be a safe relative key without `..` or leading `/`. |
-| `diff_workers` | `Optional[int]` | No | Optional integer in `1..16` ([SPEC-FIND-DIFF](../find-diff/spec.md) `REQ-0002`) passed as `--diff-workers <N>` to `cm-runner find-diff`. |
-| `log_level` | `Optional[str]` | No | Optional log verbosity (`"debug"`, `"info"`, `"warning"`, `"error"`) passed as top-level `--log-level <level>` to `cm-runner`. |
-| `extra_args` | `Tuple[str, ...]` | No | Optional sequence of additional CLI flags appended to the `cm-runner` invocation (default: `()`). |
+| `command` | `str` | Yes | Canonical `cm-runner` subcommand: `"init"`, `"find-diff"`, `"fix"`, or `"verify"`. |
+| `task_id` | `str` | Yes | Logical task identifier (e.g., `"find"`, `"fix-finding-001"`). Must be a single safe path segment (`""`, `"."`, `".."`, `/`, and `\` rejected). |
+| `base_ref` | `str \| None` | Required when `command == "find-diff"` | Target Git base ref or commit SHA passed as `--base <base_ref>` to `cm-runner find-diff` (`None` for `"init"`, `"fix"`, and `"verify"`). |
+| `finding_key` | `str \| None` | Required when `command in ("fix", "verify")` | Relative `ArtifactCache` key for the single-finding SARIF input (e.g., `"findings/finding-001.sarif"`). Must be a safe relative key without `..` or leading `/`. |
+| `diff_workers` | `int \| None` | No | Optional integer in `1..16` ([SPEC-FIND-DIFF](../find-diff/spec.md) `REQ-0002`) passed as `--diff-workers <N>` to `cm-runner find-diff`. |
+| `log_level` | `str \| None` | No | Optional log verbosity (`"debug"`, `"info"`, `"warning"`, `"error"`) passed as top-level `--log-level <level>` to `cm-runner`. |
+| `extra_args` | `tuple[str, ...]` | No | Optional sequence of additional CLI flags appended to the `cm-runner` invocation (default: `()`). |
 
-#### `RunManifest` Serialization Semantics (`from_dict` / `to_dict`)
+#### `RunManifest` Serialization Semantics (`from_dict` / `to_dict`, `from_json` / `to_json`)
 
-- `RunManifest.from_dict(data: Mapping[str, Any], default_task_id: str = "")`:
-  - Validates that `data` is a mapping.
-  - Normalizes `command = "find-diff"` when `data["command"] == "find"`, and
-    raises `ValueError` if `command` is missing or not in
-    `{"init", "find-diff", "fix", "verify"}`.
-  - Resolves `task_id` from `data.get("task_id") or default_task_id` and
-    validates that it is a single safe path segment.
-  - Resolves `base_ref` from `data.get("base_ref") or data.get("diff_base")`.
-    Raises `ValueError` if `command == "find-diff"` and `base_ref` is missing or
-    blank.
-  - Resolves `finding_key` from `data.get("finding_key")`. Raises `ValueError`
-    if `command in ("fix", "verify")` and `finding_key` is missing, blank,
-    starts with `/`, or contains `..` path segments.
-  - Coerces `diff_workers` to `int` when provided (raising `ValueError` if
-    non-integer or outside `1..16` per [SPEC-FIND-DIFF](../find-diff/spec.md)
-    `REQ-0002`) and `extra_args` to `tuple[str, ...]`.
-- `RunManifest.to_dict() -> dict[str, Any]`:
-  - Returns a JSON-serializable dictionary containing `command`, `task_id`, and
-    all non-`None` optional fields (`base_ref`, `finding_key`, `diff_workers`,
-    `log_level`, and `extra_args` as a list when non-empty).
+- `RunManifest.from_dict(data: Mapping[str, Any]) -> RunManifest` &
+  `RunManifest.from_json(raw_json: str | bytes) -> RunManifest`:
+  - Validates that `data` is a mapping and delegates directly to `RunManifest(**data)`
+    so `attrs` field converters and validators enforce all invariants in one
+    place (raising `ValidationError` on invalid fields).
+- `RunManifest.to_dict() -> dict[str, Any]` & `RunManifest.to_json() -> str`:
+  - Serializes `command`, `task_id`, and all non-`None` optional fields
+    (`base_ref`, `finding_key`, `diff_workers`, `log_level`, and `extra_args`).
 
 #### Example `manifest.json` (`fix` Task)
 
@@ -520,30 +508,27 @@ codes:
 
 ## Security, Signal Handling & Failure-Spill Details
 
-### Tar-Slip Security Validation (`unpack_tar_gz_preserving_permissions`)
+### Tar-Slip Security Validation (`launcher.cache.unpack_tar_gz_preserving_permissions`)
 
 Before extracting any file from `shared/code.tar.gz`,
-`unpack_tar_gz_preserving_permissions(archive_path: Path, dest_dir: Path)`
-resolves `abs_dest = os.path.realpath(dest_dir)` and iterates over all members
-returned by `tar.getmembers()`:
+`unpack_tar_gz_preserving_permissions(archive_path: Path, dest_dir: Path)` in
+`launcher.cache.archive` resolves `abs_dest = dest_dir.resolve()` and validates
+all members returned by `tar.getmembers()` prior to extraction:
 1. **Absolute Path Check:** Rejects any member where
-   `os.path.isabs(member.name)` is `True`.
-2. **Path Traversal Check:** Splits `member.name` on `/` and `os.sep` and
-   rejects any member containing `".."` or whose resolved target path
-   `target_path = os.path.realpath(os.path.join(abs_dest, member.name))` does
-   not satisfy `os.path.commonpath([abs_dest, target_path]) == abs_dest`.
+   `PurePosixPath(member.name).is_absolute()` is `True` or `member.name`
+   contains backslashes.
+2. **Path Traversal Check:** Rejects any member containing `".."` in
+   `PurePosixPath(member.name).parts` or whose resolved target path
+   `target_path.resolve()` is not relative to `abs_dest`
+   (`target_path.is_relative_to(abs_dest)`).
 3. **Symlink & Hardlink Escape Check:** For any member where `member.issym()` or
-   `member.islnk()` is `True`, rejects the member if
-   `os.path.isabs(member.linkname)`, if `".."` escapes the destination root, or
-   if the resolved link target
-   `os.path.realpath(os.path.join(link_base, member.linkname))` (where
-   `link_base` is `os.path.dirname(target_path)` for symlinks and `abs_dest` for
-   hardlinks) does not satisfy
-   `os.path.commonpath([abs_dest, link_target]) == abs_dest`.
+   `member.islnk()` is `True`, rejects the member if `member.linkname` is
+   absolute, traverses another archive link, forms a cycle, or resolves outside
+   `abs_dest`.
 4. **Device / Special File Rejection:** Rejects character devices, block
    devices, and FIFOs (`member.ischr()`, `member.isblk()`, `member.isfifo()`).
-5. **Permission Restoration:** Extracts members and applies
-   `os.chmod(extracted_path, member.mode & 0o777)` on regular files and
+5. **Permission Restoration:** Extracts members with PEP 706 `filter="tar"` and
+   applies `target_path.chmod(member.mode & 0o777)` on regular files and
    directories (skipping symlinks).
 
 ### Child Process Group Termination & Preemption Handling
