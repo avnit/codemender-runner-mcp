@@ -1,6 +1,6 @@
 # ==============================================================================
 # Cloud Run Jobs - Container Bootstrapper Layer
-# Path: cloud-run-jobs/Dockerfile
+# Path: docker/cloudrun.Dockerfile
 # Base: Locally built runner image from docker/runner.Dockerfile (make build-runner; configurable via --build-arg)
 # ==============================================================================
 ARG BASE_IMAGE=codemender-runner:local

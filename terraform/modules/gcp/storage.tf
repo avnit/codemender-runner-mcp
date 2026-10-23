@@ -62,11 +62,14 @@ locals {
 
 # Grant Storage Object Viewer to both legacy & compute default Cloud Build service accounts (for source tarballs)
 resource "google_project_iam_member" "cloudbuild_storage_viewer" {
-  for_each   = local.cloudbuild_service_accounts
-  project    = var.project_id
-  role       = "roles/storage.objectViewer"
-  member     = each.value
-  depends_on = [google_project_service.enabled_services["iam.googleapis.com"]]
+  for_each = local.cloudbuild_service_accounts
+  project  = var.project_id
+  role     = "roles/storage.objectViewer"
+  member   = each.value
+  depends_on = [
+    google_project_service.enabled_services["iam.googleapis.com"],
+    google_project_service.enabled_services["cloudbuild.googleapis.com"],
+  ]
 }
 
 # Grant Artifact Registry Writer to Cloud Build SAs for container image pushes
@@ -77,13 +80,20 @@ resource "google_artifact_registry_repository_iam_member" "cloudbuild_ar_writer"
   repository = google_artifact_registry_repository.docker_repo.name
   role       = "roles/artifactregistry.writer"
   member     = each.value
+  depends_on = [
+    google_project_service.enabled_services["iam.googleapis.com"],
+    google_project_service.enabled_services["cloudbuild.googleapis.com"],
+  ]
 }
 
 # Grant Cloud Logging Writer to Cloud Build SAs for build log execution
 resource "google_project_iam_member" "cloudbuild_log_writer" {
-  for_each   = local.cloudbuild_service_accounts
-  project    = var.project_id
-  role       = "roles/logging.logWriter"
-  member     = each.value
-  depends_on = [google_project_service.enabled_services["iam.googleapis.com"]]
+  for_each = local.cloudbuild_service_accounts
+  project  = var.project_id
+  role     = "roles/logging.logWriter"
+  member   = each.value
+  depends_on = [
+    google_project_service.enabled_services["iam.googleapis.com"],
+    google_project_service.enabled_services["cloudbuild.googleapis.com"],
+  ]
 }

@@ -94,3 +94,9 @@ variable "vpc_connector_machine_type" {
   description = "Machine type for the Serverless VPC Access Connector."
   default     = "e2-micro"
 }
+
+variable "auto_build_image" {
+  type        = bool
+  description = "Whether Terraform should automatically build and push the Cloud Run Job container image via Cloud Build (cloudbuild.yaml) before creating or updating the Cloud Run Job."
+  default     = true
+}

@@ -32,6 +32,7 @@ exactly how the contract has been broken before.
 """
 
 import ast
+import hashlib
 from io import StringIO
 import json
 import os
@@ -835,6 +836,154 @@ class TestPackagingAndDockerContract(unittest.TestCase):
         copy_pkg_idx,
         "cm binary installation must precede COPY packages/codemender to preserve layer caching",
     )
+
+  def test_cloudbuild_yaml_and_makefile_targets(self):
+    """Root cloudbuild.yaml and Makefile define two-stage Cloud Build and deploy-cloudrun/build-cloudrun targets."""
+    cloudbuild_path = _REPO_ROOT / "cloudbuild.yaml"
+    self.assertTrue(cloudbuild_path.is_file(), f"Missing {cloudbuild_path}")
+    cb_content = cloudbuild_path.read_text(encoding="utf-8")
+    self.assertIn("docker/runner.Dockerfile", cb_content)
+    self.assertIn("docker/cloudrun.Dockerfile", cb_content)
+    self.assertIn("BASE_IMAGE=codemender-runner:base", cb_content)
+    self.assertIn("--all-tags", cb_content)
+    self.assertNotIn("substitutions:", cb_content)
+    self.assertIn(
+        "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/codemender-runner:${_IMAGE_TAG}",
+        cb_content,
+    )
+    self.assertIn(
+        "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/codemender-runner:latest",
+        cb_content,
+    )
+
+    makefile_path = _REPO_ROOT / "Makefile"
+    self.assertTrue(makefile_path.is_file(), f"Missing {makefile_path}")
+
+    clean_env = os.environ.copy()
+    for var in (
+        "GCP_PROJECT_ID",
+        "GCP_REGION",
+        "RESOURCE_PREFIX",
+        "CLOUDRUN_JOB",
+        "CLOUDRUN_WORKER_JOB",
+        "IMAGE_TAG",
+        "RUNNER_IMAGE",
+        "CLOUDRUN_IMAGE",
+        "GITLAB_IMAGE",
+        "TFVARS_FILE",
+    ):
+      clean_env.pop(var, None)
+
+    static_files = [
+        "docker/runner.Dockerfile",
+        "docker/cloudrun.Dockerfile",
+        "cloud-run-jobs/entrypoint.py",
+        "cloudbuild.yaml",
+    ]
+    pkg_dir = _REPO_ROOT / "packages" / "codemender"
+    codemender_files = sorted(
+        rel
+        for p in pkg_dir.rglob("*")
+        if p.is_file()
+        for rel in [p.relative_to(pkg_dir).as_posix()]
+        if "__pycache__/" not in rel
+        and ".egg-info/" not in rel
+        and not rel.startswith("build/")
+        and "/testdata/" not in rel
+        and not p.name.endswith(".pyc")
+        and not p.name.startswith("test_")
+        and not p.name.endswith("_test.py")
+    )
+    sha256_file = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+    expected_hash = hashlib.sha256(
+        "".join([
+            *(sha256_file(_REPO_ROOT / f) for f in static_files),
+            *(f"{f}:{sha256_file(pkg_dir / f)}" for f in codemender_files),
+        ]).encode("utf-8")
+    ).hexdigest()[:12]
+
+    with tempfile.TemporaryDirectory() as tmp:
+      tfvars = Path(tmp) / "terraform.tfvars"
+      tfvars.write_text(
+          '# comment\ngcp_project_id = "my-gcp-proj" # inline\n'
+          'gcp_region = "us-west1"\n'
+          '# resource_prefix = "ignored"\n'
+          'resource_prefix = "custom-prefix"\n',
+          encoding="utf-8",
+      )
+      res_deploy = subprocess.run(
+          ["make", "-n", "deploy-cloudrun", f"TFVARS_FILE={tfvars}"],
+          cwd=str(_REPO_ROOT),
+          env=clean_env,
+          capture_output=True,
+          text=True,
+          check=False,
+      )
+      self.assertEqual(res_deploy.returncode, 0, msg=res_deploy.stderr)
+      self.assertIn(
+          f"gcloud builds submit --config=cloudbuild.yaml --project=my-gcp-proj --substitutions=_REGION=us-west1,_REPO_NAME=custom-prefix-runner,_IMAGE_TAG={expected_hash} .",
+          res_deploy.stdout,
+      )
+      self.assertIn(
+          f"gcloud run jobs update custom-prefix-runner --image us-west1-docker.pkg.dev/my-gcp-proj/custom-prefix-runner/codemender-runner:{expected_hash}",
+          res_deploy.stdout,
+      )
+      self.assertIn(
+          f"gcloud run jobs update custom-prefix-worker --image us-west1-docker.pkg.dev/my-gcp-proj/custom-prefix-runner/codemender-runner:{expected_hash}",
+          res_deploy.stdout,
+      )
+
+      tfvars_missing_region = Path(tmp) / "missing_region.tfvars"
+      tfvars_missing_region.write_text(
+          'gcp_project_id = "my-gcp-proj"\n',
+          encoding="utf-8",
+      )
+      res_missing_region = subprocess.run(
+          [
+              "make",
+              "check-gcp-project",
+              f"TFVARS_FILE={tfvars_missing_region}",
+          ],
+          cwd=str(_REPO_ROOT),
+          env=clean_env,
+          capture_output=True,
+          text=True,
+          check=False,
+      )
+      self.assertNotEqual(res_missing_region.returncode, 0)
+      self.assertIn("Error: GCP_REGION is not set", res_missing_region.stderr)
+
+      res_build = subprocess.run(
+          ["make", "-n", "build-cloudrun"],
+          cwd=str(_REPO_ROOT),
+          env=clean_env,
+          capture_output=True,
+          text=True,
+          check=False,
+      )
+      self.assertEqual(res_build.returncode, 0, msg=res_build.stderr)
+      self.assertIn(
+          "docker build -f docker/runner.Dockerfile -t codemender-runner:local .",
+          res_build.stdout,
+      )
+      self.assertIn(
+          "docker build -f docker/cloudrun.Dockerfile --build-arg BASE_IMAGE=codemender-runner:local -t codemender-cloudrun:local .",
+          res_build.stdout,
+      )
+
+      res_gitlab = subprocess.run(
+          ["make", "-n", "build-gitlab"],
+          cwd=str(_REPO_ROOT),
+          env=clean_env,
+          capture_output=True,
+          text=True,
+          check=False,
+      )
+      self.assertEqual(res_gitlab.returncode, 0, msg=res_gitlab.stderr)
+      self.assertIn(
+          "docker build -f docker/gitlab.Dockerfile -t codemender-gitlab:local .",
+          res_gitlab.stdout,
+      )
 
 
 if __name__ == "__main__":

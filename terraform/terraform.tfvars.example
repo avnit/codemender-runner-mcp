@@ -42,20 +42,20 @@ gcp_wif_provider_id = "codemender-wif-provider"
 # ==============================================================================
 # Controls the architectural execution mode for CodeMender scans:
 #
-# - "local": (Default) Runs cm-runner directly on the GitHub Actions runner host
-#   (LocalDockerLauncher). The WIF Service Account is granted roles/aiplatform.user
-#   to interact with Vertex AI Gemini models directly from CI runner. No Cloud Run
-#   or GCS transit infrastructure is provisioned.
-#
-# - "cloud_run": Automatically provisions terraform/modules/gcp (Cloud Run Jobs,
+# - "cloud_run": (Default) Automatically provisions terraform/modules/gcp (Cloud Run Jobs,
 #   GCS transit/reports bucket, and runtime service accounts) and seamlessly wires
 #   them into terraform/modules/wif without manual wiring. GitHub Actions acts as
 #   an orchestrator staging repository snapshots to GCS and triggering remote Cloud
 #   Run Job execution. The WIF Service Account is granted roles/run.developer,
 #   roles/storage.objectUser on the transit bucket, and roles/iam.serviceAccountUser
 #   on Cloud Run runtime SAs (Vertex AI permissions reside solely on Cloud Run SAs).
+#
+# - "local": Runs cm-runner directly on the GitHub Actions runner host
+#   (LocalDockerLauncher). The WIF Service Account is granted roles/aiplatform.user
+#   to interact with Vertex AI Gemini models directly from CI runner. No Cloud Run
+#   or GCS transit infrastructure is provisioned.
 
-execution_mode = "local" # or "cloud_run"
+execution_mode = "cloud_run" # or "local"
 
 # Optional Cloud Run Infrastructure Settings (effective when execution_mode = "cloud_run"):
 # The root module automatically wires module.gcp outputs into module.wif. Uncomment
@@ -80,6 +80,11 @@ execution_mode = "local" # or "cloud_run"
 # Task timeout allocated to Cloud Run worker tasks (e.g., "600s", "1800s", "3600s").
 # Default: "3600s"
 # runner_timeout = "3600s"
+
+# Whether Terraform should automatically build and push the Cloud Run Job container
+# image to Artifact Registry via Cloud Build (cloudbuild.yaml) during terraform apply.
+# Default: true
+# auto_build_image = true
 
 # Whether to provision a dedicated VPC network, subnets, and Cloud NAT gateway.
 # Default: false

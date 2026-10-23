@@ -75,11 +75,14 @@ resource "google_project_iam_member" "worker_aiplatform_user" {
 
 # Grant Cloud Run Developer to Cloud Build SAs so they can update the Cloud Run Job image
 resource "google_project_iam_member" "cloudbuild_run_developer" {
-  for_each   = local.cloudbuild_service_accounts
-  project    = var.project_id
-  role       = "roles/run.developer"
-  member     = each.value
-  depends_on = [google_project_service.enabled_services["iam.googleapis.com"]]
+  for_each = local.cloudbuild_service_accounts
+  project  = var.project_id
+  role     = "roles/run.developer"
+  member   = each.value
+  depends_on = [
+    google_project_service.enabled_services["iam.googleapis.com"],
+    google_project_service.enabled_services["cloudbuild.googleapis.com"],
+  ]
 }
 
 # Grant Service Account User to Cloud Build SAs on the Runner SA

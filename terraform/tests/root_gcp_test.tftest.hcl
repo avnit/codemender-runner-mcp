@@ -84,5 +84,25 @@ run "cloud_run_mode_composition" {
     condition     = var.runner_timeout == "3600s"
     error_message = "Expected default runner_timeout in root module to be '3600s'."
   }
+
+  assert {
+    condition     = output.cloud_run_artifact_registry_repository == "us-central1-docker.pkg.dev/test-codemender-project/codemender-runner"
+    error_message = "Expected cloud_run_artifact_registry_repository output to match the Artifact Registry repository path."
+  }
+
+  assert {
+    condition     = output.cloud_run_image_uri != null && startswith(output.cloud_run_image_uri, "us-central1-docker.pkg.dev/test-codemender-project/codemender-runner/codemender-runner:")
+    error_message = "Expected cloud_run_image_uri output to start with the Artifact Registry image path."
+  }
+
+  assert {
+    condition     = output.cloud_run_image_uri != "us-docker.pkg.dev/cloudrun/container/job:latest"
+    error_message = "Expected cloud_run_image_uri not to use the placeholder container image."
+  }
+
+  assert {
+    condition     = output.next_step_cloud_build_command != null && strcontains(output.next_step_cloud_build_command, "gcloud builds submit --config=cloudbuild.yaml --project=test-codemender-project")
+    error_message = "Expected next_step_cloud_build_command output to contain the gcloud builds submit command."
+  }
 }
 

@@ -25,11 +25,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH="/opt/codemender/venv/bin:/usr/local/go/bin:${PATH}"
 
 # 1. Consolidated multi-toolchain install (Python 3.11, Node.js 22, Java 17, and base build tools)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl gnupg software-properties-common \
-    && add-apt-repository ppa:deadsnakes/ppa -y \
+RUN apt-get -o Acquire::Retries=5 update && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+        ca-certificates curl gnupg \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
         build-essential dirmngr git gzip jq psmisc tar unzip \
         python3.11 python3.11-dev python3.11-venv python3-pip python-is-python3 \
         nodejs \

@@ -12,17 +12,82 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Governing: docs/openspec/specs/wif/spec.md#req-0005, docs/openspec/specs/wif/spec.md#req-0007
+
+locals {
+  repo_root = "${path.module}/../../.."
+  codemender_source_files = sort([
+    for f in fileset("${local.repo_root}/packages/codemender", "**") :
+    f if !strcontains(f, "__pycache__/") &&
+    !strcontains(f, ".egg-info/") &&
+    !startswith(f, "build/") &&
+    !strcontains(f, "/testdata/") &&
+    !endswith(f, ".pyc") &&
+    !startswith(basename(f), "test_") &&
+    !endswith(basename(f), "_test.py")
+  ])
+  runner_image_hash = substr(
+    sha256(
+      join("", concat(
+        [
+          filesha256("${local.repo_root}/docker/runner.Dockerfile"),
+          filesha256("${local.repo_root}/docker/cloudrun.Dockerfile"),
+          filesha256("${local.repo_root}/cloud-run-jobs/entrypoint.py"),
+          filesha256("${local.repo_root}/cloudbuild.yaml"),
+        ],
+        [
+          for f in local.codemender_source_files :
+          "${f}:${filesha256("${local.repo_root}/packages/codemender/${f}")}"
+        ]
+      ))
+    ),
+    0,
+    12
+  )
+  runner_image_uri = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.docker_repo.repository_id}/codemender-runner:${local.runner_image_hash}"
+}
+
 resource "time_sleep" "wait_for_apis_and_iam" {
   create_duration = "60s"
 
   depends_on = [
     google_project_service.enabled_services,
+    google_artifact_registry_repository.docker_repo,
+    google_artifact_registry_repository_iam_member.cloudbuild_ar_writer,
+    google_project_iam_member.cloudbuild_storage_viewer,
+    google_project_iam_member.cloudbuild_log_writer,
     google_storage_bucket_iam_member.runner_reports_admin,
     google_project_iam_member.service_accounts_log_writer,
     google_project_iam_member.runner_aiplatform_user,
     google_secret_manager_secret_version.github_app_token_initial,
     google_secret_manager_secret_iam_member.worker_secret_accessor,
     google_project_iam_member.worker_aiplatform_user,
+  ]
+}
+
+# Cloud Run validates that the container image exists in Artifact Registry at
+# Job creation time. Building and pushing the content-hashed image here in the
+# dependency graph (after Artifact Registry + Cloud Build IAM, before the Cloud
+# Run Jobs) avoids dummy placeholder images and `ignore_changes` drift masking.
+resource "terraform_data" "cloud_build_runner_image" {
+  count = var.auto_build_image ? 1 : 0
+
+  triggers_replace = [
+    google_artifact_registry_repository.docker_repo.id,
+    local.runner_image_hash,
+  ]
+
+  provisioner "local-exec" {
+    working_dir = local.repo_root
+    command     = "gcloud artifacts docker images describe ${local.runner_image_uri} --project=${var.project_id} >/dev/null 2>&1 || gcloud builds submit --config=cloudbuild.yaml --project=${var.project_id} --substitutions=_REGION=${var.region},_REPO_NAME=${google_artifact_registry_repository.docker_repo.repository_id},_IMAGE_TAG=${local.runner_image_hash} ."
+  }
+
+  depends_on = [
+    time_sleep.wait_for_apis_and_iam,
+    google_artifact_registry_repository.docker_repo,
+    google_artifact_registry_repository_iam_member.cloudbuild_ar_writer,
+    google_project_iam_member.cloudbuild_storage_viewer,
+    google_project_iam_member.cloudbuild_log_writer,
   ]
 }
 
@@ -40,9 +105,7 @@ resource "google_cloud_run_v2_job" "runner" {
       service_account       = google_service_account.runner_sa.email
 
       containers {
-        # Use a placeholder image initially so Terraform can provision the job before Cloud Build runs.
-        # The actual image is deployed out-of-band via Cloud Build.
-        image = "us-docker.pkg.dev/cloudrun/container/job:latest"
+        image = local.runner_image_uri
 
         resources {
           limits = {
@@ -67,14 +130,9 @@ resource "google_cloud_run_v2_job" "runner" {
     }
   }
 
-  lifecycle {
-    ignore_changes = [
-      template[0].template[0].containers[0].image
-    ]
-  }
-
   depends_on = [
-    time_sleep.wait_for_apis_and_iam
+    time_sleep.wait_for_apis_and_iam,
+    terraform_data.cloud_build_runner_image,
   ]
 }
 
@@ -89,9 +147,7 @@ resource "google_cloud_run_v2_job" "worker" {
       service_account = google_service_account.worker_sa.email
 
       containers {
-        # Use a placeholder image initially so Terraform can provision the job before Cloud Build runs.
-        # The actual image is deployed out-of-band via Cloud Build.
-        image = "us-docker.pkg.dev/cloudrun/container/job:latest"
+        image = local.runner_image_uri
 
         resources {
           limits = {
@@ -121,14 +177,9 @@ resource "google_cloud_run_v2_job" "worker" {
     }
   }
 
-  lifecycle {
-    ignore_changes = [
-      template[0].template[0].containers[0].image
-    ]
-  }
-
   depends_on = [
     time_sleep.wait_for_apis_and_iam,
+    terraform_data.cloud_build_runner_image,
     google_secret_manager_secret_version.github_app_token_initial,
     google_secret_manager_secret_iam_member.worker_secret_accessor,
   ]

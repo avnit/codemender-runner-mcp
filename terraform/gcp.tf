@@ -31,6 +31,7 @@ module "gcp" {
   vpc_connector_min_instances = var.vpc_connector_min_instances
   vpc_connector_max_instances = var.vpc_connector_max_instances
   vpc_connector_machine_type  = var.vpc_connector_machine_type
+  auto_build_image            = var.auto_build_image
 }
 
 output "cloud_run_reports_bucket_name" {
@@ -41,4 +42,19 @@ output "cloud_run_reports_bucket_name" {
 output "cloud_run_job_name" {
   description = "Cloud Run Job name when execution_mode is 'cloud_run'."
   value       = var.execution_mode == "cloud_run" ? module.gcp[0].runner_job_name : null
+}
+
+output "cloud_run_artifact_registry_repository" {
+  description = "Artifact Registry Docker repository path when execution_mode is 'cloud_run'."
+  value       = var.execution_mode == "cloud_run" ? module.gcp[0].cloud_run_artifact_registry_repository : null
+}
+
+output "cloud_run_image_uri" {
+  description = "Deterministic Artifact Registry image URI for the Cloud Run Job when execution_mode is 'cloud_run'."
+  value       = var.execution_mode == "cloud_run" ? module.gcp[0].cloud_run_image_uri : null
+}
+
+output "next_step_cloud_build_command" {
+  description = "Standalone Cloud Build command to manually rebuild and push the Cloud Run Job container image when execution_mode is 'cloud_run'."
+  value       = var.execution_mode == "cloud_run" ? module.gcp[0].next_step_cloud_build_command : null
 }

@@ -1,0 +1,47 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Governing: docs/openspec/specs/wif/spec.md#req-0005
+
+steps:
+  # Step 1: Build Stage 1 base runner image from docker/runner.Dockerfile
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'docker/runner.Dockerfile'
+      - '-t'
+      - 'codemender-runner:base'
+      - '.'
+
+  # Step 2: Build Stage 2 Cloud Run bootstrapper image from docker/cloudrun.Dockerfile
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'docker/cloudrun.Dockerfile'
+      - '--build-arg'
+      - 'BASE_IMAGE=codemender-runner:base'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/codemender-runner:${_IMAGE_TAG}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/codemender-runner:latest'
+      - '.'
+
+  # Step 3: Push all tags to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/codemender-runner'

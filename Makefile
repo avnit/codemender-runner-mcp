@@ -1,8 +1,22 @@
-.PHONY: test test-cov build-runner build-cloudrun build-gitlab init-fork
+.PHONY: test test-cov build-runner build-cloudrun build-gitlab check-gcp-project deploy-cloudrun init-fork
 
 RUNNER_IMAGE ?= codemender-runner:local
 CLOUDRUN_IMAGE ?= codemender-cloudrun:local
 GITLAB_IMAGE ?= codemender-gitlab:local
+
+TFVARS_FILE ?= terraform/terraform.tfvars
+parse_tfvar = $(strip $(shell [ -f "$(TFVARS_FILE)" ] && awk -F= '/^[[:space:]]*$(1)[[:space:]]*=/ { val = $$2; sub(/[[:space:]]*\043.*/, "", val); gsub(/^[[:space:]"'\'']+|[[:space:]"'\'']+$$/, "", val); print val }' "$(TFVARS_FILE)" | tail -n 1))
+
+GCP_PROJECT_ID ?= $(call parse_tfvar,gcp_project_id)
+GCP_REGION ?= $(call parse_tfvar,gcp_region)
+RESOURCE_PREFIX ?= $(or $(call parse_tfvar,resource_prefix),codemender)
+
+IMAGE_TAG ?= $(shell python3 -c 'import hashlib, pathlib; r=pathlib.Path("."); s=["docker/runner.Dockerfile","docker/cloudrun.Dockerfile","cloud-run-jobs/entrypoint.py","cloudbuild.yaml"]; p=r/"packages/codemender"; fs=sorted(f for x in p.rglob("*") if x.is_file() for f in [x.relative_to(p).as_posix()] if "__pycache__/" not in f and ".egg-info/" not in f and not f.startswith("build/") and "/testdata/" not in f and not x.name.endswith(".pyc") and not x.name.startswith("test_") and not x.name.endswith("_test.py")); h=lambda x: hashlib.sha256(x.read_bytes()).hexdigest(); print(hashlib.sha256("".join([*(h(r/f) for f in s),*(f"{f}:{h(p/f)}" for f in fs)]).encode()).hexdigest()[:12])')
+AR_HOST = $(GCP_REGION)-docker.pkg.dev
+AR_REPO = $(RESOURCE_PREFIX)-runner
+CLOUDRUN_JOB ?= $(RESOURCE_PREFIX)-runner
+CLOUDRUN_WORKER_JOB ?= $(RESOURCE_PREFIX)-worker
+REMOTE_IMAGE_SHA = $(AR_HOST)/$(GCP_PROJECT_ID)/$(AR_REPO)/codemender-runner:$(IMAGE_TAG)
 
 empty :=
 space := $(empty) $(empty)
@@ -20,11 +34,27 @@ test-cov:
 build-runner:
 	docker build -f docker/runner.Dockerfile -t $(RUNNER_IMAGE) .
 
-build-cloudrun:
-	docker build -f docker/cloudrun.Dockerfile -t $(CLOUDRUN_IMAGE) .
+build-cloudrun: build-runner
+	docker build -f docker/cloudrun.Dockerfile --build-arg BASE_IMAGE=$(RUNNER_IMAGE) -t $(CLOUDRUN_IMAGE) .
 
 build-gitlab:
 	docker build -f docker/gitlab.Dockerfile -t $(GITLAB_IMAGE) .
+
+check-gcp-project:
+	@if [ -z "$(GCP_PROJECT_ID)" ] || [ "$(GCP_PROJECT_ID)" = "TODO" ]; then \
+		echo "Error: GCP_PROJECT_ID is not set. Configure gcp_project_id in $(TFVARS_FILE) or pass GCP_PROJECT_ID=<project-id>." >&2; \
+		exit 1; \
+	fi
+	@if [ -z "$(GCP_REGION)" ] || [ "$(GCP_REGION)" = "TODO" ]; then \
+		echo "Error: GCP_REGION is not set. Configure gcp_region in $(TFVARS_FILE) or pass GCP_REGION=<region>." >&2; \
+		exit 1; \
+	fi
+
+# Governing: docs/openspec/specs/wif/spec.md#req-0005, docs/openspec/specs/wif/spec.md#req-0007
+deploy-cloudrun: check-gcp-project
+	gcloud builds submit --config=cloudbuild.yaml --project=$(GCP_PROJECT_ID) --substitutions=_REGION=$(GCP_REGION),_REPO_NAME=$(AR_REPO),_IMAGE_TAG=$(IMAGE_TAG) .
+	gcloud run jobs update $(CLOUDRUN_JOB) --image $(REMOTE_IMAGE_SHA) --region $(GCP_REGION) --project $(GCP_PROJECT_ID)
+	gcloud run jobs update $(CLOUDRUN_WORKER_JOB) --image $(REMOTE_IMAGE_SHA) --region $(GCP_REGION) --project $(GCP_PROJECT_ID)
 
 # Governing: docs/openspec/specs/distribute/spec.md#req-0004, SPEC-DIST
 init-fork:

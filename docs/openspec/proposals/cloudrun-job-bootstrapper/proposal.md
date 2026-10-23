@@ -41,7 +41,7 @@ While `vcs-cloudrun-comms` defines the external client-to-cloud communications c
 
 - **Proposed Code Changes & Paths:**
   - `cloud-run-jobs/entrypoint.py`: Introduce native Python container bootstrapper handling GCS transit, manifest loading, signal trapping, and receipt generation.
-  - `cloud-run-jobs/Dockerfile`: Update container layout (`/workspace`, `/workspace/output`, `/workspace/repo`, `/workspace/inputs`) and set `ENTRYPOINT ["python3", "/workspace/entrypoint.py"]`.
+  - `docker/cloudrun.Dockerfile`: Update container layout (`/workspace`, `/workspace/output`, `/workspace/repo`, `/workspace/inputs`) and set `ENTRYPOINT ["python3", "/workspace/entrypoint.py"]`.
   - `cloud-run-jobs/tests/test_entrypoint.py`: Introduce unit and integration test suite validating container bootstrapper functions, manifest parameter resolution, archive extraction, and preemption traps.
   - `codemender-runner/tests/dummy_cm.py`: Enhance mock CLI backend for end-to-end local testing.
 - **Dependencies:**
