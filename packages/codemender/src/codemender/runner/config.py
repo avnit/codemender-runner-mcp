@@ -14,7 +14,6 @@
 
 """Configuration injection and environment security module for CodeMender Agent."""
 
-import json
 import logging
 import os
 import sys
@@ -73,56 +72,6 @@ class OrchestratorConfig:
         sandbox_enabled=sandbox_enabled,
         sandbox_network_profile=sandbox_network_profile,
     )
-
-
-def detect_build_command(repo_dir: str) -> Optional[str]:
-  """Auto-detects default build/test command from repository structure."""
-  # 1. Node.js (package.json)
-  pkg_json = os.path.join(repo_dir, "package.json")
-  if os.path.exists(pkg_json):
-    try:
-      with open(pkg_json, "r", encoding="utf-8") as f:
-        data = json.load(f)
-      if "scripts" in data and "test" in data["scripts"]:
-        return "npm test"
-    except Exception:
-      return "npm test"
-
-  # 2. Python (pytest / pyproject.toml / setup.py / tox.ini / requirements.txt)
-  if any(
-      os.path.exists(os.path.join(repo_dir, f))
-      for f in [
-          "pytest.ini",
-          "pyproject.toml",
-          "setup.py",
-          "tox.ini",
-          "requirements.txt",
-      ]
-  ):
-    return "pytest"
-
-  # 3. Java (Maven / Gradle)
-  if os.path.exists(os.path.join(repo_dir, "pom.xml")):
-    return "mvn test"
-  if any(
-      os.path.exists(os.path.join(repo_dir, f))
-      for f in ["build.gradle", "build.gradle.kts"]
-  ):
-    return (
-        "./gradlew test"
-        if os.path.exists(os.path.join(repo_dir, "gradlew"))
-        else "gradle test"
-    )
-
-  # 4. Go (go.mod)
-  if os.path.exists(os.path.join(repo_dir, "go.mod")):
-    return "go test ./..."
-
-  # 5. Rust (Cargo.toml)
-  if os.path.exists(os.path.join(repo_dir, "Cargo.toml")):
-    return "cargo test"
-
-  return None
 
 
 def inject_codemender_config(
@@ -218,22 +167,12 @@ def inject_codemender_config(
           for p in project_config["project_paths"]
       ]
 
-  # 4. Read Environment Variable configurations or auto-detect build command (Env Overrides take top precedence)
-  effective_build_cmd = None
+  # 4. Read Environment Variable configurations (Env Overrides take top precedence)
   if cfg.build_command and cfg.build_command.strip().strip("'\""):
     effective_build_cmd = cfg.build_command.strip().strip("'\"")
     logger.info(
         "Applying env override CODEMENDER_BUILD_COMMAND: %s", effective_build_cmd
     )
-  elif not config_data["build"].get("command"):
-    detected_cmd = detect_build_command(repo_dir)
-    if detected_cmd:
-      effective_build_cmd = detected_cmd
-      logger.info(
-          "Auto-detected project build/test command: %s", detected_cmd
-      )
-
-  if effective_build_cmd:
     config_data["build"]["command"] = effective_build_cmd
 
   if cfg.model:

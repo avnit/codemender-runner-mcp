@@ -57,7 +57,7 @@ Governed by [SPEC-GHA-FIX](spec.md), [SPEC-GHA](../github-actions/spec.md),
 | 7 | For pull requests, `actions/checkout` puts a temporary merge commit on disk by default, not the PR's head. | [GitHub docs](https://github.com/actions/checkout) | Line numbers from the scan wouldn't match the PR's *Files changed* view, where suggestions attach. |
 | 8 | `cm` gives a finding a new ID on every import. | SPEC-FIX REQ-0004 | IDs can't tell us that an earlier run already posted a fix. |
 | 9 | cm-runner has no limit on tokens, cost or number of fixes, only time limits. | `fix.py`, `find_diff.py` | No "budget" input. |
-| 10 | cm-runner picks a build command for most projects: `npm test`, `pytest`, `mvn test`, Gradle, `go test ./...` or `cargo test`, from files at the repository root. | [`config.py`](../../../../codemender-runner/config.py) `detect_build_command` | Most projects have a build command, even though nobody set one. |
+| 10 | cm-runner sets `build.command` only when explicitly configured via `.codemender.yaml` or `CODEMENDER_BUILD_COMMAND`; it does not guess a build command from repository files. | [`config.py`](../../../../packages/codemender/src/codemender/runner/config.py) `inject_codemender_config` | Unconfigured repositories leave `build.command` unset, so `cm fix` skips `validateFixBuild` instead of failing on a guessed command whose dependencies aren't installed. |
 | 11 | When `cm` has a build command, it runs it after the agent finishes. If it fails, `cm` leaves the finding open, so `fix` exits 3 (no fix). This is in `cm` since cl/987005678 (2026-09-23). | `gdm/security/cmoc/client/cmd/fix.go` | A project whose build can't run here gets "No fix", not an untested fix. Not yet confirmed on `cm` 0.11.0. |
 | 12 | `cm` runs that last build in its main process, not in its sandbox. In our container, that process has network access and can read the Google credentials file. | Same file, `validateFixBuild` | The project's build and tests run with network access, next to the credentials. See [Security](#security). |
 
@@ -203,9 +203,9 @@ Governed by [SPEC-GHA-FIX](spec.md), [SPEC-GHA](../github-actions/spec.md),
      that image via `runner_image`. With BYOI, customers do not need to open the
      sandbox network or pre-install dependencies in the GHA workflow before
      calling CodeMender.
-  3. **`.codemender.yaml` and auto-detection:** `cm-runner init` reads
-     `build.command` from `.codemender.yaml` or auto-detects the build command
-     from repository files (`detect_build_command`, fact 10).
+  3. **Explicit `.codemender.yaml` (`build.command`):** `cm-runner init` reads
+     `build.command` from `.codemender.yaml` (or `CODEMENDER_BUILD_COMMAND`)
+     when explicitly configured, and leaves it unset otherwise (fact 10).
 - **Alternatives Considered:**
   - *Open the sandbox network*
     (`CODEMENDER_SANDBOX_NETWORK_PROFILE=permissive-open`): the agent's commands
@@ -213,9 +213,10 @@ Governed by [SPEC-GHA-FIX](spec.md), [SPEC-GHA](../github-actions/spec.md),
   - *Install dependencies on the host first:* in a separate container that has
     network access, writing into the workspace copy. Each language then needs
     its own install step and offline build flags.
-- **What actually happens:** `cm-runner init` honours `.codemender.yaml` and
-  `detect_build_command` (fact 10), and `cm` runs it after the agent finishes.
-  When dependencies are pre-baked via BYOI (`runner_image`) or the project uses
+- **What actually happens:** `cm-runner init` honours `.codemender.yaml` (fact
+  10), and `cm` runs `build.command` after the agent finishes when one is
+  configured (skipping post-fix build verification when unset). When
+  dependencies are pre-baked via BYOI (`runner_image`) or the project uses
   standard library / lightweight checks via `.codemender.yaml`, `cm fix` builds
   and verifies patches completely offline inside the container.
 

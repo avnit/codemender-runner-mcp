@@ -420,6 +420,37 @@ def unpack_tar_gz_preserving_permissions(
             except OSError:
               pass
 
+    # Ensure all extracted files and directories are owned by the current process
+    # and have user read/write permissions. When running as root in containers
+    # (such as Cloud Run Jobs), tar.extractall preserves original archive
+    # ownership (e.g. GitHub Actions runner uid:gid 1001:1001). Sandboxed
+    # execution engines (like CodeMender's exebox) drop all Linux capabilities
+    # (CAP_DAC_OVERRIDE and CAP_FOWNER), causing tool file modifications
+    # (write_to_file, search_and_replace) to fail with EACCES (Permission denied).
+    current_uid = os.getuid()
+    current_gid = os.getgid()
+    try:
+      os.chown(dest_dir, current_uid, current_gid)
+    except OSError:
+      pass
+
+    for root_dir, dirs, files in os.walk(dest_dir):
+      for name in dirs + files:
+        target = os.path.join(root_dir, name)
+        if not os.path.islink(target):
+          try:
+            os.chown(target, current_uid, current_gid)
+          except OSError:
+            pass
+          try:
+            mode = os.stat(target).st_mode
+            if os.path.isdir(target):
+              os.chmod(target, mode | 0o700)
+            else:
+              os.chmod(target, mode | 0o600)
+          except OSError:
+            pass
+
 
 def flatten_repo_if_nested(repo_dir: str) -> None:
   """Flattens single top-level wrapper folder so .git is at repo_dir/.git."""

@@ -368,10 +368,12 @@ class TestInitConfig(InitTestBase):
         self.read_config()["sandbox"]["network"]["profile"], "permissive-open"
     )
 
-  def test_build_command_is_guessed_from_the_repo(self):
-    """A package.json with a test script gives `npm test`, as in legacy."""
-    with open(os.path.join(self.repo, "package.json"), "w") as handle:
-      json.dump({"scripts": {"test": "jest"}}, handle)
+  def test_build_command_from_repo_config(self):
+    """A .codemender.yaml with build.command sets the build command."""
+    with open(
+        os.path.join(self.repo, ".codemender.yaml"), "w", encoding="utf-8"
+    ) as handle:
+      yaml.safe_dump({"build": {"command": "npm test"}}, handle)
     stub = self.write_stub_cm()
 
     result = self.run_init("--repo", self.repo, "--cm-binary", stub)
@@ -380,9 +382,11 @@ class TestInitConfig(InitTestBase):
     self.assertEqual(self.read_config()["build"]["command"], "npm test")
 
   def test_build_command_from_environment_wins(self):
-    """CODEMENDER_BUILD_COMMAND overrides the guess, as in legacy."""
-    with open(os.path.join(self.repo, "package.json"), "w") as handle:
-      json.dump({"scripts": {"test": "jest"}}, handle)
+    """CODEMENDER_BUILD_COMMAND overrides .codemender.yaml."""
+    with open(
+        os.path.join(self.repo, ".codemender.yaml"), "w", encoding="utf-8"
+    ) as handle:
+      yaml.safe_dump({"build": {"command": "npm test"}}, handle)
     stub = self.write_stub_cm()
 
     result = self.run_init(
@@ -396,15 +400,21 @@ class TestInitConfig(InitTestBase):
     self.assertIn(
         "build command make check", self.config_event(result)["message"]
     )
+    self.assertEqual(self.read_config()["build"]["command"], "make check")
 
   def test_no_build_command_is_reported_and_does_not_block(self):
-    """Nothing to guess from: reported as `not set`; no prompt, no hang."""
+    """Without explicit config, build command is not guessed from repo files; reported as `not set`."""
+    with open(
+        os.path.join(self.repo, "package.json"), "w", encoding="utf-8"
+    ) as handle:
+      json.dump({"scripts": {"test": "jest"}}, handle)
     stub = self.write_stub_cm()
 
     result = self.run_init("--repo", self.repo, "--cm-binary", stub)
 
     self.assertEqual(result.returncode, exit_codes.OK, result.stderr)
     self.assertIn("build command not set", self.config_event(result)["message"])
+    self.assertNotIn("command", self.read_config().get("build", {}))
 
   @unittest.skipIf(os.geteuid() == 0, "root ignores file permissions")
   def test_failed_write_is_caught(self):

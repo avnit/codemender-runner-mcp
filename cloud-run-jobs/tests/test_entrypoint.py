@@ -538,6 +538,52 @@ class TestCloudRunEntrypoint(unittest.TestCase):
     mode = stat.S_IMODE(os.stat(extracted_script).st_mode)
     self.assertEqual(mode & 0o111, 0o111, f"Expected executable bits in {oct(mode)}")
 
+  def test_unpack_tar_gz_normalizes_ownership_and_user_write_permissions(self):
+    ep = _load_entrypoint_module()
+    archive_path = os.path.join(self.temp_dir, "perm_test.tar.gz")
+    with tarfile.open(archive_path, "w:gz") as tar:
+      ti_dir = tarfile.TarInfo(name="pkg")
+      ti_dir.type = tarfile.DIRTYPE
+      ti_dir.mode = 0o555
+      ti_dir.uid = 1001
+      ti_dir.gid = 1001
+      tar.addfile(ti_dir)
+
+      ti_file = tarfile.TarInfo(name="pkg/readonly.py")
+      ti_file.type = tarfile.REGTYPE
+      ti_file.mode = 0o444
+      ti_file.size = 12
+      ti_file.uid = 1001
+      ti_file.gid = 1001
+      import io
+      tar.addfile(ti_file, io.BytesIO(b"print('ok')\n"))
+
+    extract_dest = os.path.join(self.temp_dir, "extracted_repo")
+    with mock.patch.object(ep.os, "chown") as mock_chown:
+      ep.unpack_tar_gz_preserving_permissions(archive_path, extract_dest)
+
+      expected_uid = os.getuid()
+      expected_gid = os.getgid()
+      mock_chown.assert_any_call(extract_dest, expected_uid, expected_gid)
+      mock_chown.assert_any_call(
+          os.path.join(extract_dest, "pkg"), expected_uid, expected_gid
+      )
+      mock_chown.assert_any_call(
+          os.path.join(extract_dest, "pkg", "readonly.py"),
+          expected_uid,
+          expected_gid,
+      )
+
+    file_mode = stat.S_IMODE(
+        os.stat(os.path.join(extract_dest, "pkg", "readonly.py")).st_mode
+    )
+    self.assertEqual(file_mode & 0o600, 0o600)
+
+    dir_mode = stat.S_IMODE(
+        os.stat(os.path.join(extract_dest, "pkg")).st_mode
+    )
+    self.assertEqual(dir_mode & 0o700, 0o700)
+
   def test_transit_driver_priority_order(self):
     ep = _load_entrypoint_module()
     dest_file = os.path.join(self.temp_dir, "downloaded.txt")

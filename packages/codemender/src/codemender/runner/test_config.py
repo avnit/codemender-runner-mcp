@@ -25,7 +25,6 @@ _PKG_DIR = Path(__file__).resolve().parents[2]
 if str(_PKG_DIR) not in sys.path:
   sys.path.insert(0, str(_PKG_DIR))
 
-from codemender.runner.config import detect_build_command
 from codemender.runner.config import inject_codemender_config
 from codemender.runner.config import OrchestratorConfig
 import yaml
@@ -117,39 +116,26 @@ class TestConfig(unittest.TestCase):
           self.assertIn(os.path.abspath(os.path.join(repo_dir, "routes")), data["project_paths"])
           self.assertIn(os.path.abspath("/custom/abs/path"), data["project_paths"])
 
-  def test_detect_build_command_nodejs(self):
-    """Verify detect_build_command finds npm test in package.json."""
-    with tempfile.TemporaryDirectory() as repo_dir:
-      with open(os.path.join(repo_dir, "package.json"), "w") as f:
-        f.write('{"name": "test-pkg", "scripts": {"test": "mocha"}}')
-      self.assertEqual(detect_build_command(repo_dir), "npm test")
-
-  def test_detect_build_command_python(self):
-    """Verify detect_build_command finds pytest when pyproject.toml exists."""
-    with tempfile.TemporaryDirectory() as repo_dir:
-      with open(os.path.join(repo_dir, "pyproject.toml"), "w") as f:
-        f.write("[tool.pytest]")
-      self.assertEqual(detect_build_command(repo_dir), "pytest")
-
-  def test_detect_build_command_go(self):
-    """Verify detect_build_command finds go test when go.mod exists."""
-    with tempfile.TemporaryDirectory() as repo_dir:
-      with open(os.path.join(repo_dir, "go.mod"), "w") as f:
-        f.write("module example.com/test")
-      self.assertEqual(detect_build_command(repo_dir), "go test ./...")
-
-  def test_inject_codemender_config_auto_detects_build_command(self):
-    """Verify inject_codemender_config auto-detects build command if unset."""
+  def test_inject_codemender_config_does_not_guess_build_command(self):
+    """Verify inject_codemender_config leaves build.command unset when not explicitly configured."""
     with tempfile.TemporaryDirectory() as temp_home:
       with tempfile.TemporaryDirectory() as repo_dir:
         with open(os.path.join(repo_dir, "package.json"), "w") as f:
           f.write('{"scripts": {"test": "jest"}}')
-        with unittest.mock.patch("os.path.expanduser", return_value=temp_home):
+        with open(os.path.join(repo_dir, "pyproject.toml"), "w") as f:
+          f.write("[tool.pytest]")
+        with open(os.path.join(repo_dir, "go.mod"), "w") as f:
+          f.write("module example.com/test")
+        with (
+            unittest.mock.patch("os.path.expanduser", return_value=temp_home),
+            unittest.mock.patch("sys.stdin.isatty", return_value=False),
+            unittest.mock.patch.dict(os.environ, {}, clear=True),
+        ):
           inject_codemender_config(repo_dir)
           out_config = os.path.join(temp_home, ".codemender", "config.yaml")
           with open(out_config, "r") as f:
             data = yaml.safe_load(f)
-          self.assertEqual(data["build"]["command"], "npm test")
+          self.assertNotIn("command", data["build"])
 
   def test_inject_codemender_config_env_override_takes_precedence(self):
     """Verify env override CODEMENDER_BUILD_COMMAND takes precedence over repo config."""
