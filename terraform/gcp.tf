@@ -22,6 +22,7 @@ module "gcp" {
   region                      = var.gcp_region
   resource_prefix             = var.resource_prefix
   reports_bucket_name         = var.reports_bucket_name
+  reports_bucket_ttl_days     = var.reports_bucket_ttl_days
   runner_cpu                  = var.runner_cpu
   runner_memory               = var.runner_memory
   runner_timeout              = var.runner_timeout

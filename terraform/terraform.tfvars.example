@@ -69,6 +69,10 @@ execution_mode = "cloud_run" # or "local"
 # is automatically generated using resource_prefix and random suffix.
 # reports_bucket_name = ""
 
+# Number of days to retain objects in the GCS reports and transit bucket before deletion.
+# Default: 7
+# reports_bucket_ttl_days = 7
+
 # CPU limit allocated to Cloud Run worker tasks (e.g., "1", "2", "4", "8").
 # Default: "2"
 # runner_cpu = "2"

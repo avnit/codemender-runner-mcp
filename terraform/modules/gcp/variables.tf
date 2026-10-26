@@ -35,6 +35,17 @@ variable "reports_bucket_name" {
   default     = ""
 }
 
+variable "reports_bucket_ttl_days" {
+  type        = number
+  description = "Number of days to retain objects in the GCS reports and transit bucket before lifecycle deletion."
+  default     = 7
+
+  validation {
+    condition     = var.reports_bucket_ttl_days >= 1 && floor(var.reports_bucket_ttl_days) == var.reports_bucket_ttl_days
+    error_message = "reports_bucket_ttl_days must be a whole number greater than or equal to 1."
+  }
+}
+
 
 variable "runner_cpu" {
   type        = string

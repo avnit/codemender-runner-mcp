@@ -90,6 +90,17 @@ variable "reports_bucket_name" {
   description = "Name of the GCS bucket for scan reports and source snapshot staging."
 }
 
+variable "reports_bucket_ttl_days" {
+  type        = number
+  default     = 7
+  description = "Number of days to retain objects in the GCS reports and transit bucket before lifecycle deletion."
+
+  validation {
+    condition     = var.reports_bucket_ttl_days >= 1 && floor(var.reports_bucket_ttl_days) == var.reports_bucket_ttl_days
+    error_message = "reports_bucket_ttl_days must be a whole number greater than or equal to 1."
+  }
+}
+
 variable "runner_cpu" {
   type        = string
   default     = "2000m"

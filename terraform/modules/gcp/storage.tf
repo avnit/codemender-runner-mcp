@@ -31,7 +31,7 @@ resource "google_storage_bucket" "reports" {
 
   lifecycle_rule {
     condition {
-      age = 1
+      age = var.reports_bucket_ttl_days
     }
     action {
       type = "Delete"

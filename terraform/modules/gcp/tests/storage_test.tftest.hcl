@@ -39,8 +39,8 @@ run "storage_resources_default_names" {
   }
 
   assert {
-    condition     = tolist(tolist(google_storage_bucket.reports.lifecycle_rule)[0].condition)[0].age == 1
-    error_message = "Reports/transit bucket lifecycle rule must enforce a 1-day (24-hour) TTL."
+    condition     = tolist(tolist(google_storage_bucket.reports.lifecycle_rule)[0].condition)[0].age == 7
+    error_message = "Reports/transit bucket lifecycle rule must enforce a 7-day TTL."
   }
 }
 
@@ -48,12 +48,18 @@ run "storage_resources_custom_names" {
   command = plan
 
   variables {
-    reports_bucket_name = "custom-reports-123"
+    reports_bucket_name     = "custom-reports-123"
+    reports_bucket_ttl_days = 14
   }
 
   assert {
     condition     = google_storage_bucket.reports.name == "custom-reports-123"
     error_message = "Reports bucket should use provided variable when specified."
+  }
+
+  assert {
+    condition     = tolist(tolist(google_storage_bucket.reports.lifecycle_rule)[0].condition)[0].age == 14
+    error_message = "Reports/transit bucket lifecycle rule should use custom reports_bucket_ttl_days when specified."
   }
 }
 
