@@ -400,10 +400,10 @@ orchestrator and `runners/aggregate.py` read.)*
   that a subsequent `cm-runner fix` does not fail its own pre-flight dirty check
   when run in the same checkout.
 
-### Decision 5: One Attempt, 30-Minute Timeout
+### Decision 5: One Attempt with a Bounded Timeout
 
-- **Choice:** `_VERIFY_TIMEOUT_SEC = 1800.0`; no internal retries.
-- **Rationale:** Matches `SPEC-FIX` (`_FIX_TIMEOUT_SEC = 1800.0`). Exploit
+- **Choice:** Bound `cm verify` by `_VERIFY_TIMEOUT_SEC`; no internal retries.
+- **Rationale:** Matches `SPEC-FIX` (`_FIX_TIMEOUT_SEC`). Exploit
   verification builds and runs the target project inside `cm`'s sandbox across
   multiple agent turns. Callers or CI job definitions control retries.
 
@@ -422,7 +422,7 @@ flowchart TD
     import["fix._import() -> CmAdapter.import_finding()
 (report before -> report import -> report after -> 1 new ID)"]
     verify["_run_verify(): cm verify -y --bypass-warning ID
-(timeout 1800 s)"]
+(timeout _VERIFY_TIMEOUT_SEC)"]
     cleanup["finally: git.reset_working_tree()
 (keep .cm_project, .exploit)"]
     status["CmAdapter.get_finding()

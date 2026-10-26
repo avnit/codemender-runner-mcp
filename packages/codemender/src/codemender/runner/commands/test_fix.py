@@ -413,7 +413,7 @@ class TestSuccessfulFix(FixTestBase):
     for call in adapter.calls:
       self.assertIsNone(call["env"])
     self.assertEqual(adapter.calls[3]["cwd"], self.repo)
-    self.assertEqual(adapter.calls[3]["timeout_sec"], 1800.0)
+    self.assertEqual(adapter.calls[3]["timeout_sec"], 3000.0)
     self.assertEqual(adapter.calls[0]["timeout_sec"], 60.0)
     self.assertEqual(adapter.findings["old-finding"], "OPEN")
 
@@ -569,10 +569,10 @@ class TestFailures(FixTestBase):
         stdout="partial progress\n",
         stderr="",
         tokens=TokenUsage(),
-        error="timed out after 1800.0 s",
+        error="timed out after 3000.0 s",
     )
     adapter = FakeCm(overrides={("fix", "-y"): timeout})
-    self.assert_failed(adapter, expect_in_log="timed out after 1800.0 s")
+    self.assert_failed(adapter, expect_in_log="timed out after 3000.0 s")
     self.assertEqual(adapter.call_args()[-1][0], "fix")
 
   def test_fix_exits_non_zero(self):

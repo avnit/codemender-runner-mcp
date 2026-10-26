@@ -112,7 +112,12 @@ from repohost.github.fix_comments import FixCell
 
 logger = logging.getLogger("codemender-github-actions")
 
-FIX_TIMEOUT_SECONDS = 35 * 60
+# Outer per-fix container timeout (55m). Must sit between cm-runner's inner
+# `_FIX_TIMEOUT_SEC` (50m / 3000s in `codemender/runner/commands/fix.py`) and
+# the outer Cloud Run Job / workflow timeout (`runner_timeout = "3600s"` / 60m)
+# so `cm-runner` can time out cleanly before the container or Cloud Run task is
+# terminated.
+FIX_TIMEOUT_SECONDS = 55 * 60
 DEFAULT_MAX_PARALLEL_FIXES = DEFAULT_MAX_PARALLEL
 MAX_CONCURRENT_VERIFIES = 4
 VERIFY_LOCK_TTL_SECONDS = 45 * 60

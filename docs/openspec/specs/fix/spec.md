@@ -179,7 +179,7 @@ through `codemender.vcs.git`.
    exactly one `finding_id` that was not there in step 1. `cm report import`
    does not print the ID it assigns, and every import assigns a new one.
 1. **Fix:** `cm fix -y --bypass-warning <finding_id>`
-   (`_FIX_TIMEOUT_SEC = 1800.0`). `fix` MUST log a line to `stderr` before
+   (`_FIX_TIMEOUT_SEC`). `fix` MUST log a line to `stderr` before
    `cm fix` starts, saying it usually takes 10 minutes or more. `CmAdapter`
    captures `cm`'s output, so all of `cm`'s `stdout` and `stderr` MUST be logged
    to `cm-runner`'s `stderr` when `cm fix` exits, whatever the outcome.
@@ -199,7 +199,7 @@ attempt. Retrying is left to the caller.
   `["report", "--format", "json"]`,
   `["report", "import", "-f", "<abs path of f.sarif>", "-p", "/workspace"]`,
   `["report", "--format", "json"]`,
-  `["fix", "-y", "--bypass-warning", "<new id>"]` with `timeout_sec=1800.0`,
+  `["fix", "-y", "--bypass-warning", "<new id>"]` with `timeout_sec=_FIX_TIMEOUT_SEC`,
   and `["report", "--format", "json"]`; all with `cwd="/workspace"`.
 
 #### Scenario: `cm fix` Finishes Without Fixing
@@ -212,7 +212,7 @@ attempt. Retrying is left to the caller.
 #### Scenario: `cm fix` Times Out
 
 - **GIVEN** `cm fix` runs past `_FIX_TIMEOUT_SEC`
-- **WHEN** `CmAdapter.run()` returns `CmResult(exit_code=None, error="timed out after 1800s")`
+- **WHEN** `CmAdapter.run()` returns a timeout `CmResult(exit_code=None, error=...)`
 - **THEN** the command logs the timeout, does not read the status or the diff,
   emits zero bytes on `stdout`, and exits `3`.
 

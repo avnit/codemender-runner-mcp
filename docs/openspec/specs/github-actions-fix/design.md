@@ -53,7 +53,7 @@ Governed by [SPEC-GHA-FIX](spec.md), [SPEC-GHA](../github-actions/spec.md),
 | 3 | `cm fix` starts with `git checkout HEAD -- . && git clean -fd`, and `fix` refuses to run on a tree with uncommitted work. | SPEC-FIX REQ-0003 | Each fix needs a clean checkout of its own. |
 | 4 | `fix` finds the ID of the finding it imported by comparing `cm report` before and after the import. | [`fix.py`](../../../../codemender-runner/cli/commands/fix.py) | Two fixes sharing a `cm` home would each see two new IDs and fail. |
 | 5 | The legacy parallel design found that the CodeMender server allows one active session per project ID. `cm` stores that ID in a `.cm_project` file inside the repository. | [parallelization_design.md](../../../architecture/parallelization_design.md) | Each fix starts from the original checkout, never from the scan's copy, which has a `.cm_project`. Not yet confirmed on `cm` 0.11.0. |
-| 6 | A fix to a 10-line file took 8–9 minutes. `fix` gives up after 30 minutes. | SPEC-FIX design, fact 4 | Fixes one after another would take hours. They have to run at the same time. |
+| 6 | A fix to a 10-line file took 8–9 minutes, and `fix` enforces a per-finding timeout (`_FIX_TIMEOUT_SEC`). | SPEC-FIX design, fact 4 | Fixes one after another would take hours. They have to run at the same time. |
 | 7 | For pull requests, `actions/checkout` puts a temporary merge commit on disk by default, not the PR's head. | [GitHub docs](https://github.com/actions/checkout) | Line numbers from the scan wouldn't match the PR's *Files changed* view, where suggestions attach. |
 | 8 | `cm` gives a finding a new ID on every import. | SPEC-FIX REQ-0004 | IDs can't tell us that an earlier run already posted a fix. |
 | 9 | cm-runner has no limit on tokens, cost or number of fixes, only time limits. | `fix.py`, `find_diff.py` | No "budget" input. |
@@ -181,9 +181,10 @@ Governed by [SPEC-GHA-FIX](spec.md), [SPEC-GHA](../github-actions/spec.md),
 - **Choice:** Bound concurrent fix containers to `max_parallel_fixes` (default
   `4`), stage each finding's workspace copy only when its worker starts, and
   delete its folder as soon as its patch is saved. No cost or token budget or
-  severity filter: every finding gets a fix attempt. cm-runner's own 30-minute
-  limit per fix (with a 35-minute outer container timeout) bounds each
-  container, and the workflow template sets a 60-minute job timeout.
+  severity filter: every finding gets a fix attempt. cm-runner's own timeout
+  per fix (`_FIX_TIMEOUT_SEC`, with a slightly longer outer container timeout
+  `FIX_TIMEOUT_SECONDS`) bounds each container, and the workflow template sets
+  a job-level timeout ceiling.
 - **Rationale:** Standard GitHub-hosted runners have 2 vCPUs, 8 GB RAM and
   14 GB free disk. Bounding concurrency to 4 prevents OOM and disk exhaustion
   when a PR has many findings, while customers on larger runners can raise
@@ -315,8 +316,8 @@ artifact upload, then deletes the folder.
 | Result | When | Fix column | Job |
 | :--- | :--- | :--- | :--- |
 | `fixed` | exit 0 and a non-empty `.diff` | ✅ Suggested or 📎 Patch | passes |
-| `no_fix` | exit 3: no patch, a `cm` error, or cm-runner's own 30-minute timeout | ❌ No fix | passes |
-| `failed` | exit 2, any other exit code, a launcher error, or the 35-minute container timeout | ⚠️ Failed, plus a warning in the log | passes |
+| `no_fix` | exit 3: no patch, a `cm` error, or cm-runner's own fix timeout (`_FIX_TIMEOUT_SEC`) | ❌ No fix | passes |
+| `failed` | exit 2, any other exit code, a launcher error, or the outer container timeout (`FIX_TIMEOUT_SECONDS`) | ⚠️ Failed, plus a warning in the log | passes |
 
 Findings and failed fixes never fail the job, the same as findings in M1.
 

@@ -257,12 +257,13 @@ fails:
 1. `cm report --format json`, to list the findings already in `cm`'s database.
 1. `cm report import -f <finding> -p <repo>`. A finding from stdin is first
    written to a temporary file outside the repository.
-1. `cm report --format json` again. Exactly one finding must be new; that is the
-   ID `cm` gave the import.
-1. `cm fix -y --bypass-warning <id>`, with a 30-minute limit. `--bypass-warning`
-   accepts `cm`'s responsibility warning for you, as the older pipeline does.
-1. `cm report --format json`, to check that the finding's status is now `FIXED`.
-   `cm fix` exits `0` even when it did not produce a patch.
+1. `cm report --format json` again. Exactly one finding must be new; that is
+   the ID `cm` gave the import.
+1. `cm fix -y --bypass-warning <id>` (bounded by `_FIX_TIMEOUT_SEC`).
+   `--bypass-warning` accepts `cm`'s responsibility warning for you, as the
+   older pipeline does.
+1. `cm report --format json`, to check that the finding's status is now
+   `FIXED`. `cm fix` exits `0` even when it did not produce a patch.
 
 > [!IMPORTANT] **`fix` is slow.** A one-line fix in a 10-line file took 8 to 9
 > minutes on `cm` 0.11.0. `cm fix` prints nothing until it finishes, so its
@@ -327,7 +328,7 @@ fails:
 1. `cm report --format json`, to inspect findings already in `cm`'s database.
 1. `cm report import -f <finding> -p <repo>`, discovering the newly assigned
    finding ID.
-1. `cm verify -y --bypass-warning <id>`, with a 30-minute limit.
+1. `cm verify -y --bypass-warning <id>` (bounded by `_VERIFY_TIMEOUT_SEC`).
 1. Resets the Git working tree (tracked modifications and untracked files
    outside `.cm_project` and `.exploit/`) via `codemender.vcs.git`.
 1. `cm report --format json`, reading the post-verify status and

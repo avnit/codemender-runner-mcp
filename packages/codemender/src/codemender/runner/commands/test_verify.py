@@ -397,7 +397,7 @@ class TestVerifyWorkflow(VerifyTestBase):
     for call in adapter.calls:
       self.assertIsNone(call["env"])
     self.assertEqual(adapter.calls[3]["cwd"], self.repo)
-    self.assertEqual(adapter.calls[3]["timeout_sec"], 1800.0)
+    self.assertEqual(adapter.calls[3]["timeout_sec"], 3000.0)
     self.assertEqual(adapter.calls[0]["timeout_sec"], 60.0)
 
     # Output on stdout is a single-line compact SARIF JSON with status VERIFIED.
@@ -626,10 +626,10 @@ class TestFailures(VerifyTestBase):
         stdout="partial verify\n",
         stderr="",
         tokens=TokenUsage(),
-        error="timed out after 1800.0 s",
+        error="timed out after 3000.0 s",
     )
     adapter = FakeVerifyCm(overrides={("verify", "-y"): timeout})
-    self.assert_failed(adapter, expect_in_log="timed out after 1800.0 s")
+    self.assert_failed(adapter, expect_in_log="timed out after 3000.0 s")
 
   def test_out_write_failure_exits_three_with_empty_stdout(self):
     blocker = Path(self.tmp, "blocker")

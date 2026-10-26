@@ -65,7 +65,7 @@ _CM_REPORT_TIMEOUT_SEC = 60.0
 
 # A 10-line file took 8 to 9 minutes on `cm` 0.11.0, so real repositories need
 # a generous limit.
-_FIX_TIMEOUT_SEC = 1800.0
+_FIX_TIMEOUT_SEC = 3000.0
 
 # Files `cm` writes into the repository it works on. They are not the caller's
 # work, so they don't block a run, and they are never part of the patch.

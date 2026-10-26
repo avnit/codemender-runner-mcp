@@ -40,7 +40,7 @@ from `cm`'s SARIF.
 | 1 | `cm fix` accepts only a finding ID. `cm report import -f FILE -p REPO` accepts JSON or SARIF and assigns a **new** ID on every import, but does not print it. | Import, then compare `cm report --format json` before and after to find the new ID. |
 | 2 | A finding imported from **SARIF fixed as well as one imported from JSON**, even though the SARIF import loses the title (it becomes `"CWE-78"`) and lowers severity from CRITICAL to HIGH. | SARIF, the format `find-diff` writes, is a sound input. |
 | 3 | The default model (`gemini-3.8-flash`) produced a correct patch in both runs, marking the finding `FIXED`. (It failed with server error 13 on `cm` 0.9.0.) | No `--model` flag. |
-| 4 | **Each run took 8–9 minutes** (545 s and 479 s, about 40 agent steps), even for a 10-line file. On 0.9.0 it took 19–65 s. | Timeout of 30 minutes. |
+| 4 | **Each run took 8–9 minutes** (545 s and 479 s, about 40 agent steps), even for a 10-line file. On 0.9.0 it took 19–65 s. | Generous per-fix timeout (`_FIX_TIMEOUT_SEC`). |
 | 5 | **`cm fix` first runs `git checkout HEAD -- . && git clean -fd`.** An uncommitted edit was reverted and an untracked file deleted. | Refuse to run on a repository with uncommitted work. |
 | 6 | `cm fix` exits `0` either way. The result is the finding's `status` in `cm report --format json`. | Confirm `FIXED` before collecting the patch. |
 | 7 | The patch appeared in three identical forms: `git diff HEAD` (minus `.cm_project`), `cm report --patches` (display format), and `cm fix`'s `stdout` (mixed with progress text). It was not staged. `cm fix --export` prints "not yet implemented". | Collect the patch with Git. |
@@ -137,9 +137,9 @@ from `cm`'s SARIF.
 - **Rationale:** Git gives a diff that `git apply` accepts, including new files
   and binary changes, and it matched `cm`'s own patch exactly in both runs.
 
-### Decision 5: One Attempt, 30-Minute Timeout
+### Decision 5: One Attempt with a Bounded Timeout
 
-- **Choice:** `_FIX_TIMEOUT_SEC = 1800.0`; no retries.
+- **Choice:** Bound `cm fix` by `_FIX_TIMEOUT_SEC`; no retries.
 - **Rationale:** A 10-line file took 8–9 minutes (fact 4), so real repositories
   need a generous limit. Both test runs succeeded first time. A caller that
   wants retries can rerun the command, and CI systems already have retry
@@ -163,7 +163,7 @@ flowchart TD
     after["cm report --format json
 (exactly 1 new ID)"]
     fix["cm fix -y --bypass-warning ID
-(timeout 1800 s)"]
+(timeout _FIX_TIMEOUT_SEC)"]
     status["cm report --format json
 (status == FIXED)"]
     diff["git add -N + git diff --binary HEAD

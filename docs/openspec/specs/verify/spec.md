@@ -209,7 +209,7 @@ In accordance with [ADR-0002](../../adr/ADR-0002-runner-layout-and-build.md),
    `finding_id` embedded in the input SARIF properties MUST NOT be used
    directly).
 1. **Verify (`_run_verify`):** `cm verify -y --bypass-warning <finding_id>`
-   (`_VERIFY_TIMEOUT_SEC = 1800.0`). All of `cm`'s `stdout` and `stderr` MUST be
+   (`_VERIFY_TIMEOUT_SEC`). All of `cm`'s `stdout` and `stderr` MUST be
    logged to `cm-runner`'s `stderr`.
 1. **Reset working tree (`_run_verify` `finally` block):** call
    `git.reset_working_tree(repo.as_posix(), exclude=fix._CM_OWN_PATHS)` to
@@ -235,15 +235,15 @@ exit `3`. `verify` MUST NOT make more than one `cm verify` attempt.
   `["report", "--format", "json"]`,
   `["report", "import", "-f", "/tmp/finding-00.sarif", "-p", "/workspace"]`,
   `["report", "--format", "json"]`,
-  `["verify", "-y", "--bypass-warning", "<new id>"]` with `timeout_sec=1800.0`,
+  `["verify", "-y", "--bypass-warning", "<new id>"]` with `timeout_sec=_VERIFY_TIMEOUT_SEC`,
   and `["report", "--format", "json"]`; all with `cwd="/workspace"` and
   `env=None`.
 
 #### Scenario: `cm verify` Times Out
 
 - **GIVEN** `cm verify` runs past `_VERIFY_TIMEOUT_SEC`
-- **WHEN** `CmAdapter.run()` returns
-  `CmResult(exit_code=None, error="timed out after 1800.0 s")`
+- **WHEN** `CmAdapter.run()` returns a timeout
+  `CmResult(exit_code=None, error=...)`
 - **THEN** the command logs the timeout, resets the repository working tree in
   `finally`, writes nothing to `--out`, emits zero bytes on `stdout`, and exits
   `3`.

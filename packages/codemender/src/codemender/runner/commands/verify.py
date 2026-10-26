@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 # `cm verify` runs dynamic/agentic verification and needs the same ceiling as
 # `cm fix`.
-_VERIFY_TIMEOUT_SEC = 1800.0
+_VERIFY_TIMEOUT_SEC = 3000.0
 
 # Lifecycle statuses written to the SARIF result properties.
 _VERIFIED = "VERIFIED"
