@@ -3,7 +3,7 @@
 **Change ID:** `vcs-cloudrun-comms` \
 **Status:** Draft \
 **Author:** Brent Collier (brentcollier@google.com) \
-**Target Spec:** [SPEC-CR-COMMS](../../specs/cloudrun-communication/spec.md) \
+**Target Spec:** [SPEC-ARTIFACT-CACHE](../../specs/artifact-cache/spec.md), [SPEC-WORKER](../../specs/worker/spec.md) \
 **Bug/Epic:** go/cm-ci-cd-project-plan (Workstream 3: Cloud Run)
 
 ## Why
