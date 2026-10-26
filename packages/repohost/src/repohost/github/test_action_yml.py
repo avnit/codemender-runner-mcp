@@ -143,6 +143,16 @@ class TestCompositeActionsDualModeAndDefaultImage(unittest.TestCase):
             f"{action_pkgs.resolve()}/repohost[github]", pip_args_external
         )
 
+  def test_codemender_cloud_run_inputs_optional_and_blank_default_in_yaml(self):
+    content = _CODEMENDER_YML.read_text(encoding="utf-8")
+    for input_name in ("cloud_run_job_name", "cloud_run_region", "gcs_transit_bucket"):
+      with self.subTest(input_name=input_name):
+        match = re.search(rf"  {input_name}:\n((?:    .*\n)+)", content)
+        self.assertIsNotNone(match, f"{input_name} input not found in action.yml")
+        block = match.group(1)
+        self.assertIn("required: false", block)
+        self.assertIn("default: ''", block)
+
   def test_codemender_local_runner_image_optional_and_default_in_yaml(self):
     content = _CODEMENDER_LOCAL_YML.read_text(encoding="utf-8")
     runner_image_match = re.search(

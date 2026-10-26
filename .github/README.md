@@ -14,9 +14,9 @@ security model specifications.
 
 1. **Google Cloud Project** with billing enabled and Vertex AI API access for
    CodeMender.
-2. **Terraform** (`>= 1.5`) and **Google Cloud SDK (`gcloud`)** authenticated
+1. **Terraform** (`>= 1.5`) and **Google Cloud SDK (`gcloud`)** authenticated
    (`gcloud auth application-default login`) for one-time infrastructure setup.
-3. **GitHub Authentication** (`gh auth login` or `GITHUB_TOKEN` /
+1. **GitHub Authentication** (`gh auth login` or `GITHUB_TOKEN` /
    `github_mgmt_token` when bootstrapping repository secrets and variables via
    Terraform).
 
@@ -67,15 +67,15 @@ automatically configures the target repositories. If you manage settings
 manually (at the **Organization** or **Repository** level under **Settings →
 Secrets and variables → Actions**), configure:
 
-| Name | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| `CODEMENDER_WORKLOAD_IDENTITY_PROVIDER` | Secret | Yes | Full resource name of the GCP Workload Identity Provider (`terraform output gcp_workload_identity_provider`). |
-| `CODEMENDER_SERVICE_ACCOUNT` | Secret | Yes | Email of the GCP Service Account (`terraform output gcp_service_account`). |
-| `CODEMENDER_GCP_PROJECT_ID` | Variable | Yes | Google Cloud project ID hosting Vertex AI. |
-| `CODEMENDER_GCS_TRANSIT_BUCKET` | Variable | Optional (Cloud Run) | GCS bucket for staging source archives and reports (`codemender` action). Defaults to `codemender-reports-<project>`. |
-| `CODEMENDER_CLOUD_RUN_JOB_NAME` | Variable | Optional (Cloud Run) | Cloud Run Job name (`codemender` action). Defaults to `codemender-runner`. |
-| `CODEMENDER_GCP_REGION` | Variable | Optional (Cloud Run) | GCP region for the Cloud Run Job (`codemender` action). Defaults to `us-central1`. |
-| `CODEMENDER_RUNNER_IMAGE` | Variable | Optional (Local Docker) | Container image URI for `.github/actions/codemender-local`. Defaults to `ghcr.io/<action-or-workflow-repo>:latest` in lowercase. |
+| Name                                    | Type     | Required                | Description                                                                                                                      |
+| :-------------------------------------- | :------- | :---------------------- | :------------------------------------------------------------------------------------------------------------------------------- |
+| `CODEMENDER_WORKLOAD_IDENTITY_PROVIDER` | Secret   | Yes                     | Full resource name of the GCP Workload Identity Provider (`terraform output gcp_workload_identity_provider`).                    |
+| `CODEMENDER_SERVICE_ACCOUNT`            | Secret   | Yes                     | Email of the GCP Service Account (`terraform output gcp_service_account`).                                                       |
+| `CODEMENDER_GCP_PROJECT_ID`             | Variable | Yes                     | Google Cloud project ID hosting Vertex AI.                                                                                       |
+| `CODEMENDER_GCS_TRANSIT_BUCKET`         | Variable | Optional (Cloud Run)    | GCS bucket for staging source archives and reports (`codemender` action). Defaults to `codemender-reports-<project>`.            |
+| `CODEMENDER_CLOUD_RUN_JOB_NAME`         | Variable | Optional (Cloud Run)    | Cloud Run Job name (`codemender` action). Defaults to `codemender-runner`.                                                       |
+| `CODEMENDER_GCP_REGION`                 | Variable | Optional (Cloud Run)    | GCP region for the Cloud Run Job (`codemender` action). Defaults to `us-central1`.                                               |
+| `CODEMENDER_RUNNER_IMAGE`               | Variable | Optional (Local Docker) | Container image URI for `.github/actions/codemender-local`. Defaults to `ghcr.io/<action-or-workflow-repo>:latest` in lowercase. |
 
 ## Step 3 — Build & Publish the `cm-runner` Container Image
 
@@ -126,10 +126,10 @@ above.
 You can roll out CodeMender across an entire GitHub Organization or in
 individual repositories without copying action files into target repositories:
 
-| Rollout Option | Files in Target Repo | Supported Event Triggers | Action & Package Version Isolation |
-| :--- | :--- | :--- | :--- |
-| **Option 1: Organization Repository Ruleset** | **0 files** | `pull_request` / `push` / `merge_group` (**PR scan `find-diff` + automatic inline `fix` suggestions**) | Isolated to `<your-org>/codemender-runner` after running `make init-fork` (or pin `@<tag/sha>`) |
-| **Option 2: Caller Workflow in Target Repo** (`workflow_call` or `uses:`) | 1 thin `.github/workflows/codemender.yml` file (`.github/actions/*` and `packages/` stay centralized) | `pull_request` (**scan + fix**) **and** `pull_request_review_comment` / `issue_comment` (**on-demand `@cm-runner verify`**) | Pin `@<tag/sha>` or reference `<your-org>/codemender-runner@main` |
+| Rollout Option                                                            | Files in Target Repo                                                                                  | Supported Event Triggers                                                                                                    | Action & Package Version Isolation                                                              |
+| :------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------- |
+| **Option 1: Organization Repository Ruleset**                             | **0 files**                                                                                           | `pull_request` / `push` / `merge_group` (**PR scan `find-diff` + automatic inline `fix` suggestions**)                      | Isolated to `<your-org>/codemender-runner` after running `make init-fork` (or pin `@<tag/sha>`) |
+| **Option 2: Caller Workflow in Target Repo** (`workflow_call` or `uses:`) | 1 thin `.github/workflows/codemender.yml` file (`.github/actions/*` and `packages/` stay centralized) | `pull_request` (**scan + fix**) **and** `pull_request_review_comment` / `issue_comment` (**on-demand `@cm-runner verify`**) | Pin `@<tag/sha>` or reference `<your-org>/codemender-runner@main`                               |
 
 ### Option 1: Organization-Wide Rollout (Fork + Repository Rulesets)
 
@@ -137,8 +137,9 @@ To enforce CodeMender pull request scanning (`find-diff`) and automatic fix
 suggestions (`fix`) across multiple repositories in a GitHub Organization with
 **zero workflow files** added to target repositories:
 
-1. **Fork `codemender-runner` into your organization (`<your-org>/codemender-runner`) and update workflow action references:**
-   Run the fork ownership helper in your fork clone so
+1. **Fork `codemender-runner` into your organization
+   (`<your-org>/codemender-runner`) and update workflow action references:** Run
+   the fork ownership helper in your fork clone so
    `.github/workflows/cm-merge-scan.yml` references the actions in
    `<your-org>/codemender-runner` instead of the upstream repository you forked
    from:
@@ -160,28 +161,29 @@ suggestions (`fix`) across multiple repositories in a GitHub Organization with
      General → Access** and select **Accessible from repositories in the
      organization** so other repositories in `<your-org>` can invoke your fork's
      workflows and composite actions.
-2. **Configure Google Cloud credentials** at the organization or repository
-   level as shown in [Step 2](#step-2--configure-github-actions-secrets--variables).
+1. **Configure Google Cloud credentials** at the organization or repository
+   level as shown in
+   [Step 2](#step-2--configure-github-actions-secrets--variables).
    *(Repositories in the organization that have not configured these credentials
    automatically emit a `::notice::` and exit `0` so their pull requests are not
    blocked.)*
-3. **Enable the Organization Repository Ruleset:**
-   In your GitHub Organization settings, navigate to **Settings → Rules →
-   Rulesets → New branch ruleset**:
+1. **Enable the Organization Repository Ruleset:** In your GitHub Organization
+   settings, navigate to **Settings → Rules → Rulesets → New branch ruleset**:
    - Target your desired repositories and default branch (`main` / `master`).
    - Enable **Require workflows to pass before merging** and select
      `.github/workflows/cm-merge-scan.yml` from `<your-org>/codemender-runner`.
 
 > [!NOTE]
-> **Organization Ruleset event scope vs. PR comment triggers (`@cm-runner verify`):**
-> GitHub Organization Repository Rulesets only trigger required workflows on
-> branch/merge-gate events (`pull_request`, `push`, `merge_group`). Both **PR
-> diff scanning (`find-diff`)** and **automatic inline fix suggestions (`fix`)**
-> run during `pull_request` events and work with **zero workflow files** in
-> target repositories. However, because GitHub Organization Rulesets ignore
-> `pull_request_review_comment` and `issue_comment` events, on-demand PR comment
-> commands (such as `@cm-runner verify`) require adding a thin caller workflow
-> in the target repository (see [Option 2](#option-2-single-repository-or-comment-triggered-rollout-caller-workflow-in-target-repo))
+> **Organization Ruleset event scope vs. PR comment triggers
+> (`@cm-runner verify`):** GitHub Organization Repository Rulesets only trigger
+> required workflows on branch/merge-gate events (`pull_request`, `push`,
+> `merge_group`). Both **PR diff scanning (`find-diff`)** and **automatic inline
+> fix suggestions (`fix`)** run during `pull_request` events and work with
+> **zero workflow files** in target repositories. However, because GitHub
+> Organization Rulesets ignore `pull_request_review_comment` and `issue_comment`
+> events, on-demand PR comment commands (such as `@cm-runner verify`) require
+> adding a thin caller workflow in the target repository (see
+> [Option 2](#option-2-single-repository-or-comment-triggered-rollout-caller-workflow-in-target-repo))
 > or an organization-level GitHub App / webhook dispatcher. Even when a thin
 > caller workflow is used in the target repository, `.github/actions/*` and
 > `packages/` remain centralized in `codemender-runner` and are never copied.
@@ -189,8 +191,12 @@ suggestions (`fix`) across multiple repositories in a GitHub Organization with
 ### Option 2: Single-Repository or Comment-Triggered Rollout (Caller Workflow in Target Repo)
 
 Use a thin caller workflow in the target repository when:
-- You are on a **personal GitHub account** (where Organization Rulesets are unavailable) or rolling out to a **single repository**, or
-- Your repository needs **PR-comment-triggered commands** (such as `@cm-runner verify` on `pull_request_review_comment` / `issue_comment`, which GitHub Organization Rulesets do not trigger).
+
+- You are on a **personal GitHub account** (where Organization Rulesets are
+  unavailable) or rolling out to a **single repository**, or
+- Your repository needs **PR-comment-triggered commands** (such as
+  `@cm-runner verify` on `pull_request_review_comment` / `issue_comment`, which
+  GitHub Organization Rulesets do not trigger).
 
 Configure the secrets and variables from
 [Step 2](#step-2--configure-github-actions-secrets--variables) in your
@@ -236,6 +242,7 @@ on:
     branches: [main, master]
 
 permissions:
+  actions: read
   contents: read
   id-token: write
   packages: read
@@ -256,8 +263,13 @@ jobs:
       - uses: cloud-gtm/codemender-runner/.github/actions/codemender@main
         with:
           gcp_project_id: ${{ vars.CODEMENDER_GCP_PROJECT_ID }}
-          gcp_workload_identity_provider: ${{ secrets.CODEMENDER_WORKLOAD_IDENTITY_PROVIDER }}
+          gcp_workload_identity_provider: ${{ 
+            secrets.CODEMENDER_WORKLOAD_IDENTITY_PROVIDER }}
           gcp_service_account: ${{ secrets.CODEMENDER_SERVICE_ACCOUNT }}
+          # Optional: defaults to repo variables or standard names when omitted
+          # gcs_transit_bucket: ${{ vars.CODEMENDER_GCS_TRANSIT_BUCKET }}
+          # cloud_run_job_name: ${{ vars.CODEMENDER_CLOUD_RUN_JOB_NAME }}
+          # cloud_run_region: ${{ vars.CODEMENDER_GCP_REGION }}
 
       # Or Local Docker + gVisor mode:
       # - uses: cloud-gtm/codemender-runner/.github/actions/codemender-local@main
@@ -276,7 +288,9 @@ jobs:
 - **Enabled by default:** After `find-diff` reports findings, the action runs
   `cm-runner fix` for each finding and updates the PR summary table's `Fix`
   column. Set `fix: 'false'` in the action `with:` block to run only the scan.
+
 - **How fixes are posted on the PR:**
+
   - **One-click suggestions (`✅ Suggested`):** When all lines modified by a
     patch fall inside the PR diff's hunks (and do not touch `.github/`), the
     action posts an inline PR review with ```` ```suggestion ```` blocks that
@@ -284,15 +298,16 @@ jobs:
   - **Patch comments (`📎 Patch`):** When a patch modifies lines outside the PR
     diff or touches `.github/`, the action posts a collapsible unified `diff`
     comment with `git apply` instructions.
+
 - **`Fix` column status values:**
 
-  | Status | Meaning |
-  | :--- | :--- |
-  | `⏳ Working` | `cm-runner fix` is currently running for this finding. |
-  | `✅ Suggested` | Links to a PR review with one-click ```` ```suggestion ```` block(s). |
-  | `📎 Patch` | Links to a review comment with a unified diff (or to the workflow run artifacts). |
-  | `❌ No fix` | `cm-runner fix` exited with code 3 (could not produce or verify a patch). Does not fail the job. |
-  | `⚠️ Failed` | The fix run failed or timed out. Does not fail the job; see the collapsible `::group::` in the job log. |
+  | Status         | Meaning                                                                                                 |
+  | :------------- | :------------------------------------------------------------------------------------------------------ |
+  | `⏳ Working`   | `cm-runner fix` is currently running for this finding.                                                  |
+  | `✅ Suggested` | Links to a PR review with one-click ```` ```suggestion ```` block(s).                                   |
+  | `📎 Patch`     | Links to a review comment with a unified diff (or to the workflow run artifacts).                       |
+  | `❌ No fix`    | `cm-runner fix` exited with code 3 (could not produce or verify a patch). Does not fail the job.        |
+  | `⚠️ Failed`    | The fix run failed or timed out. Does not fail the job; see the collapsible `::group::` in the job log. |
 
 - **Customizing the build/test command (`.codemender.yaml`):** You can override
   the verification command that `cm-runner init` configures by setting
@@ -318,47 +333,47 @@ jobs:
 - **Outcomes:** CodeMender reacts with 👀 (`eyes`), posts an in-progress reply,
   runs `cm-runner verify` under gVisor, and updates the reply in place with:
   - `🚨 Verified (VERIFIED)` — confirmed exploitable true positive.
-  - `✅ Dismissed (DISMISSED)` — refuted as not exploitable (with dismissal reason).
+  - `✅ Dismissed (DISMISSED)` — refuted as not exploitable (with dismissal
+    reason).
   - `ℹ️ Inconclusive (OPEN)` — could neither confirm nor refute.
   - `⚠️ Verification failed` — container failure or cancellation (retryable).
 
 ### Action Inputs
 
-| Input | Action | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `gcp_project_id` | Both | — (**required**) | Google Cloud project ID used by CodeMender for Vertex AI API calls. |
-| `gcp_workload_identity_provider` | Both | — (**required**) | Full Workload Identity Provider resource name (`projects/<num>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`). |
-| `gcp_service_account` | Both | — (**required**) | Service account email impersonated via Workload Identity Federation. |
-| `fix` | Both | `'true'` | Run `cm-runner fix` for each finding and post suggestions/patches on the PR (`'false'` to scan only). |
-| `max_parallel_fixes` | Both | `'4'` | Maximum number of `cm-runner fix` jobs/containers to run concurrently. |
-| `diff_workers` | Both | `'8'` | Number of concurrent workers for `cm-runner find-diff` (`1`..`16`). |
-| `log_level` | Both | `'info'` | `cm-runner` log level (`debug`, `info`, `warning`, `error`). |
-| `artifact_retention_days` | Both | `'3'` | Days to retain the uploaded `codemender-report-pr-<N>` artifact (`report.sarif`, `report.md`, `findings/*.sarif`, `fixes/*.diff`, `verified/*.sarif`). |
-| `gcs_transit_bucket` | `codemender` | `''` | GCS bucket used for transit storage and report staging in Cloud Run mode (defaults to `CODEMENDER_GCS_TRANSIT_BUCKET` or `codemender-reports-<project>`). |
-| `cloud_run_job_name` | `codemender` | `'codemender-runner'` | Cloud Run Job name to execute in Cloud Run mode. |
-| `cloud_run_region` | `codemender` | `'us-central1'` | GCP region for the Cloud Run Job. |
-| `runner_image` | `codemender-local` | `ghcr.io/<action-or-workflow-repo>:latest` | Container image for Local Docker mode (built from the root `Dockerfile`). |
-| `registry_token` | `codemender-local` | *(workflow token)* | Optional token used only to pull `runner_image` from GHCR when the workflow token cannot read the package. |
-| `container_runtime` | `codemender-local` | `'runsc'` | `'runsc'` installs gVisor (`runsc`) required by `cm`'s inner sandbox; `'runc'` opts out to plain Docker. |
-| `gvisor_release` | `codemender-local` | `'20260921.0'` | Pinned gVisor release (`yyyymmdd` or `yyyymmdd.N`) installed when `container_runtime` is `'runsc'`. |
+| Input                            | Action             | Default                                    | Description                                                                                                                                               |
+| :------------------------------- | :----------------- | :----------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gcp_project_id`                 | Both               | — (**required**)                           | Google Cloud project ID used by CodeMender for Vertex AI API calls.                                                                                       |
+| `gcp_workload_identity_provider` | Both               | — (**required**)                           | Full Workload Identity Provider resource name (`projects/<num>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`).                      |
+| `gcp_service_account`            | Both               | — (**required**)                           | Service account email impersonated via Workload Identity Federation.                                                                                      |
+| `fix`                            | Both               | `'true'`                                   | Run `cm-runner fix` for each finding and post suggestions/patches on the PR (`'false'` to scan only).                                                     |
+| `max_parallel_fixes`             | Both               | `'4'`                                      | Maximum number of `cm-runner fix` jobs/containers to run concurrently.                                                                                    |
+| `diff_workers`                   | Both               | `'8'`                                      | Number of concurrent workers for `cm-runner find-diff` (`1`..`16`).                                                                                       |
+| `log_level`                      | Both               | `'info'`                                   | `cm-runner` log level (`debug`, `info`, `warning`, `error`).                                                                                              |
+| `artifact_retention_days`        | Both               | `'3'`                                      | Days to retain the uploaded `codemender-report-pr-<N>` artifact (`report.sarif`, `report.md`, `findings/*.sarif`, `fixes/*.diff`, `verified/*.sarif`).    |
+| `gcs_transit_bucket`             | `codemender`       | `''`                                       | GCS bucket used for transit storage and report staging in Cloud Run mode (defaults to `CODEMENDER_GCS_TRANSIT_BUCKET` or `codemender-reports-<project>`). |
+| `cloud_run_job_name`             | `codemender`       | `''`                                       | Cloud Run Job name to execute in Cloud Run mode (defaults to `CODEMENDER_CLOUD_RUN_JOB_NAME` or `'codemender-runner'`).                                   |
+| `cloud_run_region`               | `codemender`       | `''`                                       | GCP region for the Cloud Run Job (defaults to `CODEMENDER_GCP_REGION` or `'us-central1'`).                                                                |
+| `runner_image`                   | `codemender-local` | `ghcr.io/<action-or-workflow-repo>:latest` | Container image for Local Docker mode (built from the root `Dockerfile`).                                                                                 |
+| `registry_token`                 | `codemender-local` | *(workflow token)*                         | Optional token used only to pull `runner_image` from GHCR when the workflow token cannot read the package.                                                |
+| `container_runtime`              | `codemender-local` | `'runsc'`                                  | `'runsc'` installs gVisor (`runsc`) required by `cm`'s inner sandbox; `'runc'` opts out to plain Docker.                                                  |
+| `gvisor_release`                 | `codemender-local` | `'20260921.0'`                             | Pinned gVisor release (`yyyymmdd` or `yyyymmdd.N`) installed when `container_runtime` is `'runsc'`.                                                       |
 
 ### Required Workflow Permissions
 
-| Permission | Purpose |
-| :--- | :--- |
-| `actions: read` | Download prior PR scan artifacts (`findings/*.sarif`) during on-demand verification. |
-| `contents: read` | Check out the repository (`fetch-depth: 0` so the PR base commit is present for `find-diff`). |
-| `id-token: write` | Request a GitHub OIDC token for Google Cloud Workload Identity Federation. |
-| `packages: read` | Pull the `cm-runner` image from GHCR with the workflow token (`codemender-local`). |
+| Permission             | Purpose                                                                                              |
+| :--------------------- | :--------------------------------------------------------------------------------------------------- |
+| `actions: read`        | Download prior PR scan artifacts (`findings/*.sarif`) during on-demand verification.                 |
+| `contents: read`       | Check out the repository (`fetch-depth: 0` so the PR base commit is present for `find-diff`).        |
+| `id-token: write`      | Request a GitHub OIDC token for Google Cloud Workload Identity Federation.                           |
+| `packages: read`       | Pull the `cm-runner` image from GHCR with the workflow token (`codemender-local`).                   |
 | `pull-requests: write` | Post and update the CodeMender summary comment, inline review suggestions, and verification replies. |
 
 ### Fork Pull Requests (Private and Internal Repositories)
 
 By default, GitHub grants fork pull request workflows a read-only token and no
 secrets. For **private or internal** repositories where forks come from trusted
-organization members, an administrator can enable fork PR scans under
-**Settings → Actions → General → Fork pull request workflows in private
-repositories**:
+organization members, an administrator can enable fork PR scans under **Settings
+→ Actions → General → Fork pull request workflows in private repositories**:
 
 - Enable **Run workflows from fork pull requests**
 - Enable **Send write tokens to workflows from pull requests**

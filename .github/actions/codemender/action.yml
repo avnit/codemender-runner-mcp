@@ -41,14 +41,16 @@ inputs:
     default: ''
   cloud_run_job_name:
     description: >-
-      Name of the Cloud Run Job to execute in Cloud Run mode. Defaults to 'codemender-runner'.
+      Name of the Cloud Run Job to execute in Cloud Run mode. Defaults to
+      CODEMENDER_CLOUD_RUN_JOB_NAME repo variable or 'codemender-runner'.
     required: false
-    default: 'codemender-runner'
+    default: ''
   cloud_run_region:
     description: >-
-      GCP region for Cloud Run Job. Defaults to 'us-central1'.
+      GCP region for Cloud Run Job. Defaults to CODEMENDER_GCP_REGION repo
+      variable or 'us-central1'.
     required: false
-    default: 'us-central1'
+    default: ''
   diff_workers:
     description: >-
       Number of concurrent workers for `cm-runner find-diff` (1..16).
