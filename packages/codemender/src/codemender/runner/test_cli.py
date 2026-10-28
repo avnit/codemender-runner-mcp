@@ -846,6 +846,7 @@ class TestPackagingAndDockerContract(unittest.TestCase):
     self.assertIn("docker/cloudrun.Dockerfile", cb_content)
     self.assertIn("BASE_IMAGE=codemender-runner:base", cb_content)
     self.assertIn("--all-tags", cb_content)
+    self.assertIn("logging: CLOUD_LOGGING_ONLY", cb_content)
     self.assertNotIn("substitutions:", cb_content)
     self.assertIn(
         "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/codemender-runner:${_IMAGE_TAG}",

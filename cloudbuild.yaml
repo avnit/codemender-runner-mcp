@@ -45,3 +45,6 @@ steps:
       - 'push'
       - '--all-tags'
       - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/codemender-runner'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
