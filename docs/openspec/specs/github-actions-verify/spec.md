@@ -302,21 +302,37 @@ file required by `cm-runner verify --finding` using a two-tier strategy:
    - `cm-home/`: an empty directory for `~/.codemender`.
    - `out/`: a directory containing the resolved single-finding SARIF file
      (`finding.sarif`).
-2. The action MUST run
+2. The action MUST configure the launcher's output directory via
+   `launcher.with_dirs(out_dir=out_dir)` and run
    `cm-runner verify --repo /workspace --finding /out/finding.sarif --out /out`
-   via `LocalDockerLauncher` (under gVisor `runsc` by default) with an outer
-   timeout of `VERIFY_TIMEOUT_SECONDS = 35 * 60` (35 minutes, exceeding
-   `cm-runner verify`'s internal 30-minute ceiling).
-3. On `SIGINT` or `SIGTERM` (workflow cancellation or job timeout), the action
-   MUST stop the running container (`launcher.stop()`) and update (`PATCH`) the
+   via the configured `Launcher` (`LocalDockerLauncher` under gVisor `runsc` for
+   `codemender-local`, or `CloudRunLauncher` via `CloudRunClient` for
+   `codemender`) with an outer launcher timeout exceeding `cm-runner verify`'s
+   internal `_VERIFY_TIMEOUT_SEC` ceiling.
+3. When executing via `CloudRunLauncher`, the launcher MUST:
+   - Rewrite container path arguments (`/workspace`, `/out`, and
+     `/out/finding.sarif`) to the staged host directory paths (configured via
+     `with_dirs` or `CloudRunConfig`) so `CloudRunClient` uploads the
+     single-finding SARIF file to GCS transit storage (`input/finding.sarif`).
+   - Download the verified output SARIF (`output/finding.sarif`) from GCS
+     transit storage back to `out_dir/finding.sarif` on the host runner and
+     populate `RunResult.stdout` with its raw bytes so downstream result
+     handling (`REQ-0007`) operates identically across both backends.
+4. On `SIGINT` or `SIGTERM` (workflow cancellation or job timeout), the action
+   MUST stop the running execution (`launcher.stop()`) and update (`PATCH`) the
    in-progress reply comment to `<!-- codemender-verify:failed finding:<finding_id> -->`
    with a cancellation notice so the thread is never left permanently locked in
    `in-progress`.
 
+#### Scenario: On-demand verify executes via CloudRunLauncher
+- **GIVEN** `CODEMENDER_BACKEND="cloudrun"` and a resolved single-finding SARIF file staged at `out_dir/finding.sarif`
+- **WHEN** `run_verify` invokes `launcher.run("verify", ["--repo", "/workspace", "--finding", "/out/finding.sarif", "--out", "/out"])`
+- **THEN** `CloudRunLauncher` MUST translate `/out/finding.sarif` to the staged host path, upload `input/finding.sarif` to GCS transit storage, execute the Cloud Run job with `CMD="verify"`, download `output/finding.sarif` back to `out_dir/finding.sarif` (and `RunResult.stdout`), and update the PR review reply in place.
+
 #### Scenario: Cancelled job releases the in-progress lock
-- **GIVEN** a running `cm-runner verify` container and an `in-progress` reply comment on the PR
+- **GIVEN** a running `cm-runner verify` execution and an `in-progress` reply comment on the PR
 - **WHEN** the process receives `SIGTERM`
-- **THEN** the action MUST stop the container and update the reply comment's marker to `<!-- codemender-verify:failed finding:<finding_id> -->`.
+- **THEN** the action MUST stop the launcher and update the reply comment's marker to `<!-- codemender-verify:failed finding:<finding_id> -->`.
 
 ---
 
@@ -325,9 +341,10 @@ file required by `cm-runner verify --finding` using a two-tier strategy:
 - **CUJ UUID:** `cuj-gha-verify-result-reply`
 
 1. When `cm-runner verify` finishes, the action MUST inspect its exit code and
-   parse the emitted SARIF 2.1.0 JSON from `--out/finding.sarif` (falling back
-   to `stdout`), reading `runs[0].results[0].properties.status` and
-   `runs[0].results[0].properties.dismiss_reason`.
+   parse the emitted SARIF 2.1.0 JSON from `RunResult.stdout` (populated from
+   container `stdout` in local mode or the downloaded `output/finding.sarif`
+   artifact in Cloud Run mode), reading `runs[0].results[0].properties.status`
+   and `runs[0].results[0].properties.dismiss_reason`.
 2. The action MUST update (`PATCH /repos/{repo}/pulls/comments/{reply_comment_id}`)
    the in-progress reply comment in place (falling back to posting a new thread
    reply if `PATCH` fails) with one of the following outcomes:

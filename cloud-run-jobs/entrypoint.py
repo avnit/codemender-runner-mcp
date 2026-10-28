@@ -241,17 +241,24 @@ def write_receipt(
   finding_count = 0
 
   sarif_file = os.path.join(OUTPUT_DIR, "report.sarif")
+  verified_sarif_file = os.path.join(OUTPUT_DIR, "finding.sarif")
   findings_file = os.path.join(OUTPUT_DIR, "findings.json")
 
   if os.path.isfile(sarif_file):
     artifacts["sarif"] = f"{prefix}/report.sarif"
+  elif os.path.isfile(verified_sarif_file):
+    artifacts["sarif"] = f"{prefix}/finding.sarif"
   if os.path.isfile(findings_file):
     artifacts["findings"] = f"{prefix}/findings.json"
 
   count_source = (
       sarif_file
       if os.path.isfile(sarif_file)
-      else (findings_file if os.path.isfile(findings_file) else "")
+      else (
+          verified_sarif_file
+          if os.path.isfile(verified_sarif_file)
+          else (findings_file if os.path.isfile(findings_file) else "")
+      )
   )
   if count_source:
     try:

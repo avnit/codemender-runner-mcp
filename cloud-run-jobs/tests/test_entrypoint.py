@@ -449,6 +449,52 @@ class TestCloudRunEntrypoint(unittest.TestCase):
     self.assertEqual(receipt["command"], "fix")
     self.assertIn("patch", receipt["artifacts"])
 
+  def test_verify_command_stages_finding_uri_and_indexes_sarif_in_receipt(self):
+    archive_path = self._create_mock_repo()
+    finding_src = os.path.join(self.temp_dir, "single_finding.sarif")
+    sarif_payload = {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "CodeMender", "version": "0.12.0"}},
+            "results": [{
+                "ruleId": "CWE-78",
+                "level": "error",
+                "message": {"text": "Command injection in sample.txt"},
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": "sample.txt"},
+                        "region": {"startLine": 1, "endLine": 1},
+                    }
+                }],
+            }],
+        }],
+    }
+    with open(finding_src, "w", encoding="utf-8") as f:
+      json.dump(sarif_payload, f)
+
+    out_dest = os.path.join(self.gcs_sim_dir, "verify_out")
+    result = self._run_entrypoint(
+        "verify",
+        env={
+            "PAYLOAD_URI": f"file://{archive_path}",
+            "FINDING_URI": f"file://{finding_src}",
+            "OUTPUT_URI": f"file://{out_dest}",
+        },
+    )
+    self.assertEqual(result.returncode, 0, f"Stderr: {result.stderr}")
+    self.assertTrue(os.path.exists(os.path.join(self.inputs_dir, "finding.sarif")))
+    self.assertTrue(os.path.exists(os.path.join(out_dest, "finding.sarif")))
+    receipt_file = os.path.join(out_dest, "receipt.json")
+    self.assertTrue(os.path.exists(receipt_file))
+    with open(receipt_file, "r", encoding="utf-8") as f:
+      receipt = json.load(f)
+    self.assertEqual(receipt["status"], "SUCCESS")
+    self.assertEqual(receipt["command"], "verify")
+    self.assertEqual(receipt["finding_count"], 1)
+    self.assertIn("sarif", receipt["artifacts"])
+    self.assertTrue(receipt["artifacts"]["sarif"].endswith("/finding.sarif"))
+
   def test_init_command_success(self):
     archive_path = self._create_mock_repo()
     result = self._run_entrypoint(

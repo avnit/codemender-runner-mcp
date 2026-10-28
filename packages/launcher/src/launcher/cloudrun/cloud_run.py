@@ -69,6 +69,8 @@ class CloudRunLauncher(Launcher):
       client: Any,
       log_level: str = "info",
       timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
+      workspace_dir: Optional[str] = None,
+      out_dir: Optional[str] = None,
   ):
     """Initializes the launcher.
 
@@ -76,6 +78,8 @@ class CloudRunLauncher(Launcher):
       client: CloudRunClient instance or mock implementing run().
       log_level: Log verbosity string passed to the client.
       timeout_seconds: Hard limit for command execution.
+      workspace_dir: Optional host directory mapped from `/workspace`.
+      out_dir: Optional host directory mapped from `/out`.
 
     Raises:
       ValueError: if client is None or not provided.
@@ -87,7 +91,31 @@ class CloudRunLauncher(Launcher):
     self.client = client
     self.log_level = log_level
     self.timeout_seconds = timeout_seconds
+    self.workspace_dir = workspace_dir
+    self.out_dir = out_dir
     self._stopped = False
+
+  def with_dirs(
+      self,
+      *,
+      workspace_dir: Optional[str] = None,
+      cm_home_dir: Optional[str] = None,
+      out_dir: Optional[str] = None,
+      timeout_seconds: Optional[int] = None,
+  ) -> "CloudRunLauncher":
+    """Returns a launcher with the same client and settings but different directories."""
+    del cm_home_dir
+    return CloudRunLauncher(
+        client=self.client,
+        log_level=self.log_level,
+        timeout_seconds=(
+            self.timeout_seconds if timeout_seconds is None else timeout_seconds
+        ),
+        workspace_dir=(
+            self.workspace_dir if workspace_dir is None else workspace_dir
+        ),
+        out_dir=self.out_dir if out_dir is None else out_dir,
+    )
 
   def stop(self) -> None:
     """Stops any in-flight Cloud Run Job execution."""
@@ -201,19 +229,51 @@ class CloudRunLauncher(Launcher):
     finally:
       shutil.rmtree(folder, ignore_errors=True)
 
-  def run(self, command: str, args: Sequence[str] = ()) -> RunResult:
+  def run(
+      self,
+      command: str,
+      args: Sequence[str] = (),
+      log_path: Optional[str] = None,
+  ) -> RunResult:
     """Runs a command via the in-process CloudRunClient and waits for completion."""
+    del log_path
     # Governing: docs/openspec/specs/github-actions/spec.md#req-0003
+    # Governing: docs/openspec/specs/github-actions-verify/spec.md#req-0006
+    client_cfg = getattr(self.client, "config", None)
+    cfg_ws = (
+        self.workspace_dir
+        if self.workspace_dir is not None
+        else getattr(client_cfg, "workspace_dir", None)
+    )
+    ws_dir = cfg_ws.strip() if isinstance(cfg_ws, str) else ""
+    cfg_out = (
+        self.out_dir
+        if self.out_dir is not None
+        else getattr(client_cfg, "out_dir", None)
+    )
+    out_dir = cfg_out.strip() if isinstance(cfg_out, str) else ""
+
+    rewritten_args = []
+    for arg in args:
+      if arg == "/workspace" and ws_dir:
+        rewritten_args.append(ws_dir)
+      elif arg == "/out" and out_dir:
+        rewritten_args.append(out_dir)
+      elif arg.startswith("/out/") and out_dir:
+        rewritten_args.append(os.path.join(out_dir, arg[len("/out/") :]))
+      else:
+        rewritten_args.append(arg)
+
     logger.info(
         "Executing Cloud Run task in-process: command=%s args=%s",
         command,
-        list(args),
+        rewritten_args,
     )
 
     try:
       receipt = self.client.run(
           command=command,
-          args=list(args),
+          args=rewritten_args,
           log_level=self.log_level,
           timeout_seconds=self.timeout_seconds,
       )

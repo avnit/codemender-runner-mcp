@@ -142,9 +142,9 @@ class LocalDockerLauncher(Launcher):
   def with_dirs(
       self,
       *,
-      workspace_dir: Optional[str],
-      cm_home_dir: Optional[str],
-      out_dir: Optional[str],
+      workspace_dir: Optional[str] = None,
+      cm_home_dir: Optional[str] = None,
+      out_dir: Optional[str] = None,
       timeout_seconds: Optional[int] = None,
   ) -> "LocalDockerLauncher":
     """Returns a launcher with the same image and settings but different directories.
@@ -169,9 +169,11 @@ class LocalDockerLauncher(Launcher):
         ),
         docker_binary=self.docker_binary,
         runtime=self.runtime,
-        workspace_dir=workspace_dir,
-        cm_home_dir=cm_home_dir,
-        out_dir=out_dir,
+        workspace_dir=(
+            self.workspace_dir if workspace_dir is None else workspace_dir
+        ),
+        cm_home_dir=self.cm_home_dir if cm_home_dir is None else cm_home_dir,
+        out_dir=self.out_dir if out_dir is None else out_dir,
         gcp_credentials_file=self.gcp_credentials_file,
         gcp_project=self.gcp_project,
     )

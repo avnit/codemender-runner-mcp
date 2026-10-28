@@ -136,6 +136,9 @@ class ExecutionReceipt:
         os.path.join(out_dir, "report.sarif") if out_dir else "",
         os.path.join("output", "report.sarif"),
         "report.sarif",
+        os.path.join(out_dir, "finding.sarif") if out_dir else "",
+        os.path.join("output", "finding.sarif"),
+        "finding.sarif",
     ]:
       if cand and os.path.isfile(cand):
         try:
@@ -431,6 +434,8 @@ class CloudRunClient:
       out_dir = self.config.out_dir or os.environ.get("CODEMENDER_OUT_DIR", "").strip()
 
     raw_finding = _parse_cli_arg(args, "--finding", "")
+    if raw_finding.startswith("/out/") and out_dir:
+      raw_finding = os.path.join(out_dir, raw_finding[len("/out/") :])
 
     run_id = self.config.run_id or os.environ.get("GITHUB_RUN_ID", "manual")
     attempt = self.config.run_attempt or os.environ.get("GITHUB_RUN_ATTEMPT", "1")
@@ -442,6 +447,7 @@ class CloudRunClient:
     output_uri = f"{gcs_prefix}/output"
     receipt_gcs_uri = f"{output_uri}/receipt.json"
     sarif_gcs_uri = f"{output_uri}/report.sarif"
+    verified_sarif_gcs_uri = f"{output_uri}/finding.sarif"
     diff_gcs_uri = f"{output_uri}/finding.diff"
     log_gcs_uri = f"{output_uri}/runner.log"
     manifest_gcs_uri = f"{gcs_prefix}/input/manifest.json"
@@ -633,6 +639,27 @@ class CloudRunClient:
             else:
               diff_name = "finding.diff"
             shutil.copy2(local_diff, os.path.join(out_dir, diff_name))
+          _gcloud_transfer(
+              log_gcs_uri, os.path.join(out_dir, "runner.log"), check=False
+          )
+      elif command == "verify":
+        # Governing: docs/openspec/specs/github-actions-verify/spec.md#req-0006
+        local_verified = os.path.join(temp_dir, "finding.sarif")
+        _gcloud_transfer(verified_sarif_gcs_uri, local_verified, check=False)
+        if os.path.isfile(local_verified):
+          with open(local_verified, "rb") as f:
+            output_bytes = f.read()
+        if out_dir:
+          os.makedirs(out_dir, exist_ok=True)
+          if os.path.isfile(local_receipt):
+            shutil.copy2(local_receipt, os.path.join(out_dir, "receipt.json"))
+          if os.path.isfile(local_verified):
+            shutil.copy2(local_verified, os.path.join(out_dir, "finding.sarif"))
+            if raw_finding:
+              stem = os.path.splitext(os.path.basename(raw_finding))[0]
+              sarif_name = f"{stem}.sarif"
+              if sarif_name != "finding.sarif":
+                shutil.copy2(local_verified, os.path.join(out_dir, sarif_name))
           _gcloud_transfer(
               log_gcs_uri, os.path.join(out_dir, "runner.log"), check=False
           )

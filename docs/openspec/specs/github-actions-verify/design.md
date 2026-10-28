@@ -165,6 +165,27 @@ Governed by [SPEC-GHA-VERIFY](spec.md), [SPEC-VERIFY](../verify/spec.md),
   comment reconstruction fallback ensures `@cm-runner verify` continues to work
   reliably on long-lived PRs after workflow artifacts expire.
 
+### Decision 5: Symmetric Backend Execution (`LocalDockerLauncher` & `CloudRunLauncher`) {#decision-5}
+
+- **Choice:** Keep `run_verify()` in `packages/repohost` 100% backend-agnostic by
+  configuring the output directory via `launcher.with_dirs(out_dir=out_dir)` and
+  invoking `launcher.run("verify", ["--repo", "/workspace", "--finding", "/out/finding.sarif", "--out", "/out"])`.
+  - In `LocalDockerLauncher` (`codemender-local`), `/workspace` and `/out` are
+    bind-mounted directly into the gVisor container, and `cm-runner verify`
+    writes the updated SARIF to `/out/finding.sarif` and `stdout`.
+  - In `CloudRunLauncher` (`codemender`), `CloudRunLauncher.run()` rewrites
+    `/workspace`, `/out`, and `/out/<file>` arguments to the staged host paths
+    (matching `run_isolated()`), allowing `CloudRunClient.run()` to upload
+    `finding.sarif` to `gs://<bucket>/<run_tag>/input/finding.sarif`. Once the
+    Cloud Run job completes `cm-runner verify`, `CloudRunClient.run()` downloads
+    `gs://<bucket>/<run_tag>/output/finding.sarif` back to `out_dir/finding.sarif`
+    on the host and populates `ExecutionReceipt.stdout` so `run_verify()` parses
+    the result identically to local execution.
+- **Why:** Reusing the existing `Launcher` contract avoids any backend-specific
+  branching in `repohost` ([SPEC-GHA REQ-0008](../github-actions/spec.md#req-0008))
+  and leverages the `CMD == "verify"` handling already present in
+  `cloud-run-jobs/entrypoint.py`.
+
 ---
 
 ## Architecture
@@ -183,9 +204,9 @@ flowchart TD
     F -->|"Already done"| G["React 👀 + Reply with link to existing result"] --> E
     F -->|"Active count >= 4"| H["React 👀 + Reply max 4 concurrent verifies reached"] --> E
     F -->|"Allowed"| I["React 👀 + Post in-progress reply\n(should_run=true, reply_comment_id=...)"]
-    I --> J["WIF Auth + Install gVisor + Pull cm-runner image"]
+    I --> J["WIF Auth (+ gVisor & image pull in local mode)"]
     J --> K["Resolve finding.sarif\n(1. PR artifact -> 2. Reconstruct from comment)"]
-    K --> L["Run cm-runner verify in gVisor container"]
+    K --> L["Run cm-runner verify via Launcher\n(LocalDockerLauncher gVisor or CloudRunLauncher microVM)"]
     L --> M["PATCH in-progress reply in place\n(VERIFIED / DISMISSED / OPEN / FAILED)"]
     M --> N["Upload verified/*.sarif artifact"]
 ```

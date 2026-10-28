@@ -619,6 +619,150 @@ class TestCloudRunClient(unittest.TestCase):
       release_payload_lock.set()
       holder.join(timeout=2)
 
+  # Governing: docs/openspec/specs/github-actions-verify/spec.md#req-0006, SPEC-GHA-VERIFY
+  @patch("launcher.cloudrun.client.subprocess.Popen")
+  @patch("launcher.cloudrun.client._package_workspace")
+  @patch("launcher.cloudrun.client._gcloud_transfer")
+  def test_run_verify_uploads_finding_and_downloads_verified_sarif(
+      self, mock_transfer, mock_package, mock_popen
+  ):
+    with tempfile.TemporaryDirectory() as ws_dir, tempfile.TemporaryDirectory() as out_dir:
+      input_sarif_path = os.path.join(out_dir, "finding.sarif")
+      with open(input_sarif_path, "wb") as f:
+        f.write(b'{"version": "2.1.0", "runs": [{"results": [{"ruleId": "R1"}]}]}')
+
+      verified_sarif_bytes = (
+          b'{"version": "2.1.0", "runs": [{"results": [{"ruleId": "R1",'
+          b' "properties": {"status": "DISMISSED", "dismiss_reason": "safe"}}]}]}'
+      )
+
+      cfg = CloudRunConfig(
+          project="test-proj",
+          bucket="test-bucket",
+          job_name="codemender-runner",
+          region="us-central1",
+          workspace_dir=ws_dir,
+          out_dir=out_dir,
+      )
+      client = CloudRunClient(cfg)
+      mock_popen.return_value = _fake_popen(returncode=0)
+
+      uploaded_finding_uris = []
+      uploaded_manifests = []
+
+      def fake_transfer(src, dest, check=True):
+        del check
+        if dest.endswith("/input/finding.sarif"):
+          uploaded_finding_uris.append((src, dest))
+          return True
+        if src.endswith("manifest.json"):
+          with open(src, "r", encoding="utf-8") as mf:
+            uploaded_manifests.append(json.load(mf))
+          return True
+        if dest.endswith("receipt.json"):
+          with open(dest, "w", encoding="utf-8") as rf:
+            json.dump(
+                {"status": "SUCCESS", "exit_code": 0, "command": "verify"}, rf
+            )
+          return True
+        if src.endswith("/output/finding.sarif") and dest.endswith("finding.sarif"):
+          with open(dest, "wb") as sf:
+            sf.write(verified_sarif_bytes)
+          return True
+        return True
+
+      mock_transfer.side_effect = fake_transfer
+
+      receipt = client.run(
+          "verify",
+          ["--repo", "/workspace", "--finding", "/out/finding.sarif", "--out", "/out"],
+      )
+
+      self.assertEqual(receipt.status, "SUCCESS")
+      self.assertEqual(receipt.exit_code, 0)
+      self.assertEqual(receipt.command, "verify")
+      self.assertEqual(receipt.stdout, verified_sarif_bytes)
+      self.assertEqual(len(uploaded_finding_uris), 1)
+      self.assertEqual(uploaded_finding_uris[0][0], input_sarif_path)
+      self.assertEqual(len(uploaded_manifests), 1)
+      self.assertIn("finding_uri", uploaded_manifests[0])
+      with open(os.path.join(out_dir, "finding.sarif"), "rb") as f:
+        self.assertEqual(f.read(), verified_sarif_bytes)
+      mock_package.assert_called_once_with(ws_dir, unittest.mock.ANY)
+
+  # Governing: docs/openspec/specs/github-actions-verify/spec.md#req-0006, SPEC-GHA/REQ-0008
+  @patch("launcher.cloudrun.client.subprocess.Popen")
+  @patch("launcher.cloudrun.client._package_workspace")
+  @patch("launcher.cloudrun.client._gcloud_transfer")
+  def test_run_verify_with_custom_finding_name_writes_canonical_and_custom_sarif(
+      self, mock_transfer, mock_package, mock_popen
+  ):
+    with tempfile.TemporaryDirectory() as ws_dir, tempfile.TemporaryDirectory() as out_dir:
+      input_sarif_path = os.path.join(out_dir, "custom-finding.sarif")
+      with open(input_sarif_path, "wb") as f:
+        f.write(b'{"version": "2.1.0", "runs": [{"results": [{"ruleId": "R1"}]}]}')
+
+      verified_sarif_bytes = (
+          b'{"version": "2.1.0", "runs": [{"results": [{"ruleId": "R1",'
+          b' "properties": {"status": "VERIFIED"}}]}]}'
+      )
+
+      cfg = CloudRunConfig(
+          project="test-proj",
+          bucket="test-bucket",
+          job_name="codemender-runner",
+          region="us-central1",
+          workspace_dir=ws_dir,
+          out_dir=out_dir,
+      )
+      client = CloudRunClient(cfg)
+      mock_popen.return_value = _fake_popen(returncode=0)
+
+      def fake_transfer(src, dest, check=True):
+        del check
+        if dest.endswith("receipt.json"):
+          with open(dest, "w", encoding="utf-8") as rf:
+            json.dump(
+                {"status": "SUCCESS", "exit_code": 0, "command": "verify"}, rf
+            )
+          return True
+        if src.endswith("/output/finding.sarif") and dest.endswith("finding.sarif"):
+          with open(dest, "wb") as sf:
+            sf.write(verified_sarif_bytes)
+          return True
+        return True
+
+      mock_transfer.side_effect = fake_transfer
+
+      client.run(
+          "verify",
+          [
+              "--repo",
+              "/workspace",
+              "--finding",
+              "/out/custom-finding.sarif",
+              "--out",
+              "/out",
+          ],
+      )
+
+      for filename in ("finding.sarif", "custom-finding.sarif"):
+        with open(os.path.join(out_dir, filename), "rb") as f:
+          self.assertEqual(f.read(), verified_sarif_bytes)
+      mock_package.assert_called_once_with(ws_dir, unittest.mock.ANY)
+
+  def test_execution_receipt_resolve_stdout_falls_back_to_finding_sarif(self):
+    from launcher.cloudrun.client import ExecutionReceipt  # pylint: disable=g-import-not-at-top
+
+    with tempfile.TemporaryDirectory() as out_dir:
+      finding_path = os.path.join(out_dir, "finding.sarif")
+      payload = b'{"version": "2.1.0", "runs": []}'
+      with open(finding_path, "wb") as f:
+        f.write(payload)
+
+      with patch.dict(os.environ, {"CODEMENDER_OUT_DIR": out_dir}, clear=False):
+        receipt = ExecutionReceipt(command="verify")
+        self.assertEqual(receipt.stdout, payload)
 
 
 class TestPackageWorkspace(unittest.TestCase):

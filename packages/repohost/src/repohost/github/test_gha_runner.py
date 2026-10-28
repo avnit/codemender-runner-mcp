@@ -150,6 +150,7 @@ def _scan_result(sarif_dict=None, exit_code=0, raw=None):
 
 def _launcher(scan_result=None, error=None):
   launcher = MagicMock()
+  launcher.with_dirs.return_value = launcher
   if error:
     launcher.run.side_effect = error
     return launcher
@@ -1235,6 +1236,86 @@ class TestM3OnDemandVerify(unittest.TestCase):
     updated_body = mock_update.call_args.args[3]
     self.assertIn("<!-- codemender-verify:done finding:aabbcc112233 status:DISMISSED -->", updated_body)
     self.assertIn("Input is sanitized upstream.", updated_body)
+
+  @patch.object(gha_runner, "update_review_comment")
+  @patch.object(gha_runner, "get_sticky_comment_body", return_value="")
+  @patch.object(gha_runner, "fetch_finding_sarif_from_artifact", return_value=None)
+  @patch.object(gha_runner, "get_review_comment")
+  def test_run_verify_with_cloud_run_launcher(
+      self, mock_get_parent, _mock_artifact, _mock_sticky, mock_update
+  ):
+    event = self._write_event()
+    mock_get_parent.return_value = {
+        "id": 100,
+        "user": {"type": "Bot"},
+        "path": "src/archive/unpack.py",
+        "line": 18,
+        "body": (
+            "<!-- codemender-finding:aabbcc112233 -->\n"
+            "**CodeMender fix for finding 1:** 🔴 High / Critical · `CWE-78` · `Cmd Inj`"
+        ),
+    }
+    mock_update.return_value = gha_runner.fix_comments.github.ReviewResult(
+        ok=True, comment_id=301
+    )
+    verified_doc = {
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "CodeMender"}},
+            "results": [{
+                "ruleId": "CWE-78",
+                "level": "error",
+                "message": {"text": "Cmd Inj"},
+                "properties": {
+                    "status": "VERIFIED",
+                },
+            }],
+        }],
+    }
+    verified_bytes = json.dumps(verified_doc).encode("utf-8")
+    out_dir = os.path.join(self._temp_dir, "cloudrun-verify-out")
+    observed_args = {}
+
+    def _fake_cr_run(command, args, log_level="info", timeout_seconds=3600):
+      del log_level, timeout_seconds
+      observed_args["command"] = command
+      observed_args["args"] = list(args)
+      finding_arg = args[args.index("--finding") + 1]
+      observed_args["finding_exists"] = os.path.isfile(finding_arg)
+      return MagicMock(status="SUCCESS", exit_code=0, stdout=verified_bytes, events=[])
+
+    mock_client = MagicMock()
+    mock_client.config.workspace_dir = self._temp_dir
+    mock_client.config.out_dir = "/stale/prepopulated/out"
+    mock_client.run.side_effect = _fake_cr_run
+    launcher = CloudRunLauncher(client=mock_client)
+
+    rc = gha_runner.run_verify(
+        event,
+        self._env(CODEMENDER_VERIFY_REPLY_ID="301"),
+        launcher,
+        out_dir=out_dir,
+    )
+    self.assertEqual(rc, 0)
+    self.assertEqual(mock_client.config.out_dir, "/stale/prepopulated/out")
+    self.assertEqual(observed_args["command"], "verify")
+    self.assertTrue(observed_args["finding_exists"])
+    self.assertEqual(
+        observed_args["args"],
+        [
+            "--repo",
+            self._temp_dir,
+            "--finding",
+            os.path.join(out_dir, "finding.sarif"),
+            "--out",
+            out_dir,
+        ],
+    )
+    self.assertTrue(
+        os.path.isfile(os.path.join(out_dir, "verified", "finding-aabbcc112233.sarif"))
+    )
+    updated_body = mock_update.call_args.args[3]
+    self.assertIn("<!-- codemender-verify:done finding:aabbcc112233 status:VERIFIED -->", updated_body)
 
   @patch("subprocess.run")
   def test_preflight_pull_request_verifies_base_commit_present(self, mock_run):

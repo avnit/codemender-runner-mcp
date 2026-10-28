@@ -889,10 +889,14 @@ def run_verify(
       return True
     return reply_to_comment(repo, pr_number, token, parent_id, body).ok
 
-  if out_dir is None:
+  if not out_dir:
     out_dir = tempfile.mkdtemp(
         prefix="codemender-verify-out-", dir=env.get("RUNNER_TEMP") or None
     )
+  else:
+    os.makedirs(out_dir, exist_ok=True)
+
+  launcher = launcher.with_dirs(out_dir=out_dir)
 
   sarif_doc = fetch_finding_sarif_from_artifact(
       repo, pr_number, token, finding_id

@@ -548,7 +548,70 @@ class TestCloudRunLauncher(unittest.TestCase):
       self.assertEqual(r.log, f"log for {r.key}\n")
       self.assertEqual(r.error, "")
 
+  # Governing: docs/openspec/specs/github-actions-verify/spec.md#req-0006, SPEC-GHA-VERIFY
+  def test_run_rewrites_container_paths_for_verify_when_config_dirs_set(self):
+    mock_client = MagicMock()
+    mock_client.config.workspace_dir = "/host/ws"
+    mock_client.config.out_dir = "/host/out"
+    sarif_bytes = b'{"version": "2.1.0", "runs": [{"results": [{"properties": {"status": "VERIFIED"}}]}]}'
+    mock_client.run.return_value = MagicMock(
+        status="SUCCESS", exit_code=0, stdout=sarif_bytes, events=[]
+    )
+
+    launcher = CloudRunLauncher(client=mock_client)
+    res = launcher.run(
+        "verify",
+        ["--repo", "/workspace", "--finding", "/out/finding.sarif", "--out", "/out"],
+    )
+
+    self.assertTrue(res.ok)
+    self.assertEqual(res.stdout, sarif_bytes)
+    mock_client.run.assert_called_once_with(
+        command="verify",
+        args=[
+            "--repo",
+            "/host/ws",
+            "--finding",
+            "/host/out/finding.sarif",
+            "--out",
+            "/host/out",
+        ],
+        log_level="info",
+        timeout_seconds=3600,
+    )
+
+  # Governing: docs/openspec/specs/github-actions-verify/spec.md#req-0006, SPEC-GHA-VERIFY
+  def test_with_dirs_overrides_client_config_dirs(self):
+    mock_client = MagicMock()
+    mock_client.config.workspace_dir = "/host/ws"
+    mock_client.config.out_dir = "/stale/out"
+    sarif_bytes = b'{"version": "2.1.0", "runs": [{"results": [{"properties": {"status": "VERIFIED"}}]}]}'
+    mock_client.run.return_value = MagicMock(
+        status="SUCCESS", exit_code=0, stdout=sarif_bytes, events=[]
+    )
+
+    launcher = CloudRunLauncher(client=mock_client).with_dirs(out_dir="/override/out")
+    res = launcher.run(
+        "verify",
+        ["--repo", "/workspace", "--finding", "/out/finding.sarif", "--out", "/out"],
+    )
+
+    self.assertTrue(res.ok)
+    self.assertEqual(mock_client.config.out_dir, "/stale/out")
+    mock_client.run.assert_called_once_with(
+        command="verify",
+        args=[
+            "--repo",
+            "/host/ws",
+            "--finding",
+            "/override/out/finding.sarif",
+            "--out",
+            "/override/out",
+        ],
+        log_level="info",
+        timeout_seconds=3600,
+    )
+
 
 if __name__ == "__main__":
   unittest.main()
-

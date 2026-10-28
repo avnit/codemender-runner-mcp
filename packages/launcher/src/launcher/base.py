@@ -170,6 +170,23 @@ class Launcher(abc.ABC):
     """
     raise NotImplementedError
 
+  def with_dirs(
+      self,
+      *,
+      workspace_dir: Optional[str] = None,
+      cm_home_dir: Optional[str] = None,
+      out_dir: Optional[str] = None,
+      timeout_seconds: Optional[int] = None,
+  ) -> "Launcher":
+    """Returns a launcher configured with the given host directories.
+
+    Intentionally returns `self` by default rather than `@abc.abstractmethod`
+    so test doubles that only stub `run()` do not need to implement directory
+    reconfiguration.
+    """
+    del workspace_dir, cm_home_dir, out_dir, timeout_seconds
+    return self
+
   def stop(self) -> None:
     """Stops any in-flight containers started by this launcher.
 
