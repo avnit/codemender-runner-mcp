@@ -46,8 +46,7 @@ Governed by `var.execution_mode` (`"local"` or `"cloud_run"`):
 1. **Cloud Run Execution Mode (`execution_mode = "cloud_run"`):** Root
    `terraform/` automatically provisions `module.gcp[0]`
    (`terraform/modules/gcp`) and wires its outputs (`reports_bucket_name`,
-   `runner_job_name`, `runner_service_account_email`,
-   `worker_service_account_email`) into `module.wif` (`terraform/modules/wif`).
+   `runner_job_name`, `runner_service_account_email`) into `module.wif` (`terraform/modules/wif`).
    GitHub Actions acts purely as an orchestrator client that stages repository
    snapshots to the GCS transit bucket, triggers the remote Cloud Run Job
    (`gcloud run jobs execute --args ... --wait`), and downloads the resulting
@@ -55,7 +54,7 @@ Governed by `var.execution_mode` (`"local"` or `"cloud_run"`):
    Account is granted strictly the predefined roles required to stage transit
    objects (`roles/storage.objectUser`), execute and poll Cloud Run Jobs
    (`roles/run.developer`), and act as (`roles/iam.serviceAccountUser`) the
-   Cloud Run Job's runtime Service Accounts—while omitting
+   Cloud Run Job's runtime Service Account—while omitting
    `roles/aiplatform.user` on the WIF caller Service Account in accordance with
    [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md).
 
@@ -85,7 +84,7 @@ entrypoint at `terraform/` and reusable child modules under
    - Child modules MUST reside at `terraform/modules/wif/` (`apis.tf`,
      `github.tf`, `iam.tf`, `outputs.tf`, `provider.tf`, `variables.tf`,
      `tests/wif_test.tftest.hcl`) and `terraform/modules/gcp/` (`apis.tf`,
-     `compute.tf`, `iam.tf`, `outputs.tf`, `provider.tf`, `secret.tf`,
+     `compute.tf`, `iam.tf`, `outputs.tf`, `provider.tf`,
      `storage.tf`, `variables.tf`, `vpc.tf`, `tests/*.tftest.hcl`). Legacy
      top-level `terraform/gha_wif/`, `terraform/wif/`, and `terraform/gcp/`
      directories MUST NOT exist.
@@ -344,7 +343,7 @@ direct Vertex AI access to the WIF caller identity:
 
 - **GIVEN** `var.execution_mode = "cloud_run"`,
   `var.gcs_transit_bucket_name = "cm-transit-bucket"`, and
-  `var.cloud_run_runtime_sa_emails = ["codemender-runner-sa@test-project.iam.gserviceaccount.com", "codemender-worker-sa@test-project.iam.gserviceaccount.com"]`
+  `var.cloud_run_runtime_sa_emails = ["codemender-runner-sa@test-project.iam.gserviceaccount.com"]`
 - **WHEN** `terraform plan` is executed
 - **THEN** `google_project_service.enabled_apis` includes `run.googleapis.com`
   and `storage.googleapis.com` and excludes `aiplatform.googleapis.com`
@@ -354,7 +353,7 @@ direct Vertex AI access to the WIF caller identity:
 - **AND** `google_storage_bucket_iam_member.transit_bucket_access[0]` grants
   `roles/storage.objectUser` on `"cm-transit-bucket"` to `runner_sa`
 - **AND** `google_service_account_iam_member.cloud_run_runtime_sa_act_as` grants
-  `roles/iam.serviceAccountUser` on both runtime Service Accounts to
+  `roles/iam.serviceAccountUser` on the runtime Service Account to
   `runner_sa`.
 
 ______________________________________________________________________
@@ -372,16 +371,13 @@ overrides, and its outputs inside `terraform/gcp.tf` and
 Cloud Run files cleanly without leaving dangling references:
 
 1. **Resource Ownership & Outputs in `terraform/modules/gcp`:**
-   - `terraform/modules/gcp` MUST retain ownership of the Cloud Run Jobs
+   - `terraform/modules/gcp` MUST retain ownership of the Cloud Run Job
      (`google_cloud_run_v2_job.runner`), the GCS bucket
      (`google_storage_bucket.reports`), and the Cloud Run runtime Service
-     Accounts (`google_service_account.runner_sa` and
-     `google_service_account.worker_sa` with `roles/aiplatform.user`).
+     Account (`google_service_account.runner_sa` with `roles/aiplatform.user`).
    - `terraform/modules/gcp/outputs.tf` MUST export
      `runner_service_account_email`
-     (`value = google_service_account.runner_sa.email`) and
-     `worker_service_account_email`
-     (`value = google_service_account.worker_sa.email`) alongside
+     (`value = google_service_account.runner_sa.email`) alongside
      `reports_bucket_name`, `runner_job_name`, and `region`.
 1. **Automatic Root Composition & Native Override Wiring (`terraform/main.tf`,
    `terraform/outputs.tf`, `terraform/gcp.tf`, & `terraform/gcp_override.tf`):**
@@ -424,7 +420,7 @@ Cloud Run files cleanly without leaving dangling references:
 - **WHEN** `terraform plan` is executed in `terraform/`
 - **THEN** `module.gcp[0]` is planned and its outputs
   (`reports_bucket_name`, `runner_job_name`, and
-  `[runner_service_account_email, worker_service_account_email]`) are
+  `[runner_service_account_email]`) are
   automatically wired into `module.wif` with zero circular dependencies.
 
 ______________________________________________________________________

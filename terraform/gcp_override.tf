@@ -19,6 +19,5 @@ locals {
   gcp_module_job_name    = var.execution_mode == "cloud_run" ? module.gcp[0].runner_job_name : ""
   gcp_module_runtime_sa_emails = var.execution_mode == "cloud_run" ? [
     module.gcp[0].runner_service_account_email,
-    module.gcp[0].worker_service_account_email,
   ] : []
 }

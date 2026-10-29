@@ -16,7 +16,6 @@ locals {
   required_apis = [
     "cloudresourcemanager.googleapis.com",
     "run.googleapis.com",
-    "secretmanager.googleapis.com",
     "artifactregistry.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",

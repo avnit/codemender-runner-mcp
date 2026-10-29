@@ -44,11 +44,6 @@ output "runner_service_account_email" {
   value       = google_service_account.runner_sa.email
 }
 
-output "worker_service_account_email" {
-  description = "Email address of the Cloud Run worker Service Account."
-  value       = google_service_account.worker_sa.email
-}
-
 output "artifact_registry_repository" {
   description = "Artifact Registry Docker repository path."
   value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.docker_repo.repository_id}"
@@ -72,13 +67,4 @@ output "cloud_run_image_uri" {
 output "next_step_cloud_build_command" {
   description = "Standalone Cloud Build command to manually rebuild and push the Cloud Run Job container image."
   value       = "gcloud builds submit --config=cloudbuild.yaml --project=${var.project_id} --substitutions=_REGION=${var.region},_REPO_NAME=${google_artifact_registry_repository.docker_repo.repository_id},_IMAGE_TAG=${local.runner_image_hash} ."
-}
-
-output "secret_manager_notice" {
-  description = "Instructions for updating the GitHub App Token secret."
-  value       = <<EOT
-The secret '${google_secret_manager_secret.github_app_token.secret_id}' has been created with placeholder data.
-Please update it with your actual GitHub App Token before running scans:
-  gcloud secrets versions add ${google_secret_manager_secret.github_app_token.secret_id} --data-file=/path/to/token.pem --project=${var.project_id}
-EOT
 }

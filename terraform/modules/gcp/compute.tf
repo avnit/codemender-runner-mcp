@@ -59,16 +59,13 @@ resource "time_sleep" "wait_for_apis_and_iam" {
     google_storage_bucket_iam_member.runner_reports_admin,
     google_project_iam_member.service_accounts_log_writer,
     google_project_iam_member.runner_aiplatform_user,
-    google_secret_manager_secret_version.github_app_token_initial,
-    google_secret_manager_secret_iam_member.worker_secret_accessor,
-    google_project_iam_member.worker_aiplatform_user,
   ]
 }
 
 # Cloud Run validates that the container image exists in Artifact Registry at
 # Job creation time. Building and pushing the content-hashed image here in the
 # dependency graph (after Artifact Registry + Cloud Build IAM, before the Cloud
-# Run Jobs) avoids dummy placeholder images and `ignore_changes` drift masking.
+# Run Job) avoids dummy placeholder images and `ignore_changes` drift masking.
 resource "terraform_data" "cloud_build_runner_image" {
   count = var.auto_build_image ? 1 : 0
 
@@ -133,54 +130,5 @@ resource "google_cloud_run_v2_job" "runner" {
   depends_on = [
     time_sleep.wait_for_apis_and_iam,
     terraform_data.cloud_build_runner_image,
-  ]
-}
-
-resource "google_cloud_run_v2_job" "worker" {
-  name                = "${var.resource_prefix}-worker"
-  location            = var.region
-  project             = var.project_id
-  deletion_protection = false
-
-  template {
-    template {
-      service_account = google_service_account.worker_sa.email
-
-      containers {
-        image = local.runner_image_uri
-
-        resources {
-          limits = {
-            cpu    = var.runner_cpu
-            memory = var.runner_memory
-          }
-        }
-
-        env {
-          name = "GITHUB_APP_TOKEN"
-          value_source {
-            secret_key_ref {
-              secret  = google_secret_manager_secret.github_app_token.secret_id
-              version = "latest"
-            }
-          }
-        }
-      }
-
-      dynamic "vpc_access" {
-        for_each = local.use_vpc_access ? [1] : []
-        content {
-          connector = local.vpc_connector_id
-          egress    = "ALL_TRAFFIC"
-        }
-      }
-    }
-  }
-
-  depends_on = [
-    time_sleep.wait_for_apis_and_iam,
-    terraform_data.cloud_build_runner_image,
-    google_secret_manager_secret_version.github_app_token_initial,
-    google_secret_manager_secret_iam_member.worker_secret_accessor,
   ]
 }

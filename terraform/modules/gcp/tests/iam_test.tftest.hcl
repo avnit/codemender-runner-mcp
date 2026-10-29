@@ -24,15 +24,6 @@ override_resource {
   }
 }
 
-override_resource {
-  target          = google_service_account.worker_sa
-  override_during = plan
-  values = {
-    name  = "projects/test-project-123/serviceAccounts/test-iam-worker-sa@test-project-123.iam.gserviceaccount.com"
-    email = "test-iam-worker-sa@test-project-123.iam.gserviceaccount.com"
-  }
-}
-
 variables {
   project_id      = "test-project-123"
   region          = "us-central1"
@@ -49,18 +40,8 @@ run "iam_resources_created_correctly" {
   }
 
   assert {
-    condition     = google_service_account.worker_sa.account_id == "test-iam-worker-sa"
-    error_message = "Worker Service Account ID does not match expected prefix."
-  }
-
-  assert {
     condition     = output.runner_service_account_email == "test-iam-runner-sa@test-project-123.iam.gserviceaccount.com"
     error_message = "runner_service_account_email output does not match expected runner SA email."
-  }
-
-  assert {
-    condition     = output.worker_service_account_email == "test-iam-worker-sa@test-project-123.iam.gserviceaccount.com"
-    error_message = "worker_service_account_email output does not match expected worker SA email."
   }
 
   assert {

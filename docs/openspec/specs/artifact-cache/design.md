@@ -577,9 +577,9 @@ In [`terraform/modules/gcp/storage.tf`](../../../../terraform/modules/gcp/storag
    - `google_storage_bucket.reports` configures a `Delete` lifecycle rule with `condition { age = var.artifact_cache_ttl_days }` and an `AbortIncompleteMultipartUpload` lifecycle rule with `condition { age = 1 }`.
 2. **Immediate Expiration Without Versioning or Soft-Delete Retention:**
    - Sets `uniform_bucket_level_access = true`, `public_access_prevention = "enforced"`, `versioning { enabled = false }`, and `soft_delete_policy { retention_duration_seconds = 0 }` so expired or overwritten transit objects are purged immediately without accumulating noncurrent versions.
-3. **Scoped Bucket IAM Across `Launcher` (WIF SA) and `Worker` (Cloud Run Runtime SAs):**
+3. **Scoped Bucket IAM Across `Launcher` (WIF SA) and `Worker` (Cloud Run Runtime SA):**
    - **Host-Side `Launcher`:** Uses the WIF Service Account in `terraform/modules/wif/iam.tf` (`google_service_account.runner_sa`), granted `roles/storage.objectUser` on `google_storage_bucket.reports` via `google_storage_bucket_iam_member.transit_bucket_access` ([`SPEC-WIF` REQ-0004](../wif/spec.md)).
-   - **Inside-Container `Worker` (`cm-worker`):** Runs under the Cloud Run runtime Service Accounts in `terraform/modules/gcp/iam.tf` (`google_service_account.runner_sa` and `google_service_account.worker_sa`), both of which are granted `roles/storage.objectUser` on `google_storage_bucket.reports`.
+   - **Inside-Container `Worker` (`cm-worker`):** Runs under the Cloud Run runtime Service Account in `terraform/modules/gcp/iam.tf` (`google_service_account.runner_sa`), which is granted `roles/storage.objectUser` on `google_storage_bucket.reports` (`runner_reports_admin`).
 
 ### 6.1 Concrete Terraform Delta Against Current `terraform/modules/gcp/`
 
@@ -587,7 +587,6 @@ In [`terraform/modules/gcp/storage.tf`](../../../../terraform/modules/gcp/storag
 | :--- | :--- | :--- |
 | [`terraform/modules/gcp/variables.tf`](../../../../terraform/modules/gcp/variables.tf) | No TTL variable defined (`age = 1` hardcoded in `storage.tf`). | Add `variable "artifact_cache_ttl_days"` (`type = number`, `default = 3`, `validation` enforcing integer $\ge 1$). |
 | [`terraform/modules/gcp/storage.tf`](../../../../terraform/modules/gcp/storage.tf) | `versioning { enabled = true }`, `Delete` rule with `age = 1`, no `public_access_prevention`, no `soft_delete_policy`, and no `AbortIncompleteMultipartUpload` rule. | Set `public_access_prevention = "enforced"`, `versioning { enabled = false }`, `soft_delete_policy { retention_duration_seconds = 0 }`, `Delete` rule with `age = var.artifact_cache_ttl_days`, and `AbortIncompleteMultipartUpload` rule with `age = 1`. |
-| [`terraform/modules/gcp/iam.tf`](../../../../terraform/modules/gcp/iam.tf) | Only `google_service_account.runner_sa` has `roles/storage.objectUser` on `google_storage_bucket.reports` (`runner_reports_admin`). | Grant `roles/storage.objectUser` on `google_storage_bucket.reports` to both `google_service_account.runner_sa` and `google_service_account.worker_sa`. |
 
 ---
 
@@ -616,4 +615,4 @@ All Phase 1 tests run hermetically under `make test` (`pytest`) without network 
 
 ### 7.2 Terraform Bucket TTL & IAM Tests (`terraform/modules/gcp/tests/storage_test.tftest.hcl`)
 
-- Verify `google_storage_bucket.reports` sets `uniform_bucket_level_access == true`, `public_access_prevention == "enforced"`, `versioning[0].enabled == false`, `soft_delete_policy[0].retention_duration_seconds == 0`, a `Delete` rule with `condition.age == 3` by default (and `7` when `artifact_cache_ttl_days = 7`), a 1-day `AbortIncompleteMultipartUpload` rule, and `roles/storage.objectUser` bindings for both `google_service_account.runner_sa` and `google_service_account.worker_sa`.
+- Verify `google_storage_bucket.reports` sets `uniform_bucket_level_access == true`, `public_access_prevention == "enforced"`, `versioning[0].enabled == false`, `soft_delete_policy[0].retention_duration_seconds == 0`, a `Delete` rule with `condition.age == 3` by default (and `7` when `artifact_cache_ttl_days = 7`), a 1-day `AbortIncompleteMultipartUpload` rule, and a `roles/storage.objectUser` binding for `google_service_account.runner_sa`.

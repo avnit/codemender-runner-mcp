@@ -35,11 +35,6 @@ run "compute_resources_created_correctly" {
   }
 
   assert {
-    condition     = google_secret_manager_secret.github_app_token.secret_id == "test-compute-github-token"
-    error_message = "Secret Manager secret ID does not match the expected resource_prefix pattern."
-  }
-
-  assert {
     condition     = google_cloud_run_v2_job.runner.template[0].template[0].execution_environment == "EXECUTION_ENVIRONMENT_GEN2"
     error_message = "Runner Cloud Run Job must enforce EXECUTION_ENVIRONMENT_GEN2."
   }
@@ -77,11 +72,6 @@ run "compute_resources_created_correctly" {
   assert {
     condition     = startswith(google_cloud_run_v2_job.runner.template[0].template[0].containers[0].image, "us-central1-docker.pkg.dev/test-project-123/test-compute-runner/codemender-runner:")
     error_message = "Runner Cloud Run Job must use the deterministic Artifact Registry image URI."
-  }
-
-  assert {
-    condition     = google_cloud_run_v2_job.worker.template[0].template[0].containers[0].image == google_cloud_run_v2_job.runner.template[0].template[0].containers[0].image
-    error_message = "Worker Cloud Run Job must use the same deterministic Artifact Registry image URI as the Runner Job."
   }
 
   assert {

@@ -60,8 +60,7 @@ and
     `count = 0`).
   - In `"cloud_run"` mode, root `terraform/` automatically provisions
     `module.gcp[0]` and wires its outputs (`reports_bucket_name`,
-    `runner_job_name`, `runner_service_account_email`,
-    `worker_service_account_email`) into `module.wif`.
+    `runner_job_name`, `runner_service_account_email`) into `module.wif`.
 - Isolate `module "gcp"`, its local overrides, and its outputs in
   `terraform/gcp.tf`, `terraform/gcp_override.tf`, and
   `terraform/tests/root_gcp_test.tftest.hcl` so `scripts/distribute.sh`
@@ -224,7 +223,7 @@ flowchart TD
     subgraph GCPMod["terraform/modules/gcp (count = cloud_run ? 1 : 0)"]
         gcp_bucket["google_storage_bucket.reports"]
         gcp_job["google_cloud_run_v2_job.runner"]
-        gcp_sas["runner_sa & worker_sa\n(roles/aiplatform.user)"]
+        gcp_sas["runner_sa\n(roles/aiplatform.user)"]
     end
 
     subgraph WIFMod["terraform/modules/wif"]
@@ -237,7 +236,7 @@ flowchart TD
     tfvars --> main
     tfvars --> gcp_tf
     gcp_tf -->|"Provisioned when cloud_run"| GCPMod
-    GCPMod -->|"Auto-wired via gcp_override.tf:\nreports_bucket_name, runner_job_name,\n[runner_sa, worker_sa]"| main
+    GCPMod -->|"Auto-wired via gcp_override.tf:\nreports_bucket_name, runner_job_name,\n[runner_sa]"| main
     main --> WIFMod
 ```
 
@@ -298,7 +297,7 @@ flowchart TD
 | `terraform/modules/wif/github.tf`                 | Normalizes `var.github_repositories` into `local.short_repo_names` and provisions `codemender-scan` label, `CODEMENDER_WORKLOAD_IDENTITY_PROVIDER` and `CODEMENDER_SERVICE_ACCOUNT` secrets, `CODEMENDER_GCP_PROJECT_ID` variable, and (in `cloud_run` mode) `CODEMENDER_GCS_TRANSIT_BUCKET`, `CODEMENDER_CLOUD_RUN_JOB_NAME`, and `CODEMENDER_GCP_REGION` variables. |
 | `terraform/modules/wif/outputs.tf`                | Exports `gcp_workload_identity_provider`, `gcp_service_account`, `execution_mode`, and `next_step_private_key_injection`.                                                                                                        |
 | `terraform/modules/wif/tests/wif_test.tftest.hcl` | Hermetic `terraform test` suite for `terraform/modules/wif`.                                                                                                                                                                     |
-| `terraform/modules/gcp/`                          | Child module (`apis.tf`, `compute.tf`, `iam.tf`, `outputs.tf`, `provider.tf`, `secret.tf`, `storage.tf`, `variables.tf`, `vpc.tf`, `tests/*.tftest.hcl`) exporting `runner_service_account_email` and `worker_service_account_email`. |
+| `terraform/modules/gcp/`                          | Child module (`apis.tf`, `compute.tf`, `iam.tf`, `outputs.tf`, `provider.tf`, `storage.tf`, `variables.tf`, `vpc.tf`, `tests/*.tftest.hcl`) exporting `runner_service_account_email`. |
 
 ## Risks / Trade-offs
 

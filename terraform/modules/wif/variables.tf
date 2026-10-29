@@ -72,7 +72,7 @@ variable "gcs_transit_bucket_name" {
 variable "cloud_run_runtime_sa_emails" {
   type        = list(string)
   default     = []
-  description = "List of Cloud Run Job runtime Service Account email addresses (e.g. runner_service_account_email and worker_service_account_email from terraform/gcp) that the WIF Service Account is authorized to actAs (roles/iam.serviceAccountUser) when execution_mode is 'cloud_run'."
+  description = "List of Cloud Run Job runtime Service Account email addresses (e.g. runner_service_account_email from terraform/gcp) that the WIF Service Account is authorized to actAs (roles/iam.serviceAccountUser) when execution_mode is 'cloud_run'."
 }
 
 variable "cloud_run_job_name" {

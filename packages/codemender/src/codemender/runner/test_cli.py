@@ -845,7 +845,6 @@ class TestPackagingAndDockerContract(unittest.TestCase):
         "GCP_REGION",
         "RESOURCE_PREFIX",
         "CLOUDRUN_JOB",
-        "CLOUDRUN_WORKER_JOB",
         "IMAGE_TAG",
         "RUNNER_IMAGE",
         "CLOUDRUN_IMAGE",
@@ -908,10 +907,7 @@ class TestPackagingAndDockerContract(unittest.TestCase):
           f"gcloud run jobs update custom-prefix-runner --image us-west1-docker.pkg.dev/my-gcp-proj/custom-prefix-runner/codemender-runner:{expected_hash}",
           res_deploy.stdout,
       )
-      self.assertIn(
-          f"gcloud run jobs update custom-prefix-worker --image us-west1-docker.pkg.dev/my-gcp-proj/custom-prefix-runner/codemender-runner:{expected_hash}",
-          res_deploy.stdout,
-      )
+      self.assertNotIn("custom-prefix-worker", res_deploy.stdout)
 
       tfvars_missing_region = Path(tmp) / "missing_region.tfvars"
       tfvars_missing_region.write_text(

@@ -15,7 +15,6 @@ IMAGE_TAG ?= $(shell python3 -c 'import hashlib, pathlib; r=pathlib.Path("."); s
 AR_HOST = $(GCP_REGION)-docker.pkg.dev
 AR_REPO = $(RESOURCE_PREFIX)-runner
 CLOUDRUN_JOB ?= $(RESOURCE_PREFIX)-runner
-CLOUDRUN_WORKER_JOB ?= $(RESOURCE_PREFIX)-worker
 REMOTE_IMAGE_SHA = $(AR_HOST)/$(GCP_PROJECT_ID)/$(AR_REPO)/codemender-runner:$(IMAGE_TAG)
 
 empty :=
@@ -54,7 +53,6 @@ check-gcp-project:
 deploy-cloudrun: check-gcp-project
 	gcloud builds submit --config=cloudbuild.yaml --project=$(GCP_PROJECT_ID) --substitutions=_REGION=$(GCP_REGION),_REPO_NAME=$(AR_REPO),_IMAGE_TAG=$(IMAGE_TAG) .
 	gcloud run jobs update $(CLOUDRUN_JOB) --image $(REMOTE_IMAGE_SHA) --region $(GCP_REGION) --project $(GCP_PROJECT_ID)
-	gcloud run jobs update $(CLOUDRUN_WORKER_JOB) --image $(REMOTE_IMAGE_SHA) --region $(GCP_REGION) --project $(GCP_PROJECT_ID)
 
 # Governing: docs/openspec/specs/distribute/spec.md#req-0004, SPEC-DIST
 init-fork:

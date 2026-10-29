@@ -338,17 +338,16 @@ and `Worker`:
      `uniform_bucket_level_access = true`,
      `public_access_prevention = "enforced"`, `versioning { enabled = false }`,
      and `soft_delete_policy { retention_duration_seconds = 0 }`.
-3. **Scoped Bucket IAM Across `Launcher` (WIF SA) and `Worker` (Cloud Run Runtime SAs):**
+3. **Scoped Bucket IAM Across `Launcher` (WIF SA) and `Worker` (Cloud Run Runtime SA):**
    - Host-side `Launcher` authenticates via the WIF caller Service Account in
      `terraform/modules/wif` (`google_service_account.runner_sa`), which
      receives `roles/storage.objectUser` on `google_storage_bucket.reports` via
      `google_storage_bucket_iam_member.transit_bucket_access`
      ([SPEC-WIF](../wif/spec.md) `REQ-0004`).
    - Inside-container `Worker` (`cm-worker`) runs under the Cloud Run runtime
-     Service Accounts in `terraform/modules/gcp`
-     (`google_service_account.runner_sa` and `google_service_account.worker_sa`),
-     both of which MUST be granted `roles/storage.objectUser` on
-     `google_storage_bucket.reports`.
+     Service Account in `terraform/modules/gcp`
+     (`google_service_account.runner_sa`), which MUST be granted
+     `roles/storage.objectUser` on `google_storage_bucket.reports`.
 
 #### Scenario: Default and Custom TTL Plan Verification in Terraform Tests
 
@@ -358,9 +357,9 @@ and `Worker`:
 - **THEN** `google_storage_bucket.reports` enforces disabled versioning,
   zero-second soft-delete retention, enforced public access prevention, a
   `Delete` lifecycle rule with `age == 3` by default (and `age == 7` when
-  overridden), a 1-day `AbortIncompleteMultipartUpload` rule, and
-  `roles/storage.objectUser` bindings for both
-  `google_service_account.runner_sa` and `google_service_account.worker_sa`.
+  overridden), a 1-day `AbortIncompleteMultipartUpload` rule, and a
+  `roles/storage.objectUser` binding for
+  `google_service_account.runner_sa`.
 
 ---
 

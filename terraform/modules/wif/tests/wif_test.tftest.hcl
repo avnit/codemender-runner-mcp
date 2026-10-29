@@ -138,7 +138,6 @@ run "cloud_run_execution_mode_iam_and_github_variables" {
     cloud_run_job_name      = "codemender-runner"
     cloud_run_runtime_sa_emails = [
       "codemender-runner-sa@test-codemender-project.iam.gserviceaccount.com",
-      "codemender-worker-sa@test-codemender-project.iam.gserviceaccount.com",
     ]
   }
 
@@ -173,8 +172,8 @@ run "cloud_run_execution_mode_iam_and_github_variables" {
   }
 
   assert {
-    condition     = length(google_service_account_iam_member.cloud_run_runtime_sa_act_as) == 2 && alltrue([for b in google_service_account_iam_member.cloud_run_runtime_sa_act_as : b.role == "roles/iam.serviceAccountUser"])
-    error_message = "WIF Service Account must be granted roles/iam.serviceAccountUser on both Cloud Run runtime Service Accounts."
+    condition     = length(google_service_account_iam_member.cloud_run_runtime_sa_act_as) == 1 && alltrue([for b in google_service_account_iam_member.cloud_run_runtime_sa_act_as : b.role == "roles/iam.serviceAccountUser"])
+    error_message = "WIF Service Account must be granted roles/iam.serviceAccountUser on the Cloud Run runtime Service Account."
   }
 
   assert {

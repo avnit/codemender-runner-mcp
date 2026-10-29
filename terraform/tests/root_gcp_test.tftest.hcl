@@ -38,15 +38,6 @@ run "cloud_run_mode_composition" {
   }
 
   override_resource {
-    target          = module.gcp[0].google_service_account.worker_sa
-    override_during = plan
-    values = {
-      name  = "projects/test-codemender-project/serviceAccounts/codemender-worker-sa@test-codemender-project.iam.gserviceaccount.com"
-      email = "codemender-worker-sa@test-codemender-project.iam.gserviceaccount.com"
-    }
-  }
-
-  override_resource {
     target          = module.wif.google_service_account.runner_sa
     override_during = plan
     values = {
