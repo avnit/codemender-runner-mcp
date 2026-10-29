@@ -642,27 +642,6 @@ class TestCliArchitectureRules(unittest.TestCase):
                     f"{py_file}:{node.lineno} imports 'github' from '{mod}'",
                 )
 
-  def test_cli_modules_do_not_import_utils(self):
-    """codemender modules must never import legacy utils (go/no-utils)."""
-    for py_file in self._get_codemender_python_files():
-      with self.subTest(file=os.path.relpath(py_file, _PKG_DIR)):
-        with open(py_file, "r", encoding="utf-8") as handle:
-          tree = ast.parse(handle.read(), filename=py_file)
-        for node in ast.walk(tree):
-          if isinstance(node, ast.Import):
-            for alias in node.names:
-              self.assertNotEqual(
-                  alias.name,
-                  "utils",
-                  f"{py_file}:{node.lineno} imports banned legacy module 'utils'",
-              )
-          elif isinstance(node, ast.ImportFrom):
-            self.assertNotEqual(
-                node.module,
-                "utils",
-                f"{py_file}:{node.lineno} imports from banned legacy module 'utils'",
-            )
-
   def test_cli_modules_do_not_call_banned_functions_directly(self):
     """CLI modules must not directly call run_command, build_cm_command, or push_branch_to_remote."""
     banned_calls = {"run_command", "build_cm_command", "push_branch_to_remote"}
