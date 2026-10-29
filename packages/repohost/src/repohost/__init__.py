@@ -12,8 +12,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0008
+# Governing: ADR-0008, ADR-0009#decision-1
 
 """CodeMender repository hosting platform integrations (GitHub, GitLab)."""
 
-__all__: list[str] = []
+from repohost.base import RepoHost
+from repohost.models import (
+    ChangeContext,
+    Comment,
+    RepoHostAuthError,
+    RepoHostError,
+    RepoHostRateLimitError,
+    SecurityGate,
+    SecurityGateState,
+    SuggestedEdit,
+)
+from repohost.testing import InMemoryRepoHost
+
+__all__: list[str] = [
+    "ChangeContext",
+    "Comment",
+    "InMemoryRepoHost",
+    "RepoHost",
+    "RepoHostAuthError",
+    "RepoHostError",
+    "RepoHostRateLimitError",
+    "SecurityGate",
+    "SecurityGateState",
+    "SuggestedEdit",
+]
