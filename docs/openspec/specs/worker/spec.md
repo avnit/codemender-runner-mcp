@@ -157,9 +157,10 @@ ______________________________________________________________________
 - **CUJ UUID:** `cuj-worker-di-isolation`
 
 `Worker` MUST accept its `ArtifactCache` backend, local scratch directory path
-(defaulting to `/tmp/work`), and `cm-runner` executable name/path (defaulting to
-`"cm-runner"`) via dependency injection so that unit and integration tests can
-supply local cache backends and stub executables without network or cloud
+(defaulting to `/tmp/work`), and optional `CmAdapter` instance (defaulting to
+`None`, resolved on demand via `CmAdapter.locate()`) via dependency injection so
+that unit and integration tests can supply local cache backends and mocked
+`codemender` adapters/handlers without network, cloud, or subprocess
 dependencies.
 
 To preserve the security and packaging invariants of
@@ -296,7 +297,7 @@ free of untracked staging or output files ([SPEC-FIX](../fix/spec.md) `REQ-0003`
    yields a single top-level subdirectory, `Worker` MUST promote all entries
    from that subdirectory directly into `work_dir / "repo"` and remove the empty
    wrapper directory so `.git` (and its bounded commit history required by
-   `cm-runner find-diff` per [SPEC-FIND-DIFF](../find-diff/spec.md)
+   `codemender` `find-diff` per [SPEC-FIND-DIFF](../find-diff/spec.md)
    `REQ-0002.2`) resides directly at `work_dir / "repo" / ".git"`.
 4. **Git Safe Directory Registration:** `Worker` MUST mark the unpacked
    repository path `work_dir / "repo"` as a trusted Git `safe.directory` when
@@ -305,7 +306,7 @@ free of untracked staging or output files ([SPEC-FIX](../fix/spec.md) `REQ-0003`
    commands, `Worker` MUST download `manifest.finding_key` from `ArtifactCache`
    into `work_dir / "inputs" / <original_filename>` (outside `work_dir / "repo"`)
    so the original finding filename stem (e.g., `finding-001.sarif`) is
-   preserved when `cm-runner` writes `<stem>.diff` or `<stem>.sarif` into
+   preserved when `codemender` writes `<stem>.diff` or `<stem>.sarif` into
    `work_dir / "out"`.
 
 If fetching `shared/code.tar.gz` or `manifest.finding_key` from `ArtifactCache`
@@ -341,71 +342,73 @@ return `3`.
 
 ______________________________________________________________________
 
-### REQ-0005: Step 3 — `cm-runner` Execution & Stream Isolation {#req-0005}
+### REQ-0005: Step 3 — `codemender` In-Process Execution & Stream Isolation {#req-0005}
 
 - **CUJ UUID:** `cuj-worker-subprocess-exec`
 
-In Step 3, `Worker` MUST construct and execute the `cm-runner` command line in a
-dedicated child process group:
+In Step 3, `Worker` MUST execute the `codemender.runner.commands` handler in
+process via `codemender.runner.__main__.dispatch` using `CmAdapter`:
 
-1. **Command Construction:**
-   - Top-level flags: `[cm_runner_binary]` followed by
-     `["--log-level", manifest.log_level]` when `manifest.log_level` is set.
-   - `init`: passes `init` and `--repo <repo_dir>`.
-   - `find-diff`: passes `find-diff`, `--repo <repo_dir>`,
-     `--base <manifest.base_ref>`, `--out <out_dir>`, plus
-     `--diff-workers <manifest.diff_workers>` when `manifest.diff_workers` is
-     set.
-   - `fix`: passes `fix`, `--repo <repo_dir>`,
-     `--finding <staged_finding_path>`, and `--out <out_dir>`.
-   - `verify`: passes `verify`, `--repo <repo_dir>`,
-     `--finding <staged_finding_path>`, and `--out <out_dir>`.
-   - Any additional `manifest.extra_args` are appended to the command list.
-2. **Process Group & Environment Pass-Through Contract
+1. **In-Process Command Dispatch (`codemender.runner.__main__.dispatch`):**
+   - Resolve `CmAdapter` (using the injected `self.adapter`, or locating via
+     `CmAdapter.locate()` verified with `adapter.version()` and caching it on
+     `self.adapter`, raising `FileNotFoundError` if `cm` is unavailable).
+   - Delegate execution to `codemender.runner.__main__.dispatch(manifest.command, adapter, repo=repo_dir, base=manifest.base_ref or "HEAD", out=out_dir, finding=staged_finding_path, diff_workers=manifest.diff_workers, auto_init="--no-init" not in manifest.extra_args)`:
+     - For repository commands (`find-diff`, `fix`, `verify`), `dispatch` runs
+       auto-`init` first (`init.run(init.InitConfig(repo=repo_dir), adapter, emitter=None)`)
+       when `auto_init` is `True` (unless `"--no-init"` is present in
+       `manifest.extra_args`), returning early if `init.run` returns non-zero.
+     - `init`: invokes `init.run(init.InitConfig(repo=repo_dir), adapter, emitter=None)`.
+     - `find-diff`: invokes `find_diff.run(find_diff.FindDiffConfig(repo=repo_dir, base=manifest.base_ref, out=out_dir, diff_workers=manifest.diff_workers), adapter, cmd_emitter)` (where `FindDiffConfig` normalizes `diff_workers=None` to `DEFAULT_DIFF_WORKERS`).
+     - `fix`: invokes `fix.run(fix.FixConfig(finding=staged_finding_path, repo=repo_dir, out=out_dir), adapter, cmd_emitter)`.
+     - `verify`: invokes `verify.run(verify.VerifyConfig(finding=staged_finding_path, repo=repo_dir, out=out_dir), adapter, cmd_emitter)`.
+2. **Environment Pass-Through Contract
    ([ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md),
    [SPEC-GHA](../github-actions/spec.md),
    [SPEC-GITLAB-CI](../gitlab-ci/spec.md)):**
-   - `Worker` MUST start `cm-runner` in a new process group/session (so the
-     entire child process tree can be signaled as a unit on preemption) and
-     inherit the container process environment without denylist scrubbing or
-     `<repo_dir>/.codemender_cache` redirection (so mounted credentials such as
-     `GOOGLE_APPLICATION_CREDENTIALS` and `CODEMENDER_SANDBOX_*` settings flow
-     through to `cm-runner` and `cm`).
-3. **Stream Isolation & Live Log Teeing
+   - `CmAdapter` inherits the container process environment (`env=None`) without
+     denylist scrubbing or `<repo_dir>/.codemender_cache` redirection (so mounted
+     credentials such as `GOOGLE_APPLICATION_CREDENTIALS` and
+     `CODEMENDER_SANDBOX_*` settings flow through to `cm`).
+3. **Stream Isolation & Live Log Capture
    ([ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
    [SPEC-FIND-DIFF](../find-diff/spec.md), [SPEC-FIX](../fix/spec.md),
    [SPEC-VERIFY](../verify/spec.md)):**
    - `cm-worker` itself MUST emit zero bytes to its own `sys.stdout`.
+   - `Worker` MUST attach a `logging.FileHandler` for `work_dir / "out" / "runner.log"`
+     (temporarily applying `manifest.log_level` when specified) so all Python
+     `logging` records from `codemender` are written to both `sys.stderr` and
+     `work_dir / "out" / "runner.log"`.
    - For artifact-producing repository commands (`find-diff`, `fix`, `verify`),
-     where `--out <out_dir>` writes the canonical artifacts (`report.sarif`,
-     `report.md`, `<finding>.diff`, `<finding>.sarif`) to disk and `cm-runner`'s
-     `stdout` carries duplicate SARIF JSON or raw binary diff bytes, `Worker`
-     MUST discard `cm-runner`'s `stdout` and tee `cm-runner`'s `stderr` live to
-     `sys.stderr` and `work_dir / "out" / "runner.log"`.
-   - For `init` (which takes no `--out` flag and emits UTF-8 NDJSON `check`
-     events on `cm-runner`'s `stdout` alongside diagnostics on `stderr`),
-     `Worker` MUST capture both `cm-runner`'s `stdout` and `stderr` into
-     `work_dir / "out" / "runner.log"` and `sys.stderr` while still writing
-     nothing to `cm-worker`'s own `sys.stdout`.
+     where `out=out_dir` writes the canonical artifacts (`report.sarif`,
+     `report.md`, `<finding>.diff`, `<finding>.sarif`) to disk, `dispatch`
+     (called with `emitter=None`) creates a discard
+     `EventEmitter(stream=io.StringIO())` so duplicate SARIF JSON or raw binary
+     diff bytes are never written to `runner.log` or `sys.stdout`.
+   - For `init`, `dispatch` passes `emitter=None` to `init.run` so check
+     outcomes are logged directly through Python `logging` into
+     `work_dir / "out" / "runner.log"` and `sys.stderr` while writing nothing to
+     `cm-worker`'s own `sys.stdout`.
 
-#### Scenario: Running `cm-runner find-diff` Isolates `stderr` Logs From `stdout` SARIF Payload
+#### Scenario: Running `find-diff` Isolates `runner.log` Diagnostics From Duplicate `EventEmitter` SARIF Payload
 
 - **GIVEN** a `RunManifest` with `command="find-diff"`,
   `base_ref="origin/main"`, and `diff_workers=4`
 - **WHEN** `Worker` executes Step 3
-- **THEN** `Worker` invokes `cm-runner find-diff --repo /tmp/work/repo --base origin/main --out /tmp/work/out --diff-workers 4`
-  in a new process group with the inherited container environment, discards
-  `cm-runner`'s duplicate `stdout` SARIF stream, and tees `cm-runner`'s `stderr`
-  diagnostics live to `sys.stderr` and `/tmp/work/out/runner.log`.
+- **THEN** `Worker` calls `codemender.runner.__main__.dispatch`, which invokes
+  `find_diff.run(FindDiffConfig(repo=Path("/tmp/work/repo"), base="origin/main", out=Path("/tmp/work/out"), diff_workers=4), adapter, cmd_emitter)`
+  with a discard `EventEmitter(stream=io.StringIO())`, writes `report.sarif` and
+  `report.md` to `/tmp/work/out`, and captures `codemender` log diagnostics into
+  `sys.stderr` and `/tmp/work/out/runner.log`.
 
-#### Scenario: Running `cm-runner init` Captures `check` Events Into `runner.log`
+#### Scenario: Running `init` Captures Check Outcomes Into `runner.log`
 
 - **GIVEN** a `RunManifest` with `command="init"`
 - **WHEN** `Worker` executes Step 3
-- **THEN** `Worker` invokes `cm-runner init --repo /tmp/work/repo`, captures
-  both `cm-runner`'s `stdout` (`check` NDJSON events) and `stderr` diagnostics
-  into `/tmp/work/out/runner.log` and `sys.stderr`, and emits zero bytes to
-  `cm-worker`'s `sys.stdout`.
+- **THEN** `Worker` calls `codemender.runner.__main__.dispatch`, which invokes
+  `init.run(InitConfig(repo=Path("/tmp/work/repo")), adapter, emitter=None)`,
+  captures check outcomes via Python `logging` into `/tmp/work/out/runner.log`
+  and `sys.stderr`, and emits zero bytes to `cm-worker`'s `sys.stdout`.
 
 ______________________________________________________________________
 
@@ -413,9 +416,9 @@ ______________________________________________________________________
 
 - **CUJ UUID:** `cuj-worker-receipt-publish`
 
-In Step 4, after `cm-runner` finishes (or upon an earlier validation/execution
-error), `Worker` MUST generate an `ExecutionReceipt` and publish all task
-outputs to `tasks/<task_id>/output/` in `ArtifactCache`:
+In Step 4, after the `codemender` command finishes (or upon an earlier
+validation/execution error), `Worker` MUST generate an `ExecutionReceipt` and
+publish all task outputs to `tasks/<task_id>/output/` in `ArtifactCache`:
 
 1. **Raw-Byte Output Artifact Upload & Role Mapping:**
    - Upload every file produced in `work_dir / "out"` (such as `report.sarif`,
@@ -439,25 +442,27 @@ outputs to `tasks/<task_id>/output/` in `ArtifactCache`:
      `completed_at`, `duration_seconds`, `finding_count`, `artifacts`, and
      `error`:
      - When `exit_code == 0`, `error` MUST be `None` (`null`).
-     - When `cm-runner` itself runs to completion and returns non-zero exit code
-       `3` (for example, `cm-runner fix` exiting `3` when no valid patch could
-       be synthesized per [SPEC-FIX](../fix/spec.md) `REQ-0007`), `Worker` MUST
-       still complete Step 4 and publish `runner.log` and `receipt.json` with
-       `status="FAILURE"`, `exit_code=3`, and `error=None` (`null`), allowing
-       downstream `Launcher` and [SPEC-GHA-FIX](../github-actions-fix/spec.md)
-       (`REQ-0005.5`) to distinguish a normal `no_fix` outcome (`error is None`,
-       diagnostics in `runner.log`) from a worker/infrastructure failure.
+     - When the `codemender` command runs to completion and returns non-zero
+       exit code `3` (for example, `fix.run` returning `3` when no valid patch
+       could be synthesized per [SPEC-FIX](../fix/spec.md) `REQ-0007`), `Worker`
+       MUST still complete Step 4 and publish `runner.log` and `receipt.json`
+       with `status="FAILURE"`, `exit_code=3`, and `error=None` (`null`),
+       allowing downstream `Launcher` and
+       [SPEC-GHA-FIX](../github-actions-fix/spec.md) (`REQ-0005.5`) to
+       distinguish a normal `no_fix` outcome (`error is None`, diagnostics in
+       `runner.log`) from a worker/infrastructure failure.
      - When `Worker` itself encounters a manifest/archive validation error
-       (`exit_code == 2`), `cm-runner` usage error (`exit_code == 2`), missing
-       `cm-runner` executable (`FileNotFoundError`), `ArtifactCacheError` /
-       storage I/O exception, or preemption signal (`130` / `143`), `error` MUST
-       be a non-empty human-readable string describing the failure.
+       (`exit_code == 2`), `codemender` usage error (`exit_code == 2`), missing
+       `cm` binary (`FileNotFoundError`), `ArtifactCacheError` / storage I/O
+       exception, or preemption signal (`130` / `143`), `error` MUST be a
+       non-empty human-readable string describing the failure.
 4. **Exit Code Propagation:**
-   - If `cm-runner` exits with `0`, `Worker` MUST return `0` regardless of
-     `finding_count`.
-   - If `cm-runner` exits with `2` (usage error), `Worker` MUST return `2`.
-   - If `cm-runner` exits with any other non-zero code (or fails to start), or
-     if `ArtifactCache` raises `CacheConfigurationError`,
+   - If the `codemender` command returns `0`, `Worker` MUST return `0`
+     regardless of `finding_count`.
+   - If the `codemender` command returns `2` (usage error), `Worker` MUST return
+     `2`.
+   - If the `codemender` command returns any other non-zero code (or `cm` is
+     missing), or if `ArtifactCache` raises `CacheConfigurationError`,
      `CachePermissionError`, `CacheTransientError`, or any `ArtifactCacheError`
      during Step 4 publication, `Worker` MUST map the return code to `3`
      (execution failure, unless preserving an earlier exit code `2`, `130`, or
@@ -473,7 +478,7 @@ outputs to `tasks/<task_id>/output/` in `ArtifactCache`:
 
 #### Scenario: Successful `fix` Task Publishes Diff, Log, and Receipt
 
-- **GIVEN** `cm-runner fix` succeeds (`exit_code == 0`) and writes
+- **GIVEN** `fix.run` succeeds (`exit_code == 0`) and writes
   `/tmp/work/out/finding-001.diff`
 - **WHEN** `Worker` executes Step 4 for task `fix-finding-001`
 - **THEN** `tasks/fix-finding-001/output/finding-001.diff`,
@@ -483,19 +488,19 @@ outputs to `tasks/<task_id>/output/` in `ArtifactCache`:
   `artifacts["patch"] == "tasks/fix-finding-001/output/finding-001.diff"`, and
   `Worker` returns `0`.
 
-#### Scenario: `cm-runner fix` Returning Exit Code 3 ("No Fix") Still Publishes Receipt With `error=None`
+#### Scenario: `fix.run` Returning Exit Code 3 ("No Fix") Still Publishes Receipt With `error=None`
 
-- **GIVEN** `cm-runner fix` finishes with exit code `3` without producing a
-  `.diff` file in `/tmp/work/out`
+- **GIVEN** `fix.run` finishes with exit code `3` without producing a `.diff`
+  file in `/tmp/work/out`
 - **WHEN** `Worker` executes Step 4 for task `fix-finding-001`
 - **THEN** `Worker` uploads `tasks/fix-finding-001/output/runner.log` and
   `tasks/fix-finding-001/output/receipt.json` with `status="FAILURE"`,
   `exit_code=3`, `error=None`, and `artifacts == {"log": "tasks/fix-finding-001/output/runner.log"}`,
   and returns `3`.
 
-#### Scenario: `cm-runner verify` Dismissing a Finding Sets `finding_count` to 0
+#### Scenario: `verify.run` Dismissing a Finding Sets `finding_count` to 0
 
-- **GIVEN** `cm-runner verify` succeeds (`exit_code == 0`) and writes
+- **GIVEN** `verify.run` succeeds (`exit_code == 0`) and writes
   `/tmp/work/out/finding-001.sarif` whose single result has
   `properties.status == "DISMISSED"`
 - **WHEN** `Worker` executes Step 4 for task `verify-finding-001`
@@ -506,8 +511,9 @@ outputs to `tasks/<task_id>/output/` in `ArtifactCache`:
 
 #### Scenario: Cache Upload Failure on Non-Zero Exit Triggers Fallback Log Spill
 
-- **GIVEN** `cm-runner` fails with exit code `3` and `ArtifactCache` raises
-  `CacheTransientError` (or `OSError`) during output synchronization
+- **GIVEN** the `codemender` command fails with exit code `3` and
+  `ArtifactCache` raises `CacheTransientError` (or `OSError`) during output
+  synchronization
 - **WHEN** `Worker` finalizes the failed task
 - **THEN** `Worker` writes the framed `FALLBACK LOG SPILL` block containing
   `runner.log` to `sys.stderr` and returns exit code `3`.
@@ -523,11 +529,11 @@ When `cm-worker` runs a task, the worker MUST install signal handlers for
 gracefully
 ([ADR-0007](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)):
 
-1. **Child Process Group Termination:** Upon receiving `SIGTERM` or `SIGINT`,
-   if a `cm-runner` subprocess is active, `Worker` MUST forward `SIGTERM` to the
-   entire child process group, wait up to a bounded grace period for the child
-   group to exit, and escalate to `SIGKILL` for the process group if it remains
-   alive.
+1. **Preemption Interruption & Child `cm` Cleanup:** Upon receiving `SIGTERM` or
+   `SIGINT`, `Worker`'s signal handler MUST raise an internal preemption
+   exception (`_PreemptionSignal`), unwinding the active `codemender` call (and
+   causing `CmAdapter.run`'s `subprocess.run` context to automatically kill and
+   reap any active child `cm` process).
 2. **Preemption Receipt & Log Flush:** Before terminating, `Worker` MUST write
    and upload a failure `ExecutionReceipt` (`status="FAILURE"`,
    `exit_code=143` for `SIGTERM` or `exit_code=130` for `SIGINT`, with a
@@ -537,12 +543,11 @@ gracefully
 3. **Standard Exit Codes:** `cm-worker` MUST exit with code `143` on `SIGTERM`
    and code `130` on `SIGINT`.
 
-#### Scenario: `SIGTERM` Terminates Child Group and Flushes Failure Receipt
+#### Scenario: `SIGTERM` Interrupts Execution and Flushes Failure Receipt
 
-- **GIVEN** `Worker` is executing a long-running `cm-runner fix` child process
-  group
+- **GIVEN** `Worker` is executing a long-running `codemender` task
 - **WHEN** the container receives `SIGTERM`
-- **THEN** `Worker` terminates the `cm-runner` child process group, uploads
+- **THEN** `Worker` interrupts the active task, uploads
   `tasks/<task_id>/output/runner.log` and `tasks/<task_id>/output/receipt.json`
   with `status="FAILURE"`, `exit_code=143`, and a non-empty `error` string,
   cleans `work_dir`, and exits with code `143`.
@@ -551,6 +556,6 @@ gracefully
 
 - **GIVEN** `Worker` is executing a task when `SIGINT` is delivered
 - **WHEN** the signal handler runs
-- **THEN** `Worker` terminates the active child process group, flushes
-  `receipt.json` with `status="FAILURE"`, `exit_code=130`, and a non-empty
-  `error` string, and exits with code `130`.
+- **THEN** `Worker` interrupts the active task, flushes `receipt.json` with
+  `status="FAILURE"`, `exit_code=130`, and a non-empty `error` string, and exits
+  with code `130`.

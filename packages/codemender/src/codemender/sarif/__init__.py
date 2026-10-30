@@ -121,6 +121,13 @@ class SarifDocument:
         if isinstance(run_entry.get("results"), list)
     )
 
+  @property
+  def active_result_count(self) -> int:
+    """Returns the number of non-dismissed finding entries across `runs`."""
+    return sum(
+        1 for item in self.results if not _is_result_dismissed(item)
+    )
+
   def to_json(self, indent: Optional[int] = None) -> str:
     """Serializes the SARIF document to JSON (compact 1-line by default).
 
@@ -192,6 +199,18 @@ def normalize_sarif_path(uri: str) -> str:
   if text in (".", "..") or text.startswith("../"):
     return ""
   return text
+
+
+def _is_result_dismissed(result: Dict[str, Any]) -> bool:
+  """Returns whether `result` is marked dismissed or suppressed."""
+  props = result.get("properties")
+  if isinstance(props, dict) and props.get("status") in (
+      "DISMISSED",
+      "FALSE_POSITIVE",
+  ):
+    return True
+  suppressions = result.get("suppressions")
+  return isinstance(suppressions, list) and bool(suppressions)
 
 
 def _primary_location(result: Dict[str, Any]) -> Tuple[str, int, int]:

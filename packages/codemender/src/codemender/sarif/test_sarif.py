@@ -76,6 +76,23 @@ class TestSarifDocument(unittest.TestCase):
     serialized = doc.to_json()
     self.assertNotIn("\n", serialized)
     self.assertEqual(json.loads(serialized), {"version": "2.1.0", "runs": []})
+    self.assertEqual(doc.active_result_count, 0)
+
+  def test_active_result_count_excludes_dismissed_and_suppressed(self) -> None:
+    doc = sarif.SarifDocument.from_dict({
+        "version": "2.1.0",
+        "runs": [{
+            "results": [
+                {"ruleId": "R1"},
+                {"ruleId": "R2", "properties": {"status": "DISMISSED"}},
+                {"ruleId": "R3", "suppressions": [{"kind": "inSource"}]},
+                {"ruleId": "R4", "suppressions": []},
+                {"ruleId": "R5", "properties": {"status": "FALSE_POSITIVE"}},
+                "non-dict-ignored",
+            ]
+        }],
+    })
+    self.assertEqual(doc.active_result_count, 2)
 
 
 if __name__ == "__main__":

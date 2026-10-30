@@ -19,6 +19,9 @@ cloudrun = [
     "google-cloud-run>=0.10.0",
 ]
 
+[project.scripts]
+cm-worker = "launcher.worker:main"
+
 [tool.uv.sources]
 codemender = { workspace = true }
 

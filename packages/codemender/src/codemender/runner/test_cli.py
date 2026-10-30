@@ -44,7 +44,6 @@ import sys
 import tempfile
 import tomllib
 import unittest
-
 import setuptools
 
 # Directory containing the `codemender` package, used as cwd so `python -m codemender.runner` works.

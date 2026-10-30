@@ -57,8 +57,8 @@ communicating exclusively through `ArtifactCache` (`SPEC-ARTIFACT-CACHE`:
   `Launcher` nor `Worker` imports the other.
 - Enforce strict security isolation: zero `packages/repohost` imports,
   tar-slip-safe archive unpacking into container-private ephemeral scratch disk
-  (`/tmp/work`), and child process group termination on preemption signals
-  (`SIGTERM` -> `143`, `SIGINT` -> `130`).
+  (`/tmp/work`), and clean preemption handling on `SIGTERM` (`143`) and `SIGINT`
+  (`130`).
 - Preserve the Two-Way Door lazy-import invariant so `cm-worker` with a
   `file://` cache URI never imports `gcsfs` or `google.cloud`.
 
@@ -81,8 +81,7 @@ communicating exclusively through `ArtifactCache` (`SPEC-ARTIFACT-CACHE`:
   (`cm-worker = "launcher.worker:main"`) inside
   `packages/launcher/src/launcher/worker.py`, while placing the shared wire
   models (`RunManifest`, `ExecutionReceipt`, `ScanMetadata`) and typed protocol
-  methods in `launcher.cache` (`SPEC-ARTIFACT-CACHE`, with re-exports in
-  `launcher.worker` for convenience).
+  methods in `launcher.cache` (`SPEC-ARTIFACT-CACHE`).
 - **Rationale**:
   1. `Launcher` (host-side client) and `Worker` (inside-container server)
      implement the two halves of the same container execution protocol over
@@ -113,8 +112,8 @@ communicating exclusively through `ArtifactCache` (`SPEC-ARTIFACT-CACHE`:
 
 ### Decision 2: Pure `ArtifactCache` Protocol DI & Two-Way Door Lazy Cloud Imports
 
-- **Choice**: `Worker.__init__` accepts an `ArtifactCache` instance
-  (`Worker(cache, work_dir=Path("/tmp/work"), cm_runner_binary="cm-runner")`)
+- **Choice**: `Worker.__init__` accepts an `ArtifactCache` instance and an
+  optional `CmAdapter` (`Worker(cache, work_dir=Path("/tmp/work"), adapter=None)`)
   rather than raw `fsspec` filesystems or ad-hoc cloud SDK clients, and
   `cm-worker` resolves `--cache-uri` via
   `launcher.cache.open_artifact_cache(uri)`.
@@ -139,11 +138,12 @@ communicating exclusively through `ArtifactCache` (`SPEC-ARTIFACT-CACHE`:
      the 4-step inside-container execution lifecycle—cleaning and initializing
      `/tmp/work/{repo,inputs,out}`, reading `RunManifest` via `ArtifactCache`,
      unpacking `shared/code.tar.gz` into `/tmp/work/repo` with tar-slip
-     validation, POSIX mode restoration, and single-folder flattening, running
-     `cm-runner` in an isolated process group (`start_new_session=True`,
-     `env=None`) with stream isolation, trapping `SIGTERM`/`SIGINT` preemption
-     signals, and publishing `ExecutionReceipt`, `runner.log`, and output
-     artifacts with fallback `stderr` log spill.
+     validation, POSIX mode restoration, and single-folder flattening, calling
+     `codemender.runner.__main__.dispatch` (which delegates to `init.run`,
+     `find_diff.run`, `fix.run`, and `verify.run`) in-process using `CmAdapter`
+     with `logging.FileHandler` log capture and stream isolation, trapping
+     `SIGTERM`/`SIGINT` preemption signals, and publishing `ExecutionReceipt`,
+     `runner.log`, and output artifacts with fallback `stderr` log spill.
   4. **Two-Way Door Lazy Cloud Imports:** Because `open_artifact_cache(uri)`
      lazily imports `GcsArtifactCache` (`gcsfs` and `google.cloud`) only when
      `uri.startswith("gs://")`, local Docker/gVisor runs (`file:///cache`) and
@@ -181,40 +181,48 @@ communicating exclusively through `ArtifactCache` (`SPEC-ARTIFACT-CACHE`:
      [SPEC-FIND-DIFF](../find-diff/spec.md) `REQ-0002.2`) resides at
      `/tmp/work/repo/.git`.
 
-### Decision 4: New Process Group Execution, Stream Isolation & Preemption Receipt Flush
+### Decision 4: Direct In-Process `codemender.runner.__main__.dispatch` Execution, Stream Isolation & Preemption Receipt Flush
 
-- **Choice**: Spawn `cm-runner` with `start_new_session=True` and `env=None`
-  ([ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md)), isolate
-  `cm-runner`'s `stdout` from `stderr` for artifact-producing commands
-  (`stdout=subprocess.DEVNULL` for `find-diff`, `fix`, and `verify`; capture
-  both `stdout` `check` NDJSON events and `stderr` for `init`), tee diagnostics
-  live to `sys.stderr` and `/tmp/work/out/runner.log` while emitting zero bytes
-  to `cm-worker`'s own `sys.stdout`, and trap `SIGTERM` (`143`) and `SIGINT`
-  (`130`) to kill the child process group via `os.killpg` and flush a failure
-  `ExecutionReceipt` before exit.
+- **Choice**: Invoke `codemender.runner.__main__.dispatch` (which delegates to
+  `init.run`, `find_diff.run`, `fix.run`, and `verify.run` in
+  `codemender.runner.commands`) directly in-process using `CmAdapter` (caching
+  the resolved adapter on `self.adapter` rather than spawning a redundant
+  `cm-runner` Python subprocess), attach a `logging.FileHandler` for
+  `/tmp/work/out/runner.log` on the root logger, use a discard
+  `EventEmitter(stream=io.StringIO())` for artifact-producing commands
+  (`find-diff`, `fix`, `verify`; `emitter=None` for `init`) while emitting zero
+  bytes to `cm-worker`'s own `sys.stdout`, and trap `SIGTERM` (`143`) and
+  `SIGINT` (`130`) via `_PreemptionSignal` to unwind execution and flush a
+  failure `ExecutionReceipt` before exit.
 - **Rationale**:
-  1. `cm-runner` spawns the `cm` binary, which in turn spawns sandboxed worker
-     processes. Running `cm-runner` as a process group leader allows
-     `os.killpg(proc.pid, signal.SIGTERM)` (followed by `SIGKILL` escalation) to
-     cleanly reap the entire process tree on Cloud Run preemption or CI abort.
-  2. Per [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
+  1. Both `packages/launcher` and `packages/codemender` are installed in the same
+     Python virtual environment inside the sandbox container. Calling
+     `codemender.runner.__main__.dispatch` (which constructs `InitConfig`,
+     `FindDiffConfig`, `FixConfig`, and `VerifyConfig` and calls `init.run`,
+     `find_diff.run`, `fix.run`, and `verify.run`) shares command dispatch logic
+     with the CLI while eliminating CLI argument serialization (`build_argv`)
+     and avoiding an extra Python interpreter startup and pipe-reading loop.
+  2. When `SIGTERM` or `SIGINT` raises `_PreemptionSignal`, Python unwinds the
+     call stack through `CmAdapter.run`, whose `subprocess.run` context
+     automatically kills (`process.kill()`) and reaps (`process.wait()`) any
+     active child `cm` binary process without needing custom process-group
+     locks or `os.killpg` escalation in `Worker`.
+  3. Per [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
      [SPEC-FIND-DIFF](../find-diff/spec.md) (`REQ-0005`),
      [SPEC-FIX](../fix/spec.md) (`REQ-0005`), and
      [SPEC-VERIFY](../verify/spec.md) (`REQ-0006`), `find-diff`, `fix`, and
      `verify` write their primary payloads (full SARIF JSON or raw binary
-     `git diff --binary HEAD` bytes) to `stdout` even when `--out /tmp/work/out`
-     is passed, while auto-`init` (`emitter=None`) and command diagnostics go to
-     `stderr`. Discarding `cm-runner`'s duplicate `stdout` stream for
-     `find-diff`, `fix`, and `verify` prevents corrupting `runner.log` and
-     container `stderr` with binary diffs or large SARIF blobs. Conversely,
-     standalone `cm-runner init --repo /tmp/work/repo` takes no `--out` flag and
-     emits its four `check` NDJSON events (`cm_binary`, `cm_workspace`,
-     `cm_config`, `cm_verify`) to `stdout`, so capturing `stdout` and `stderr`
-     for `init` preserves those check outcomes in `runner.log`.
-  3. Flushing `receipt.json` and `runner.log` to `ArtifactCache` inside the
-     signal handler (with a `sys.stderr` fallback log spill if cache upload
-     fails) ensures the outer `Launcher` always observes a deterministic failure
-     receipt and diagnostic log.
+     `git diff --binary HEAD` bytes) to `emitter.stream` even when
+     `out=Path("/tmp/work/out")` is passed, while auto-`init` (`emitter=None`)
+     and command diagnostics go through Python `logging`. Calling `dispatch`
+     with `emitter=None` uses `EventEmitter(stream=io.StringIO())` for
+     artifact-producing commands to discard duplicate `stdout` payloads while
+     the `logging.FileHandler` captures all `codemender` log records into
+     `/tmp/work/out/runner.log` alongside `sys.stderr`.
+  4. Flushing `receipt.json` and `runner.log` to `ArtifactCache` when
+     `_PreemptionSignal` is caught (with a `sys.stderr` fallback log spill if
+     cache upload fails) ensures the outer `Launcher` always observes a
+     deterministic failure receipt and diagnostic log.
 
 ## Architecture & Execution Flow
 
@@ -254,7 +262,7 @@ classDiagram
             +diff_workers: int | None
             +log_level: str | None
             +extra_args: tuple[str, ...]
-            +from_dict(data: Mapping, default_task_id: str)$ RunManifest
+            +from_dict(data: Mapping)$ RunManifest
             +to_dict() dict
         }
 
@@ -278,18 +286,20 @@ classDiagram
         class Worker {
             +cache: ArtifactCache
             +work_dir: Path
-            +cm_runner_binary: str
+            +adapter: CmAdapter | None
             +run_task(task_id: str) int
         }
     }
 
     namespace codemender {
-        class cm_runner["cm-runner CLI"] {
-            +init
-            +find-diff
-            +fix
-            +verify
+        class runner_commands["codemender.runner.__main__.dispatch -> commands"] {
+            +dispatch()
+            +init.run()
+            +find_diff.run()
+            +fix.run()
+            +verify.run()
         }
+        class CmAdapter
     }
 
     ArtifactCache <|-- LocalArtifactCache
@@ -297,10 +307,12 @@ classDiagram
     ArtifactCache ..> RunManifest : owns wire schema
     ArtifactCache ..> ExecutionReceipt : owns wire schema
     Worker --> ArtifactCache : calls typed protocol methods
-    Worker --> cm_runner : spawns subprocess (start_new_session=True)
+    Worker --> runner_commands : calls dispatch() in-process
+    Worker --> CmAdapter : locates & caches or injects
+    runner_commands --> CmAdapter : invokes cm binary
 ```
 
-### Sequence Diagram (`Launcher` <-> `ArtifactCache` <-> `Worker` <-> `cm`)
+### Sequence Diagram (`Launcher` <-> `ArtifactCache` <-> `Worker` <-> `codemender` <-> `cm`)
 
 ```mermaid
 sequenceDiagram
@@ -308,8 +320,8 @@ sequenceDiagram
     participant L as Launcher Client<br/>(LocalDocker / CloudRun)
     participant C as ArtifactCache<br/>(file:// or gs://)
     participant W as Worker Server<br/>(cm-worker / Worker.run_task)
-    participant R as cm-runner Subprocess<br/>(New Process Group)
-    participant CM as cm Binary<br/>(Inside Sandbox)
+    participant R as codemender.runner.__main__.dispatch<br/>(init / find_diff / fix / verify)
+    participant CM as CmAdapter -> cm Binary<br/>(Inside Sandbox)
 
     L->>C: put_repo_archive(...) & put_finding(...)
     L->>C: put_manifest(task_id, RunManifest)
@@ -328,11 +340,11 @@ sequenceDiagram
         W->>C: get_finding(manifest.finding_key, "/tmp/work/inputs/<stem>.sarif")
     end
 
-    Note over W,CM: Step 3: Execute cm-runner Subprocess (Stream-Isolated)
-    W->>R: Popen(["cm-runner", cmd, "--repo", "/tmp/work/repo", ...], start_new_session=True, env=None)
+    Note over W,CM: Step 3: Execute codemender.runner.__main__.dispatch In-Process (Stream-Isolated)
+    W->>R: Attach FileHandler(runner.log) & call dispatch(command, adapter, ...)
     R->>CM: Invoke cm via CmAdapter
     CM-->>R: Exit code + SARIF / Diff artifacts written to /tmp/work/out
-    R-->>W: Tee stderr (and init stdout check events) -> sys.stderr & /tmp/work/out/runner.log
+    R-->>W: Python logging -> sys.stderr & /tmp/work/out/runner.log
 
     Note over W,C: Step 4: Publish Raw-Byte Artifacts & ExecutionReceipt
     W->>C: put_task_output(task_id, "runner.log", ...)
@@ -438,10 +450,10 @@ parameters staged by `Launcher` and consumed by `Worker.run_task`.
 
 ### 2. `ExecutionReceipt` (`tasks/<task_id>/output/receipt.json`)
 
-`ExecutionReceipt` is a frozen dataclass defined in `launcher.cache`
-(`SPEC-ARTIFACT-CACHE`, and re-exported by `launcher.worker`) representing the
-structured task completion record written by `Worker` to
-`tasks/<task_id>/output/receipt.json`.
+`ExecutionReceipt` is a frozen `attrs` class (`@attrs.define(frozen=True)`)
+defined in `launcher.cache` (`SPEC-ARTIFACT-CACHE`, and re-exported by
+`launcher.worker`) representing the structured task completion record written by
+`Worker` to `tasks/<task_id>/output/receipt.json`.
 
 | Field | Python Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -453,20 +465,20 @@ structured task completion record written by `Worker` to
 | `completed_at` | `str` | Yes | ISO 8601 UTC completion timestamp (`YYYY-MM-DDTHH:MM:SSZ`). |
 | `duration_seconds` | `float` | Yes | Non-negative elapsed wall-clock execution time in seconds (rounded to 3 decimal places). |
 | `finding_count` | `int` | Yes | Number of non-dismissed findings in `runs[0].results` of the emitted SARIF artifact (`properties.status != "DISMISSED"` and not suppressed per [SPEC-VERIFY](../verify/spec.md) `REQ-0005`; `0` when dismissed, when no SARIF artifact is produced, or on failure). |
-| `artifacts` | `Dict[str, str]` | Yes | Deterministic mapping of logical artifact roles (`runner.log` -> `"log"`, `*.sarif` -> `"sarif"`, `*.md` -> `"report"`, `*.diff` -> `"patch"`) to relative `ArtifactCache` keys under `tasks/<task_id>/output/`. |
-| `error` | `Optional[str]` | Yes (`null` on success or normal `cm-runner` exit `3`) | `None` (`null`) when `status == "SUCCESS"` or when `cm-runner` itself runs normally and returns exit code `3` (e.g., `cm-runner fix` producing no patch, where diagnostics are in `runner.log`); non-empty string when `Worker` encounters a manifest/archive validation error (`2`), `cm-runner` usage error (`2`), missing binary (`FileNotFoundError`), `ArtifactCacheError`/IO error, or preemption signal (`130`/`143`). |
+| `artifacts` | `dict[str, str]` | Yes | Deterministic mapping of logical artifact roles (`runner.log` -> `"log"`, `*.sarif` -> `"sarif"`, `*.md` -> `"report"`, `*.diff` -> `"patch"`) to relative `ArtifactCache` keys under `tasks/<task_id>/output/`. |
+| `error` | `str \| None` | Yes (`null` on success or normal `cm-runner` exit `3`) | `None` (`null`) when `status == "SUCCESS"` or when `cm-runner` itself runs normally and returns exit code `3` (e.g., `cm-runner fix` producing no patch, where diagnostics are in `runner.log`); non-empty string when `Worker` encounters a manifest/archive validation error (`2`), `cm-runner` usage error (`2`), missing binary (`FileNotFoundError`), `ArtifactCacheError`/IO error, or preemption signal (`130`/`143`). |
 
-#### `ExecutionReceipt` Serialization Semantics (`from_dict` / `to_dict`)
+#### `ExecutionReceipt` Serialization Semantics (`from_dict` / `to_dict`, `from_json` / `to_json`)
 
-- `ExecutionReceipt.from_dict(data: Mapping[str, Any]) -> ExecutionReceipt`:
-  - Validates required fields (`status`, `exit_code`, `command`), coerces
-    `exit_code` and `finding_count` to `int`, `duration_seconds` to `float`
-    (defaulting to `0.0` if omitted by older producers for lenient consumer
-    compatibility per
-    [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md)), and
-    `artifacts` to `dict[str, str]`.
-- `ExecutionReceipt.to_dict() -> dict[str, Any]`:
-  - Returns a JSON-serializable dictionary with all fields above.
+- `ExecutionReceipt.from_dict(data: Mapping[str, Any]) -> ExecutionReceipt` &
+  `ExecutionReceipt.from_json(raw_json: str | bytes) -> ExecutionReceipt`:
+  - Validates that `data` is a mapping and delegates directly to
+    `ExecutionReceipt(**data)` so `attrs` field converters and validators
+    enforce all invariants (raising `ValidationError` on invalid fields).
+- `ExecutionReceipt.to_dict() -> dict[str, Any]` &
+  `ExecutionReceipt.to_json() -> str`:
+  - Returns a JSON-serializable dictionary or deterministic JSON string with all
+    fields above.
 
 #### Example `receipt.json` (`find-diff` Task)
 
@@ -500,11 +512,11 @@ codes:
 
 | Exit Code | Constant / Signal | Receipt `status` | Triggering Conditions & `ArtifactCacheError` Mapping |
 | :--- | :--- | :--- | :--- |
-| `0` | `EXIT_OK` | `"SUCCESS"` | `cm-runner` completed with exit code `0` (regardless of whether `finding_count` is `0` or `> 0`) and required output artifacts were published to `ArtifactCache`. |
-| `2` | `EXIT_USAGE_ERROR` | `"FAILURE"` (or no receipt if `--cache-uri`/`--task-id` CLI flags are missing/invalid) | CLI argument error (`--cache-uri` or `--task-id` missing/invalid); `ArtifactNotFoundError`, `ArtifactIntegrityError`, or `InvalidCacheKeyError` when reading `tasks/<task_id>/input/manifest.json`, `shared/code.tar.gz`, or `finding_key` in Steps 1–2; `manifest.json` failing `RunManifest` validation (`ValueError`); tar archive failing tar-slip or format validation (`ValueError`, `tarfile.TarError`); or `cm-runner` exiting with code `2`. |
-| `3` | `EXIT_EXECUTION_FAILURE` | `"FAILURE"` | Normal `cm-runner` exit code `3` (e.g., `cm-runner fix` producing no patch, recorded with `receipt.error = None` and diagnostics in `runner.log`); OR worker/infrastructure failures recorded with a non-empty `receipt.error`: `CacheConfigurationError`, `CachePermissionError`, or `CacheTransientError` when opening `--cache-uri` or accessing `ArtifactCache`; `cm-runner` binary not found (`FileNotFoundError`); `cm-runner` exiting with any unexpected non-zero exit code (`!= 2` and `!= 3`); or an unexpected storage/IO exception (`ArtifactCacheError`, `OSError`) during execution or Step 4 output publishing. |
-| `130` | `SIGINT` (`128 + 2`) | `"FAILURE"` | Worker received `SIGINT`; active `cm-runner` process group terminated and preemption receipt flushed. |
-| `143` | `SIGTERM` (`128 + 15`) | `"FAILURE"` | Worker received `SIGTERM` (e.g., Cloud Run Job task timeout/preemption or `docker stop`); active `cm-runner` process group terminated and preemption receipt flushed. |
+| `0` | `EXIT_OK` | `"SUCCESS"` | `codemender` command completed with exit code `0` (regardless of whether `finding_count` is `0` or `> 0`) and required output artifacts were published to `ArtifactCache`. |
+| `2` | `EXIT_USAGE_ERROR` | `"FAILURE"` (or no receipt if `--cache-uri`/`--task-id` CLI flags are missing/invalid) | CLI argument error (`--cache-uri` or `--task-id` missing/invalid); `ArtifactNotFoundError`, `ArtifactIntegrityError`, or `InvalidCacheKeyError` when reading `tasks/<task_id>/input/manifest.json`, `shared/code.tar.gz`, or `finding_key` in Steps 1–2; `manifest.json` failing `RunManifest` validation (`ValidationError`, `ValueError`); tar archive failing tar-slip or format validation (`ValueError`, `tarfile.TarError`); or `codemender` command returning exit code `2`. |
+| `3` | `EXIT_EXECUTION_FAILURE` | `"FAILURE"` | Normal `codemender` exit code `3` (e.g., `fix.run` producing no patch, recorded with `receipt.error = None` and diagnostics in `runner.log`); OR worker/infrastructure failures recorded with a non-empty `receipt.error`: `CacheConfigurationError`, `CachePermissionError`, or `CacheTransientError` when opening `--cache-uri` or accessing `ArtifactCache`; `cm` binary not found (`FileNotFoundError`); `codemender` returning any unexpected non-zero exit code (`!= 2` and `!= 3`); or an unexpected storage/IO exception (`ArtifactCacheError`, `OSError`) during execution or Step 4 output publishing. |
+| `130` | `SIGINT` (`128 + 2`) | `"FAILURE"` | Worker received `SIGINT`; active task interrupted and preemption receipt flushed. |
+| `143` | `SIGTERM` (`128 + 15`) | `"FAILURE"` | Worker received `SIGTERM` (e.g., Cloud Run Job task timeout/preemption or `docker stop`); active task interrupted and preemption receipt flushed. |
 
 ## Security, Signal Handling & Failure-Spill Details
 
@@ -531,22 +543,21 @@ all members returned by `tar.getmembers()` prior to extraction:
    applies `target_path.chmod(member.mode & 0o777)` on regular files and
    directories (skipping symlinks).
 
-### Child Process Group Termination & Preemption Handling
+### Preemption Signal Handling & Child `cm` Cleanup
 
-When `Worker.run_task(task_id)` executes Step 3, it registers handlers for
+When `Worker.run_task(task_id)` executes, it registers handlers for
 `signal.SIGTERM` and `signal.SIGINT` (restoring previous signal handlers in a
-`finally` block when `run_task` returns normally):
-- `cm-runner` is started with `subprocess.Popen(..., start_new_session=True)`,
-  making `proc.pid` the process group ID (`pgid`).
-- On `SIGTERM` (`exit_code = 143`) or `SIGINT` (`exit_code = 130`),
-  `Worker._terminate_active_proc()` sends `os.killpg(proc.pid, signal.SIGTERM)`,
-  waits up to a configurable grace timeout (default `2.0` seconds), and sends
-  `os.killpg(proc.pid, signal.SIGKILL)` if the child process group has not
-  terminated.
-- The signal handler then invokes receipt/log finalization so
-  `tasks/<task_id>/output/runner.log` and `tasks/<task_id>/output/receipt.json`
-  (`status="FAILURE"`, `exit_code=143` or `130`) are uploaded to `ArtifactCache`
-  before raising `SystemExit(exit_code)` (or returning `exit_code`).
+`finally` block when `run_task` returns):
+- On `SIGTERM` (`exit_code = 143`) or `SIGINT` (`exit_code = 130`), the signal
+  handler raises `_PreemptionSignal(signum, exit_code)`.
+- As `_PreemptionSignal` unwinds the call stack through `CmAdapter.run`,
+  `subprocess.run`'s built-in exception handler automatically kills and reaps any
+  active child `cm` process.
+- `_stage_and_run_command` catches `_PreemptionSignal`, appends the signal notice
+  to `runner.log`, and returns `(command_name, sig_exc.exit_code, str(sig_exc))`
+  so `_publish_results` uploads `tasks/<task_id>/output/runner.log` and
+  `tasks/<task_id>/output/receipt.json` (`status="FAILURE"`, `exit_code=143` or
+  `130`) to `ArtifactCache` before returning `exit_code`.
 
 ### Fallback `stderr` Log Spill
 
@@ -564,7 +575,7 @@ revoked credentials during preemption), `Worker` writes the captured
 ```
 
 This guarantees that operators inspecting container `stderr` streams in Cloud
-Logging or CI job logs always see the underlying `cm-runner` failure output.
+Logging or CI job logs always see the underlying `codemender` failure output.
 
 ## Verification Strategy (`packages/launcher/src/launcher/test_worker.py`)
 
@@ -573,20 +584,16 @@ co-located unit tests in `packages/launcher/src/launcher/test_worker.py`
 executed by `make test`:
 
 1. **CLI & Argument Validation Tests:**
-   - Verify `cm-worker` entry in `packages/launcher/pyproject.toml` and test
-     `main()` with valid flags, missing `--cache-uri` / `--task-id`, and
-     path-traversal `--task-id ../bad` (asserting exit code `2` and empty
-     `stdout`).
+   - Test `WorkerConfig`, `WorkerConfig.from_cli()`, and `main()` with valid flags,
+     missing `--cache-uri` / `--task-id`, and path-traversal `--task-id ../bad`
+     (asserting exit code `2` and empty `stdout`).
 2. **Package Boundary & Lazy-Import Tests:**
-   - Inspect AST imports across `packages/launcher` to assert zero imports of
-     `repohost`.
-   - Block both `gcsfs` and `google.cloud` in `sys.modules`
-     (`sys.modules["gcsfs"] = None` and `sys.modules["google.cloud"] = None`)
-     and run `main(["--cache-uri", f"file://{tmp_path}", "--task-id", "find"])`
-     to verify Two-Way Door lazy-import compliance.
+   - Block `repohost`, `gcsfs`, and `google.cloud` in `sys.modules`
+     (`sys.modules["repohost"] = None`, `sys.modules["gcsfs"] = None`, and
+     `sys.modules["google.cloud"] = None`) during task execution to verify
+     runtime package isolation and Two-Way Door lazy-import compliance.
 3. **`RunManifest`, `ExecutionReceipt` & `ArtifactCacheError` Mapping Tests:**
-   - Test `from_dict` / `to_dict` round-trips, `"find"` -> `"find-diff"`
-     normalization, `"diff_base"` -> `"base_ref"` alias resolution, and
+   - Test `from_dict` / `to_dict` and `from_json` / `to_json` round-trips and
      validation failures (missing `base_ref` for `find-diff`, missing or unsafe
      `finding_key` for `fix`/`verify`, unknown command) producing exit code `2`
      and failure receipts.
@@ -602,15 +609,16 @@ executed by `make test`:
    - Verify `0o755` executable mode preservation and single-directory wrapper
      flattening (`my-repo/.git` -> `/tmp/work/repo/.git`).
 5. **End-to-End 4-Step Task Execution Tests (`find-diff`, `fix`, `verify`):**
-   - Using `LocalArtifactCache(tmp_path)` and a fake/stub `cm-runner` executable
-     script, verify that `Worker.run_task` stages `shared/code.tar.gz` and
-     `findings/finding-001.sarif`, invokes `cm-runner` with the expected CLI
-     flags, uploads `report.sarif` / `finding-001.diff` / `finding-001.sarif`,
-     `runner.log`, and `receipt.json` (with accurate `finding_count`), and
-     cleans `work_dir`.
+   - Using `_FakeArtifactCache` (or `LocalArtifactCache(tmp_path)`), an injected
+     `CmAdapter`, and mocked `codemender.runner.commands.{init,find_diff,fix,verify}.run`
+     handlers, verify that `Worker.run_task` stages `shared/code.tar.gz` and
+     `findings/finding-001.sarif`, invokes the command handlers with the expected
+     typed config objects, uploads `report.sarif` / `finding-001.diff` /
+     `finding-001.sarif`, `runner.log`, and `receipt.json` (with accurate
+     `finding_count`), and cleans `work_dir`.
 6. **Preemption Signal (`SIGTERM` / `SIGINT`) & Fallback Log Spill Tests:**
-   - Spawn `cm-worker` (or `Worker.run_task`) with a slow child process, send
-     `SIGTERM` / `SIGINT`, and verify child process group termination and
-     `receipt.json` publication with exit codes `143` and `130`.
-   - Simulate `ArtifactCache.put_file` failure on a non-zero exit and assert
+   - Run `Worker.run_task` with a slow mocked command handler, send `SIGTERM` /
+     `SIGINT`, and verify task interruption and `receipt.json` publication with
+     exit codes `143` and `130`.
+   - Simulate `ArtifactCache` upload failure on a non-zero exit and assert
      that `FALLBACK LOG SPILL` is written to `sys.stderr`.

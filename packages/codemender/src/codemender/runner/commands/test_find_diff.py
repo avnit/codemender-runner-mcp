@@ -317,7 +317,7 @@ class TestFindDiffValidate(FindDiffTestBase):
   """Tests for `FindDiffConfig.validate()` (`REQ-0002`, Exit Code 2)."""
 
   def test_valid_config_returns_ok(self):
-    for workers in (1, 4, 8, 16):
+    for workers in (None, 1, 4, 8, 16):
       with self.subTest(diff_workers=workers):
         cfg = find_diff.FindDiffConfig(
             repo=Path(self.repo),
@@ -325,10 +325,14 @@ class TestFindDiffValidate(FindDiffTestBase):
             out=Path(self.tmp) / "artifacts",
             diff_workers=workers,
         )
+        expected_workers = (
+            find_diff.DEFAULT_DIFF_WORKERS if workers is None else workers
+        )
+        self.assertEqual(cfg.diff_workers, expected_workers)
         self.assertEqual(cfg.validate(), exit_codes.OK)
 
   def test_invalid_diff_workers_exits_usage_with_empty_stdout(self):
-    for bad_workers in (0, -1, 17, 100, True, False, "8", None):
+    for bad_workers in (0, -1, 17, 100, True, False, "8"):
       with self.subTest(diff_workers=bad_workers):
         adapter = RecordingCmAdapter()
         cfg = find_diff.FindDiffConfig(

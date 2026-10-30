@@ -20,10 +20,12 @@ Run as:  python -m codemender.runner <command> [flags]
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 import contextlib
+import io
 import logging
+from pathlib import Path
 import sys
-from typing import List, Optional
 
 from codemender.cm import CmAdapter
 from codemender.runner import exit_codes
@@ -35,7 +37,7 @@ from codemender.runner.events import EventEmitter
 logger = logging.getLogger(__name__)
 
 _LOG_LEVELS = ("debug", "info", "warning", "error")
-_SKIP_INIT = ("version", "init")
+_REPO_COMMANDS = ("init", "find-diff", "fix", "verify")
 
 
 def configure_logging(level: str) -> None:
@@ -198,7 +200,9 @@ def build_parser() -> argparse.ArgumentParser:
       "--finding",
       required=True,
       metavar="FILE",
-      help="SARIF file holding exactly one finding, or '-' to read it from stdin",
+      help=(
+          "SARIF file holding exactly one finding, or '-' to read it from stdin"
+      ),
   )
   fix_parser.add_argument(
       "--repo",
@@ -226,7 +230,9 @@ def build_parser() -> argparse.ArgumentParser:
       "--finding",
       required=True,
       metavar="FILE",
-      help="SARIF file holding exactly one finding, or '-' to read it from stdin",
+      help=(
+          "SARIF file holding exactly one finding, or '-' to read it from stdin"
+      ),
   )
   verify_parser.add_argument(
       "--repo",
@@ -246,17 +252,100 @@ def build_parser() -> argparse.ArgumentParser:
   return parser
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def dispatch(
+    command: str,
+    adapter: CmAdapter,
+    *,
+    repo: Path | str = ".",
+    base: str = "HEAD",
+    out: Path | str | None = None,
+    finding: Path | str | None = None,
+    diff_workers: int | None = None,
+    auto_init: bool = True,
+    emitter: EventEmitter | None = None,
+) -> int:
+  """Executes a `cm-runner` repository subcommand with stdout isolation.
+
+  Args:
+    command: Repository subcommand name (`"init"`, `"find-diff"`, `"fix"`, or
+      `"verify"`).
+    adapter: Verified `CmAdapter` instance.
+    repo: Target Git repository directory path.
+    base: Base Git reference for `find-diff` (default: `"HEAD"`).
+    out: Optional directory path for output artifacts.
+    finding: Optional single-finding SARIF path (or `"-"`) for `fix`/`verify`.
+    diff_workers: Optional concurrent `cm find --diff` worker count (`None`
+      uses `FindDiffConfig`'s default).
+    auto_init: Whether to run `init` automatically before repository commands.
+    emitter: Optional `EventEmitter` for stdout payloads; defaults to a discard
+      in-memory stream for `find-diff`, `fix`, and `verify` (`None` for `init`).
+
+  Returns:
+    A process exit code from `codemender.runner.exit_codes`.
+  """
+  if command not in _REPO_COMMANDS:
+    return exit_codes.USAGE
+
+  repo_path = Path(repo).expanduser().resolve()
+  out_path = Path(out).expanduser().resolve() if out is not None else None
+  cmd_emitter = (
+      emitter if emitter is not None else EventEmitter(stream=io.StringIO())
+  )
+  with contextlib.redirect_stdout(sys.stderr):
+    if command != "init" and auto_init:
+      # Imported lazily so `cm-runner version` does not pull in `yaml`.
+      # pylint: disable-next=import-outside-toplevel
+      from codemender.runner.commands import init
+
+      init_rc = init.run(init.InitConfig(repo=repo_path), adapter, emitter=None)
+      if init_rc != exit_codes.OK:
+        return init_rc
+
+    if command == "init":
+      # Imported lazily so `cm-runner version` does not pull in `yaml`.
+      # pylint: disable-next=import-outside-toplevel
+      from codemender.runner.commands import init
+
+      return init.run(init.InitConfig(repo=repo_path), adapter, emitter)
+    if command == "find-diff":
+      return find_diff.run(
+          find_diff.FindDiffConfig(
+              repo=repo_path,
+              base=base,
+              out=out_path,
+              diff_workers=diff_workers,
+          ),
+          adapter,
+          cmd_emitter,
+      )
+    if command == "fix":
+      return fix.run(
+          fix.FixConfig(finding=finding, repo=repo_path, out=out_path),
+          adapter,
+          cmd_emitter,
+      )
+    # pylint: disable-next=import-outside-toplevel
+    from codemender.runner.commands import verify
+
+    return verify.run(
+        verify.VerifyConfig(finding=finding, repo=repo_path, out=out_path),
+        adapter,
+        cmd_emitter,
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
   """Parses arguments and dispatches to a subcommand.
 
   Args:
-    argv: Argument vector excluding the program name. Defaults to sys.argv[1:].
+    argv: Argument vector excluding the program name. Defaults to
+      `sys.argv[1:]`.
 
   Returns:
-    A process exit code from `cli.exit_codes`.
+    A process exit code from `codemender.runner.exit_codes`.
   """
   parser = build_parser()
-  args = _apply_defaults(parser.parse_args(sys.argv[1:] if argv is None else argv))
+  args = _apply_defaults(parser.parse_args(argv))
 
   configure_logging(args.log_level)
 
@@ -279,34 +368,24 @@ def main(argv: Optional[List[str]] = None) -> int:
   if adapter is None:
     return exit_codes.FAILED
 
-  with contextlib.redirect_stdout(sys.stderr):
-    if args.command not in _SKIP_INIT and args.auto_init:
-      from codemender.runner.commands import init  # pylint: disable=import-outside-toplevel
-
-      init_rc = init.run(init.config_from_args(args), adapter, emitter=None)
-      if init_rc != exit_codes.OK:
-        return init_rc
-
-    if args.command == "version":
+  if args.command == "version":
+    with contextlib.redirect_stdout(sys.stderr):
       return version.run(adapter, emitter)
-    if args.command == "init":
-      from codemender.runner.commands import init  # pylint: disable=import-outside-toplevel
 
-      return init.run(init.config_from_args(args), adapter, emitter)
-    if args.command == "find-diff":
-      return find_diff.run(find_diff.config_from_args(args), adapter, emitter)
-    if args.command == "fix":
-      return fix.run(fix.config_from_args(args), adapter, emitter)
-    if args.command == "verify":
-      from codemender.runner.commands import verify  # pylint: disable=import-outside-toplevel
-
-      return verify.run(verify.config_from_args(args), adapter, emitter)
-
-  parser.print_help(sys.stderr)
-  return exit_codes.USAGE
+  return dispatch(
+      args.command,
+      adapter,
+      repo=getattr(args, "repo", "."),
+      base=getattr(args, "base", "HEAD"),
+      out=getattr(args, "out", None),
+      finding=getattr(args, "finding", None),
+      diff_workers=getattr(args, "diff_workers", None),
+      auto_init=args.auto_init,
+      emitter=emitter,
+  )
 
 
-def _find_cm(binary: Optional[str]) -> Optional[CmAdapter]:
+def _find_cm(binary: str | None) -> CmAdapter | None:
   """Finds `cm` and checks that it runs.
 
   `CmAdapter.locate` only finds a path: an explicit `--cm-binary` is not

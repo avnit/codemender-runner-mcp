@@ -67,6 +67,8 @@ class TestRunManifest(unittest.TestCase):
         {"command": "init", "task_id": "../escape"},
         {"command": "init", "task_id": "sub/task"},
         {"command": "init", "task_id": "."},
+        {"command": "init", "task_id": ".tmp.task"},
+        {"command": "init", "task_id": "C:task"},
         {"command": "find-diff", "task_id": "find"},
         {"command": "fix", "task_id": "fix-1"},
         {"command": "verify", "task_id": "verify-1"},
@@ -79,6 +81,16 @@ class TestRunManifest(unittest.TestCase):
             "command": "fix",
             "task_id": "fix-1",
             "finding_key": "/abs/finding.sarif",
+        },
+        {
+            "command": "fix",
+            "task_id": "fix-1",
+            "finding_key": "findings/.tmp.f1.sarif",
+        },
+        {
+            "command": "fix",
+            "task_id": "fix-1",
+            "finding_key": "C:findings/f1.sarif",
         },
         {
             "command": "find-diff",
@@ -164,9 +176,12 @@ class TestExecutionReceipt(unittest.TestCase):
         {"status": "FAILURE", "exit_code": 143, "error": ""},
         {"status": "UNKNOWN"},
         {"task_id": "../escape"},
+        {"task_id": ".tmp.find"},
+        {"task_id": "C:find"},
         {"duration_seconds": -1.0},
         {"finding_count": -1},
         {"artifacts": {"log": "../escape.log"}},
+        {"artifacts": {"log": "tasks/find/output/.tmp.runner.log"}},
     ]
     for overrides in invalid_overrides:
       with self.subTest(overrides=overrides):

@@ -30,7 +30,6 @@ import argparse
 import dataclasses
 import logging
 from pathlib import Path
-from typing import Optional
 
 from codemender import sarif
 from codemender.cm import CmAdapter
@@ -70,12 +69,14 @@ class FindDiffConfig:
 
   repo: Path
   base: str = "HEAD"
-  out: Optional[Path] = None
-  diff_workers: int = DEFAULT_DIFF_WORKERS
+  out: Path | None = None
+  diff_workers: int | None = DEFAULT_DIFF_WORKERS
 
   def __post_init__(self) -> None:
     if isinstance(self.base, str):
       self.base = self.base.strip()
+    if self.diff_workers is None:
+      self.diff_workers = DEFAULT_DIFF_WORKERS
 
   def validate(self) -> int:
     """Validates command-line options and Git pre-flight checks before running `cm`.
@@ -130,7 +131,7 @@ def config_from_args(args: argparse.Namespace) -> FindDiffConfig:
   repo_arg = getattr(args, "repo", ".")
   base_arg = getattr(args, "base", "HEAD")
   out_arg = getattr(args, "out", None)
-  diff_workers_arg = getattr(args, "diff_workers", DEFAULT_DIFF_WORKERS)
+  diff_workers_arg = getattr(args, "diff_workers", None)
   return FindDiffConfig(
       repo=Path(repo_arg).expanduser().resolve(),
       base=base_arg,

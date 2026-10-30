@@ -143,6 +143,7 @@ classDiagram
     %% Dependency Injection & Cross-Layer Relationships
     Launcher --> ArtifactCache : uses
     Worker --> ArtifactCache : uses
+    Worker --> Runner : calls in-process
 ```
 
 1. **`RepoHost` (`repohost.base`) and Concrete Implementations
@@ -176,10 +177,11 @@ classDiagram
      constructor (`Worker(cache: ArtifactCache)`). When a container starts,
      `Worker.run_task(task_id)` reads `tasks/<task_id>/input/manifest.json` and
      `shared/code.tar.gz` from `ArtifactCache`, extracts the repository into
-     container-private ephemeral scratch disk (`/tmp/work/repo`), runs
-     `cm-runner` as a subprocess, and writes `receipt.json`, `runner.log`, and
-     output artifacts (`report.sarif` or `<finding>.diff`) back to
-     `ArtifactCache`.
+     container-private ephemeral scratch disk (`/tmp/work/repo`), invokes the
+     `codemender.runner.commands` handlers (`init.run`, `find_diff.run`,
+     `fix.run`, `verify.run`) in-process using `CmAdapter`, and writes
+     `receipt.json`, `runner.log`, and output artifacts (`report.sarif` or
+     `<finding>.diff`) back to `ArtifactCache`.
 1. **`ArtifactCache` (`launcher.cache` in `packages/launcher`) and Concrete
    Backends (`LocalArtifactCache`, `GcsArtifactCache`):**
    - **Role:** Provides the short-lived, PR/run-scoped key/file cache shared
@@ -192,8 +194,10 @@ classDiagram
      imports `GcsArtifactCache` only when `uri` starts with `gs://` so local
      `file://` executions never import `google.cloud` libraries.
 1. **`Runner`  (`packages/codemender`):**
-   - **Role:** The innermost package containing the `cm-runner` CLI wrapper and
-     `CmAdapter` (which invokes the underlying native `cm` binary and emits
+   - **Role:** The innermost package containing the `codemender.runner.commands`
+     handlers (`init`, `find_diff`, `fix`, `verify`), the standalone `cm-runner`
+     CLI wrapper, and `CmAdapter` (which invokes the underlying native `cm`
+     binary and emits
      [ADR-0001](ADR-0001-machine-readable-output-contract.md) NDJSON events),
      deterministic SARIF 2.1.0 parsing/splitting (`codemender.sarif`), local Git
      archive/diff operations (`codemender.vcs`), and shared data models.
@@ -244,7 +248,7 @@ classDiagram
     Launcher ..> cm-worker : spawns container
     cm-worker --> Worker
     Worker --> ArtifactCache
-    Worker --> cm-runner
+    Worker --> CmAdapter
     cm-runner --> CmAdapter
 ```
 
@@ -281,16 +285,16 @@ classDiagram
    - **First-Level Components Invoked:** Instantiates **`Worker`** injected with
      **`ArtifactCache`** (opened via `open_artifact_cache(--cache-uri)`) to read
      `tasks/<id>/input/manifest.json`, unpack `shared/code.tar.gz` into
-     `/tmp/work/repo`, invoke the **`cm-runner`** CLI as a subprocess, and
-     upload `ExecutionReceipt` + output artifacts back to `ArtifactCache`.
+     `/tmp/work/repo`, call **`codemender.runner.commands`** (`init.run`,
+     `find_diff.run`, `fix.run`, `verify.run`) in-process using **`CmAdapter`**,
+     and upload `ExecutionReceipt` + output artifacts back to `ArtifactCache`.
 1. **`cm-runner` (`codemender.runner.__main__:main` in `packages/codemender`) —
    Runs in `docker/runner.Dockerfile` (`runner.Dockerfile`):**
    - **Runtime Environment:** Executes inside the same sandbox container
-     (`docker/runner.Dockerfile`), invoked as a child process by `Worker`
-     (`cm-worker`, which serves as the container's default
-     `ENTRYPOINT ["cm-worker"]`) during orchestrated `Launcher` runs, or invoked
-     directly via `docker run --entrypoint cm-runner` for standalone local
-     single-container execution.
+     (`docker/runner.Dockerfile`) when invoked directly via
+     `docker run --entrypoint cm-runner` for standalone local single-container
+     execution (whereas orchestrated `Launcher` runs invoke `cm-worker`, which
+     calls the `codemender.runner.commands` Python modules directly in-process).
    - **First-Level Components Invoked:** Invokes **`CmAdapter`**, which wraps
      the underlying `cm` Go binary and emits structured
      [ADR-0001](ADR-0001-machine-readable-output-contract.md) NDJSON events.
@@ -309,7 +313,7 @@ running `cm-github find` on a GitHub Pull Request backed by `CloudRunLauncher`,
 > (`cm-github verify`), local gVisor execution (`LocalDockerLauncher` +
 > `LocalArtifactCache`), and headless non-PR full-repo scans—recombine these
 > exact same building blocks (`RepoHost`, `Launcher`, `ArtifactCache`, `Worker`,
-> and `cm-runner`).
+> and `codemender`).
 
 ```mermaid
 sequenceDiagram
@@ -331,7 +335,7 @@ sequenceDiagram
 
     box Cloud Run Container (docker/runner.Dockerfile)
         participant W as cm-worker / Worker<br/>(Worker Server)
-        participant CMR as cm-runner -> CmAdapter -> cm
+        participant CMR as codemender.runner.commands -> CmAdapter -> cm
     end
 
     GH->>CLI: Trigger 'cm-github find' on PR event
@@ -344,7 +348,7 @@ sequenceDiagram
     API->>W: Start container (docker/runner.Dockerfile, ENTRYPOINT ["cm-worker"])
 
     W->>GCS: Read manifest.json & download shared/code.tar.gz
-    W->>CMR: Subprocess: cm-runner find-diff (in /tmp/work/repo)
+    W->>CMR: In-process: find_diff.run(repo=/tmp/work/repo, out=/tmp/work/out)
     CMR-->>W: report.sarif + runner.log
     W->>GCS: Upload report.sarif, runner.log & receipt.json
     W-->>API: Container exits
@@ -520,9 +524,12 @@ sequenceDiagram
         transit and container-local extraction model established in
         [ADR-0005](ADR-0005-multi-platform-transit-storage-and-isolation.md) and
         [Proposal: `vcs-cloudrun-comms`](../openspec/proposals/vcs-cloudrun-comms/proposal.md).
-     1. **Execute `cm-runner`:** Invoke `cm-runner` as a subprocess against
-        `/tmp/work/repo` with `--out /tmp/work/out`, capturing `stdout` NDJSON
-        events and teeing `stderr` diagnostics to `/tmp/work/out/runner.log`
+     1. **Execute `codemender` In-Process:** Invoke the
+        `codemender.runner.commands` handler (`init.run`, `find_diff.run`,
+        `fix.run`, `verify.run`) in-process against `/tmp/work/repo` with
+        `out=/tmp/work/out` using `CmAdapter`, capturing `codemender` log
+        records into `/tmp/work/out/runner.log` via a `logging.FileHandler`
+        and isolating duplicate `stdout` payloads via a discard `EventEmitter`
         (per
         [Proposal: `cloudrun-job-bootstrapper`](../openspec/proposals/cloudrun-job-bootstrapper/proposal.md)).
      1. **Publish Receipt & Outputs to `ArtifactCache`:** Write `receipt.json`
@@ -569,7 +576,7 @@ sequenceDiagram
 
 - **Why:**
   - **True Container Portability Across Local gVisor, Cloud Run, and GKE:** By
-    packaging `Worker` (`cm-worker`) and `cm-runner` in a single container image
+    packaging `Worker` (`cm-worker`) and `codemender` in a single container image
     with `ENTRYPOINT ["cm-worker"]` and speaking a single `ArtifactCache`
     protocol, moving workloads between local gVisor, Cloud Run Jobs, and GKE
     requires zero changes to the container or workflow orchestration code.
@@ -956,7 +963,7 @@ sequenceDiagram
     participant L as Launcher Client<br/>(LocalDocker / CloudRun / GKE)
     participant A as ArtifactCache<br/>(file:// or gs://)
     participant W as Worker Server<br/>(cm-worker)
-    participant R as cm-runner -> cm<br/>(Inside Sandbox)
+    participant R as codemender.runner.commands -> CmAdapter -> cm<br/>(Inside Sandbox)
 
     C->>L: find() / fix() / verify()
     L->>A: ensure_repo_snapshot() -> Cache shared/code.tar.gz (once per run/commit)
@@ -965,8 +972,8 @@ sequenceDiagram
     W->>A: Open ArtifactCache from --cache-uri & read manifest.json
     W->>A: Stream shared/code.tar.gz & findings/<id>.sarif
     Note over W: Unpack code.tar.gz into container-private<br/>ephemeral scratch (/tmp/work/repo)
-    W->>R: Invoke cm-runner <cmd> --repo /tmp/work/repo --out /tmp/work/out
-    R-->>W: Exit code + stdout NDJSON + stderr -> runner.log
+    W->>R: Invoke codemender.runner.commands in-process (repo=/tmp/work/repo, out=/tmp/work/out)
+    R-->>W: Exit code + output artifacts + Python logging -> runner.log
     W->>A: Write tasks/<task_id>/output/{receipt.json, runner.log, artifacts}
     W-->>L: Container exits
     L->>A: Read tasks/<task_id>/output/receipt.json & output artifacts
@@ -1041,9 +1048,9 @@ across `packages/{codemender,launcher,repohost}`:
      `Worker(LocalArtifactCache(tmp_path)).run_task("fix-finding-001")` (and
      `cm-worker --cache-uri file://<tmp> --task-id fix-finding-001`) reads
      `tasks/fix-finding-001/input/manifest.json`, extracts `shared/code.tar.gz`
-     into an isolated temporary directory, invokes `cm-runner`, and writes
-     `receipt.json`, `runner.log`, and `finding-001.diff` to
-     `tasks/fix-finding-001/output/`.
+     into an isolated temporary directory, invokes `codemender.runner.commands`
+     in-process, and writes `receipt.json`, `runner.log`, and `finding-001.diff`
+     to `tasks/fix-finding-001/output/`.
 1. **`Launcher` Client Domain Operations, Parallel Streaming, Shard-Slicing &
    Signal-Safety Tests (`packages/launcher/src/launcher/test_launcher.py`):**
    - Verify `launcher.find()`, `launcher.fix()`, and `launcher.verify()` using

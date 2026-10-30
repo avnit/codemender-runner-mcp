@@ -20,12 +20,14 @@ from dataclasses import dataclass, field
 import logging
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
 
+from codemender.runner import exit_codes
+
 logger = logging.getLogger("codemender-github-actions")
 
 # cm-runner exit codes (ADR-0001). Frozen by the contract.
-EXIT_OK = 0
-EXIT_USAGE_ERROR = 2
-EXIT_EXECUTION_FAILURE = 3
+EXIT_OK = exit_codes.OK
+EXIT_USAGE_ERROR = exit_codes.USAGE
+EXIT_EXECUTION_FAILURE = exit_codes.FAILED
 
 DEFAULT_MAX_PARALLEL = 4
 
