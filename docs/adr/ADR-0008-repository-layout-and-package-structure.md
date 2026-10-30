@@ -29,10 +29,11 @@ four core goals:
    processing, local VCS/diff operations, and the multi-step scan-verify-fix
    pipeline coordinator across all CI/CD integrations without duplicating logic.
 1. **Modular Packaging & Scoped Dependencies:** Organize Python code into a
-   three-package workspace (`packages/{codemender,launcher,repohost}`) with
-   minimal base dependencies for the sandbox runner, scoped optional dependency
-   extras (`cloudrun`, `github`, `gitlab`), `uvx` and `pip` console entrypoints,
-   and simple `Makefile`-driven test and container builds.
+   three-package workspace (`packages/{codemender,launcher,repohost}`) built on
+   the foundational technical stack and engineering conventions in
+   [ADR-0001](ADR-0001.md), with minimal base dependencies for the sandbox
+   runner and scoped optional dependency extras (`cloudrun`, `github`,
+   `gitlab`).
 
 ______________________________________________________________________
 
@@ -331,11 +332,10 @@ ______________________________________________________________________
 ### Decision 3: Domain-Driven Subpackages (`vcs` vs. `repohost`, No `common/` or `utils/`) & Extensibility Conventions
 
 - **Design:** Organize subpackages by domain cohesion with no generic `common/`
-  or `utils/` directory ([go/no-utils](http://goto.google.com/no-utils)),
-  strictly separate `codemender.vcs` from `repohost`, and follow three
-  conventions in `launcher` and `repohost` so new execution backends and repo
-  hosts can be added—or later split into standalone packages—with zero caller
-  churn:
+  or `utils/` directory (see [ADR-0001](ADR-0001.md)), strictly separate
+  `codemender.vcs` from `repohost`, and follow three conventions in `launcher`
+  and `repohost` so new execution backends and repo hosts can be added—or later
+  split into standalone packages—with zero caller churn:
   1. **1-to-1 Subpackage-to-Extra Mapping:** Each execution backend
      (`launcher/local/`, `launcher/cloudrun/`) and each repo host
      (`repohost/github/`, `repohost/gitlab/`) lives in its own dedicated
@@ -371,38 +371,11 @@ ______________________________________________________________________
 
 ### Decision 4: Co-Located Unit Tests (`test_<name>.py`) & Packaging Exclusions
 
-- **Design:** Place unit tests in the same directory as the code they test
-  inside `packages/*/src/` using the `test_<name>.py` naming convention, and
-  exclude `test_*`, `*_test`, and `testdata*` via
-  `[tool.setuptools.packages.find]` `exclude` in each package's `pyproject.toml`
-  and the root `.dockerignore`:
-
-  ```dockerignore
-  # ILLUSTRATIVE EXAMPLE
-  .git
-  .github
-  docs
-  terraform
-  scripts
-  **/__pycache__
-  **/*.pyc
-  **/test_*.py
-  **/*_test.py
-  **/testdata/
-  .pytest_cache
-  *.egg-info
-  build
-  ```
-
-- **Why:** Co-locating `test_<name>.py` beside `<name>.py` keeps tests visible
-  and easy to maintain as modules evolve, while `[tool.setuptools.packages.find]`
-  `exclude` and Docker exclusions ensure test files are never shipped in
-  production wheels or container images.
-
-- **Alternatives Rejected:**
-
-  - *Separate `tests/` directory trees:* Requires maintaining parallel directory
-    hierarchies across every package.
+Extracted to [ADR-0001](ADR-0001.md) (*Foundational Technical Stack, Build
+Tooling, and Engineering Conventions*). Unit tests live beside the modules they
+test as `test_*.py` inside `packages/*/src/` and are excluded from production
+wheels and container images via `[tool.setuptools.packages.find]` `exclude` and
+`.dockerignore`.
 
 ### Decision 5: Per-Target Dockerfiles (`docker/*.Dockerfile`) & Root `Makefile` Targets (Two-Way Door)
 
@@ -433,23 +406,24 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## 4. Tech Stack & `cm-runner` Runtime Contract (Carried Forward from `ADR-0002` & `ADR-0004`)
+## 4. `cm-runner` Runtime Contract (Carried Forward from `ADR-0002` & `ADR-0004`)
 
-### Tech Stack Standards
+### Runtime Entrypoints & Container Packaging
 
-- **Python 3.11+ & Console Entrypoint (`cm-runner` vs. `cm`):**
+Foundational Python (`>= 3.11`), PEP 621 packaging, `Makefile`, `pytest`, and
+Terraform (`>= 1.5`) standards are defined in [ADR-0001](ADR-0001.md).
+
+- **Console Entrypoint (`cm-runner` vs. `cm`):**
   - `cm` is the underlying native Go binary that performs CodeMender analysis
     and patch synthesis.
   - `cm-runner` is the Python CLI entrypoint generated from `[project.scripts]`
     in `packages/codemender/pyproject.toml` (pointing to
     `codemender.runner.__main__:main`) that wraps `cm` with structured
-    [ADR-0001](ADR-0001-machine-readable-output-contract.md) output and
-    pre-flight checks.
+    [ADR-0002](ADR-0002.md) output and pre-flight checks.
   - Inside containers, `packages/codemender` and `packages/launcher[cloudrun]`
-    are installed into an isolated virtualenv (`/opt/codemender/venv` on
-    `$PATH`) so target repositories installing their own dependencies cannot
-    conflict with the runner.
-- **Lean Base Runner Container (`docker/runner.Dockerfile`):** Packages only OS
+    are installed into `/opt/codemender/venv` on `$PATH` (see
+    [ADR-0001](ADR-0001.md)).
+- **Lean Base Runner Container (`docker/runner.Dockerfile`):** Packages OS
   essentials (`git`, `curl`, `tar`, `gzip`, `ca-certificates`), Python 3.11,
   `cm`, `packages/codemender` (`cm-runner`), and `packages/launcher[cloudrun]`
   (`cm-worker`, with `ENTRYPOINT ["cm-worker"]` as the default container
@@ -457,11 +431,8 @@ ______________________________________________________________________
   `--task-id` arguments across Cloud Run Jobs and local Docker, while standalone
   local callers can invoke `docker run --entrypoint cm-runner`; see
   [ADR-0009](ADR-0009-abstraction-layers-and-dependency-injection.md)
-  Decision 2), omitting `packages/repohost` and heavy multi-language compiler
-  suites (see [SPEC-0003](../openspec/specs/runner-container-packaging/spec.md)).
-- **Infrastructure Automation (`terraform/`):** HashiCorp Terraform `>= 1.5`
-  with a root configuration at `terraform/` and composable child modules under
-  `terraform/modules/`.
+  Decision 2), omitting `packages/repohost` and heavy compiler suites (see
+  [SPEC-0003](../openspec/specs/runner-container-packaging/spec.md)).
 
 ### Security & Process Isolation Boundary
 
@@ -486,10 +457,10 @@ cm-runner [--cm-binary PATH] [--log-level LEVEL] [--no-init] <command> [flags]
 ```
 
 - **Inputs & Outputs:** Inputs are CLI flags (or `-` for `stdin`). Outputs
-  follow [ADR-0001](ADR-0001-machine-readable-output-contract.md): one compact
-  JSON object per line on `stdout`, human logs on `stderr`, and coarse exit
-  codes (`0` success, `2` usage error, `3` execution failure). File artifacts
-  are written to the directory specified by `--out`.
+  follow [ADR-0002](ADR-0002.md): one compact JSON object per line on `stdout`,
+  human logs on `stderr`, and coarse exit codes (`0` success, `2` usage error,
+  `3` execution failure). File artifacts are written to the directory specified
+  by `--out`.
 - **Stdout Purity by Construction:** `codemender.runner` gives the NDJSON event
   emitter the real `sys.stdout` stream and runs subcommands with Python's
   `sys.stdout` redirected to `sys.stderr`
@@ -505,20 +476,6 @@ cm-runner [--cm-binary PATH] [--log-level LEVEL] [--no-init] <command> [flags]
 
 ### How to Build, Test, and Run
 
-Standard operations are exposed as root `Makefile` targets as well as direct
-`uvx` / `pip` commands:
-
-```bash
-# Run all co-located unit tests across packages/{codemender,launcher,repohost}
-make test
-
-# Build target container images (wraps: docker build -f docker/<target>.Dockerfile .)
-make build-runner
-make build-cloudrun
-make build-gitlab
-
-# Run cm-runner directly via uvx or an editable workspace install
-uvx --from ./packages/codemender cm-runner version
-pip install -e ./packages/codemender -e "./packages/launcher[cloudrun]" -e "./packages/repohost[github,gitlab]"
-cm-runner version
-```
+Standard `Makefile`, `pytest`, `uvx`, and container build workflows follow
+[ADR-0001](ADR-0001.md) (`make test`, `make build-runner`,
+`make build-cloudrun`, `make build-gitlab`).
