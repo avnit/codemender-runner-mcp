@@ -38,10 +38,6 @@ TARGET_DOCS: tuple[str, ...] = (
 )
 
 _EXTERNAL_SCHEMES = ("http://", "https://", "mailto:")
-_LEGACY_BLOCK_RE = re.compile(
-    r"<!--\s*legacy-docs-start\s*-->.*?<!--\s*legacy-docs-end\s*-->",
-    re.DOTALL,
-)
 _FENCED_CODE_RE = re.compile(
     r"(^|\n)[ \t>]*(`{3,}|~{3,})[^\n]*\n.*?\n[ \t>]*\2[ \t]*(?=\n|$)",
     re.DOTALL,
@@ -74,8 +70,7 @@ def slugify_github_heading(heading: str) -> str:
 
 def strip_ignored_regions(markdown_text: str) -> str:
   """Strips fenced code blocks, HTML comments, and inline code spans."""
-  text = _LEGACY_BLOCK_RE.sub("", markdown_text)
-  text = _FENCED_CODE_RE.sub("\n", text)
+  text = _FENCED_CODE_RE.sub("\n", markdown_text)
   text = _INLINE_CODE_RE.sub("CODE", text)
   text = _HTML_COMMENT_RE.sub("", text)
   return text

@@ -112,7 +112,7 @@ box, along with modular building blocks for custom workflows:
   after the initial scan. Runs an exploitability check against the cached
   snapshot in the sandbox, replies on the review thread, and automatically
   dismisses false positives.
-- **[Custom Workflows](docs/guides/calling_cm_runner.md):** Compose the
+- **[Custom Workflows](packages/codemender/README.md):** Compose the
   standalone `cm-runner` stages (`find`, `fix`, `verify`) and
   [`packages/launcher/`](packages/launcher/README.md) building blocks to build
   custom scanning, triage, or remediation pipelines.
@@ -174,7 +174,6 @@ Looking for standalone component references? Jump directly to:
   - [Terraform Modules (`terraform/README.md`)](terraform/README.md)
   - [Container Packaging (`docker/README.md`)](docker/README.md)
 - **Workspace Package Guides:**
-  - [`packages/codemender/README.md`](packages/codemender/README.md) (and
-    [`docs/guides/calling_cm_runner.md`](docs/guides/calling_cm_runner.md))
+  - [`packages/codemender/README.md`](packages/codemender/README.md)
   - [`packages/launcher/README.md`](packages/launcher/README.md)
   - [`packages/repohost/README.md`](packages/repohost/README.md)

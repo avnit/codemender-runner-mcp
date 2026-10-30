@@ -219,8 +219,8 @@ def _read_finding(cfg: FixConfig, command: str = "fix") -> Optional[str]:
   if count != 1:
     logger.error(
         "The finding from %s holds %d results; %s takes exactly one. Split a"
-        " find-diff report into one file per finding first (see 'From"
-        " find-diff to fix' in docs/guides/calling_cm_runner.md).",
+        " find-diff report into one file per finding first (see"
+        " packages/codemender/README.md).",
         source,
         count,
         command,
