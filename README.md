@@ -119,6 +119,20 @@ box, along with modular building blocks for custom workflows:
 
 ## Getting Started
 
+### Prerequisites
+
+Before provisioning CodeMender Runner, confirm that you have:
+
+- **Google Cloud Project:** A Google Cloud project with billing enabled and
+  Vertex AI API access for CodeMender.
+- **Terraform & Google Cloud SDK:** Terraform (`>= 1.5`) and the Google Cloud
+  SDK (`gcloud`) authenticated (`gcloud auth application-default login`) for
+  one-time infrastructure provisioning.
+- **Repository Host Authentication *(Optional — for automated Terraform
+  setup)*:** Credentials or CLI authentication for your source control platform
+  (such as GitHub or GitLab) when using Terraform to automatically bootstrap
+  repository or project CI secrets, variables, and labels.
+
 ### Quickstart (Terraform)
 
 All workflows and supported environments are configurable via Terraform. Follow

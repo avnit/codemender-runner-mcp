@@ -146,8 +146,10 @@ github_repositories = [
 # SECTION 4: Optional GitHub Repository Bootstrap & Provider Auth
 # ==============================================================================
 # When github_repositories is non-empty, CodeMender bootstraps target repositories
-# with required GitHub Actions Secrets (GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT),
-# Labels (codemender-scan), and Variables (GCS_TRANSIT_BUCKET, CLOUD_RUN_JOB_NAME in cloud_run mode).
+# with required GitHub Actions Secrets (CODEMENDER_WORKLOAD_IDENTITY_PROVIDER,
+# CODEMENDER_SERVICE_ACCOUNT), Labels (codemender-scan), and Variables
+# (CODEMENDER_GCP_PROJECT_ID, plus CODEMENDER_GCS_TRANSIT_BUCKET,
+# CODEMENDER_CLOUD_RUN_JOB_NAME, and CODEMENDER_GCP_REGION in cloud_run mode).
 #
 # To manage these GitHub resources, we support 2 authentication methods:
 #
@@ -160,3 +162,4 @@ github_repositories = [
 #    Provide a GitHub Personal Access Token (classic with 'repo' scope or fine-grained PAT).
 #    Overrides ambient CLI credentials when specified.
 # github_mgmt_token = null
+

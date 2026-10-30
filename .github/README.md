@@ -22,21 +22,29 @@ Follow the four steps below to set up CodeMender on GitHub Actions:
 4. [**Step 4 — Configure Automated Fixes & On-Demand
    Verification**](#step-4--configure-automated-fixes--on-demand-verification)
 
+<a id="prerequisites"></a>
+
 ## Step 1 — Verify Prerequisites
 
-Before provisioning infrastructure, confirm that you have:
+Before provisioning infrastructure for GitHub Actions, confirm that you have:
 
-- A **Google Cloud Project** with billing enabled and Vertex AI API access for
-  CodeMender.
-- **Terraform** (`>= 1.5`) and **Google Cloud SDK (`gcloud`)** authenticated
-  (`gcloud auth application-default login`).
-- **GitHub Authentication** (`gh auth login` or `GITHUB_TOKEN`) if you want
-  Terraform to bootstrap repository secrets and variables automatically.
-
-> [!WARNING]
-> **Work in Progress:** Detailed prerequisite checks are being consolidated into
-> this section. See [`## Prerequisites`](#prerequisites) below for the current
-> prerequisite list.
+- [**General CodeMender Prerequisites**](../README.md#prerequisites): Confirm
+  your Google Cloud project, Vertex AI API access, Terraform (`>= 1.5`), and
+  `gcloud` authentication are set up.
+- **GitHub Repository or Organization Permissions:** Admin access to the target
+  GitHub repository (or GitHub Organization) with GitHub Actions enabled so you
+  can configure Actions secrets/variables and enable caller workflows or
+  Organization Repository Rulesets.
+- **GitHub Authentication for Automated Terraform Bootstrap *(Optional)*:** If
+  you populate `github_repositories` in `terraform.tfvars` so Terraform
+  automatically provisions GitHub Actions secrets, variables, and the
+  `codemender-scan` label, authenticate to GitHub using one of the supported
+  methods in
+  [`../terraform/README.md#github-authentication`](../terraform/README.md#github-authentication):
+  - An authenticated GitHub CLI session (`gh auth login`) or `GITHUB_TOKEN`
+    environment variable, or
+  - A Personal Access Token (`github_mgmt_token` with `repo` scope or
+    fine-grained repository Secrets/Variables/Issues permissions).
 
 ## Step 2 — Provision Your Execution Environment
 
@@ -51,9 +59,17 @@ image, and set up your GitHub Actions secrets and variables, then return to
 | [**Open the Cloud Run Setup Guide (`../docs/user-guides/cloud-run.md`) →**](../docs/user-guides/cloud-run.md) | [**Open the Local Docker + gVisor Setup Guide (`../docs/user-guides/local-gvisor.md`) →**](../docs/user-guides/local-gvisor.md) |
 | Dispatches isolated serverless Google Cloud Run Jobs (`execution_mode = "cloud_run"`) and stages source archives and reports in a GCS bucket (`gs://`). Default backend for `.github/actions/codemender`. | Runs the `cm-runner` container directly on the GitHub Actions runner VM under Docker with gVisor (`runsc`) kernel isolation (`execution_mode = "local"`, `.github/actions/codemender-local`). |
 
-For standalone infrastructure and container reference documentation, see
-[`../terraform/README.md`](../terraform/README.md) and
-[`../docker/README.md`](../docker/README.md).
+- **GitHub Actions Secrets & Variables:** When `github_repositories` is
+  populated in `terraform.tfvars`, Terraform automatically creates the required
+  repository secrets, variables, and the `codemender-scan` label. For manual
+  setup or organization-level configurations (`github_scope_type = "org"` with
+  `github_repositories = []`), configure the secrets and variables listed in
+  [Bootstrapped GitHub Repository Resources (`../terraform/README.md`)](../terraform/README.md#bootstrapped-github-repository-resources-terraformmoduleswifgithubtf)
+  (and optionally set the `CODEMENDER_RUNNER_IMAGE` variable when using a custom
+  container image with `.github/actions/codemender-local`).
+- **Standalone Infrastructure & Container Reference:** See
+  [`../terraform/README.md`](../terraform/README.md) and
+  [`../docker/README.md`](../docker/README.md).
 
 <a id="step-3"></a>
 
@@ -93,124 +109,9 @@ tune action inputs and permissions.
 
 > [!WARNING]
 > **Legacy Documentation:** The sections below are preserved while their
-> contents are being consolidated into Steps 1–4 above,
-> [`../docs/user-guides/cloud-run.md`](../docs/user-guides/cloud-run.md),
-> [`../docs/user-guides/local-gvisor.md`](../docs/user-guides/local-gvisor.md),
-> [`../terraform/README.md`](../terraform/README.md), and
-> [`../docker/README.md`](../docker/README.md).
+> contents are being consolidated into Steps 3–4 above.
 
 <!-- legacy-docs-start -->
-
-## Prerequisites
-
-1. **Google Cloud Project** with billing enabled and Vertex AI API access for
-   CodeMender.
-1. **Terraform** (`>= 1.5`) and **Google Cloud SDK (`gcloud`)** authenticated
-   (`gcloud auth application-default login`) for one-time infrastructure setup.
-1. **GitHub Authentication** (`gh auth login` or `GITHUB_TOKEN` /
-   `github_mgmt_token` when bootstrapping repository secrets and variables via
-   Terraform).
-
-## Step 1 — Provision Google Cloud & Workload Identity Federation (Terraform)
-
-Use the root [`terraform/`](../terraform/) configuration to provision keyless
-Workload Identity Federation between GitHub Actions and Google Cloud (and, when
-`execution_mode = "cloud_run"`, Google Cloud Run Jobs and a GCS transit bucket):
-
-```bash
-cd terraform
-cp terraform.tfvars.example terraform.tfvars
-```
-
-Edit `terraform.tfvars` (see
-[`terraform/terraform.tfvars.example`](../terraform/terraform.tfvars.example))
-with your environment values:
-
-- `gcp_project_id`: Your Google Cloud project ID.
-- `gcp_region`: Target GCP region (default: `"us-central1"`).
-- `execution_mode`: `"cloud_run"` (dispatches isolated Cloud Run Jobs; default
-  for `.github/actions/codemender`) or `"local"` (runs the `cm-runner` container
-  under Docker + gVisor on the GitHub Actions runner VM via
-  `.github/actions/codemender-local`).
-- `github_scope_type`: `"org"`, `"user"`, or `"repositories"`.
-- `github_owner`: Your GitHub organization or username (or `""` when
-  `github_scope_type = "repositories"`).
-- `github_repositories`: List of repository names (`"repo"` or `"owner/repo"`)
-  to authorize and/or bootstrap with GitHub Actions secrets, variables, and
-  labels.
-
-Initialize and apply the Terraform configuration:
-
-```bash
-# Authenticate to GitHub first (`gh auth login` or export GITHUB_TOKEN="...")
-terraform init
-terraform plan
-terraform apply
-
-# Inspect the provisioned WIF provider and service account outputs
-terraform output
-```
-
-## Step 2 — Configure GitHub Actions Secrets & Variables
-
-When `github_repositories` is populated in `terraform.tfvars`, `terraform apply`
-automatically configures the target repositories. If you manage settings
-manually (at the **Organization** or **Repository** level under **Settings →
-Secrets and variables → Actions**), configure:
-
-| Name                                    | Type     | Required                | Description                                                                                                                      |
-| :-------------------------------------- | :------- | :---------------------- | :------------------------------------------------------------------------------------------------------------------------------- |
-| `CODEMENDER_WORKLOAD_IDENTITY_PROVIDER` | Secret   | Yes                     | Full resource name of the GCP Workload Identity Provider (`terraform output gcp_workload_identity_provider`).                    |
-| `CODEMENDER_SERVICE_ACCOUNT`            | Secret   | Yes                     | Email of the GCP Service Account (`terraform output gcp_service_account`).                                                       |
-| `CODEMENDER_GCP_PROJECT_ID`             | Variable | Yes                     | Google Cloud project ID hosting Vertex AI.                                                                                       |
-| `CODEMENDER_GCS_TRANSIT_BUCKET`         | Variable | Optional (Cloud Run)    | GCS bucket for staging source archives and reports (`codemender` action). Defaults to `codemender-reports-<project>`.            |
-| `CODEMENDER_CLOUD_RUN_JOB_NAME`         | Variable | Optional (Cloud Run)    | Cloud Run Job name (`codemender` action). Defaults to `codemender-runner`.                                                       |
-| `CODEMENDER_GCP_REGION`                 | Variable | Optional (Cloud Run)    | GCP region for the Cloud Run Job (`codemender` action). Defaults to `us-central1`.                                               |
-| `CODEMENDER_RUNNER_IMAGE`               | Variable | Optional (Local Docker) | Container image URI for `.github/actions/codemender-local`. Defaults to `ghcr.io/<action-or-workflow-repo>:latest` in lowercase. |
-
-## Step 3 — Build & Publish the `cm-runner` Container Image
-
-CodeMender executes inside a container image built from the root
-[`Dockerfile`](../Dockerfile) (`ENTRYPOINT ["cm-runner"]`, `CMD ["version"]`),
-which comes pre-baked with Python 3.11, Node.js 22 (`npm`/`yarn`/`pnpm`),
-OpenJDK 17 (`mvn`/`gradle`), Go 1.22, and C/C++ (`gcc`/`g++`/`make`/`cmake`).
-
-### Option A: Build Automatically in GitHub Actions (GHCR)
-
-Trigger
-[`.github/workflows/build_runner_image.yml`](workflows/build_runner_image.yml)
-from the **Actions** tab (**Build & Publish CodeMender Runner Image → Run
-workflow**) or push to `main`. This builds the root `Dockerfile`, verifies the
-`cm-runner` entrypoint contract, and publishes
-`ghcr.io/<owner>/codemender-runner:latest` and `:<commit-sha>`.
-
-### Option B: Build & Push Manually with Docker (Artifact Registry or GHCR)
-
-```bash
-COMMIT_SHA="$(git rev-parse HEAD)"
-IMAGE_URI="us-docker.pkg.dev/<GCP_PROJECT_ID>/<AR_REPO>/codemender-runner:${COMMIT_SHA}"
-
-# 1. Build the image from the repository root
-docker build -t "${IMAGE_URI}" .
-
-# 2. Verify the container entrypoint contract
-docker run --rm "${IMAGE_URI}" version
-
-# 3. Push to your container registry
-gcloud auth configure-docker us-docker.pkg.dev
-docker push "${IMAGE_URI}"
-```
-
-### Customizing Project Dependencies in the Image
-
-Because `cm-runner fix` runs your project's build/test command inside an offline
-sandbox (`permissive-closed`) to verify candidate patches, if your repositories
-require third-party libraries (such as `pytest`, `flask`, or `jest`) or
-additional toolchains, edit the root [`Dockerfile`](../Dockerfile) directly to
-install those dependencies, and then build and publish your custom image using
-[Option A](#option-a-build-automatically-in-github-actions-ghcr) or
-[Option B](#option-b-build--push-manually-with-docker-artifact-registry-or-ghcr)
-above.
 
 ## Step 4 — Enable CodeMender on Your Repositories
 
@@ -254,7 +155,7 @@ suggestions (`fix`) across multiple repositories in a GitHub Organization with
      workflows and composite actions.
 1. **Configure Google Cloud credentials** at the organization or repository
    level as shown in
-   [Step 2](#step-2--configure-github-actions-secrets--variables).
+   [Step 2](#step-2--provision-your-execution-environment).
    *(Repositories in the organization that have not configured these credentials
    automatically emit a `::notice::` and exit `0` so their pull requests are not
    blocked.)*
@@ -290,7 +191,7 @@ Use a thin caller workflow in the target repository when:
   GitHub Organization Rulesets do not trigger).
 
 Configure the secrets and variables from
-[Step 2](#step-2--configure-github-actions-secrets--variables) in your
+[Step 2](#step-2--provision-your-execution-environment) in your
 repository, then add a workflow using either a reusable workflow call or a
 direct composite action step (pinning `@<ref>` to a release tag/commit SHA or
 referencing `<your-org>/codemender-runner` if you want to isolate from live

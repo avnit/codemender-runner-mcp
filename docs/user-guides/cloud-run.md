@@ -1,75 +1,111 @@
-# Step 2: Provision Google Cloud Run Jobs + GCS Cache (`gs://`)
-
-> [!WARNING]
-> **Work in Progress:** Detailed provisioning commands for Google Cloud Run Jobs
-> are being consolidated into this guide from [`README.md`](../../README.md) and
-> [`.github/README.md`](../../.github/README.md). Follow the three sections
-> below and their linked instructions to complete Step 2, then return to
-> [Step 3 — Enable CodeMender on Your
-> Repositories](../../.github/README.md#step-3).
+# Google Cloud Run Jobs + GCS Cache (`gs://`)
 
 ## Overview
 
-In Cloud Run mode (`execution_mode = "cloud_run"`), the GitHub Actions workflow
-authenticates to Google Cloud via keyless Workload Identity Federation, stages
-the repository checkout archive in a Google Cloud Storage (`gs://`) transit
-bucket, and dispatches isolated Google Cloud Run Jobs (`cm-worker` /
-`cm-runner`) to run diff scans (`find-diff`), generate patches (`fix`), and
-verify findings (`verify`).
+In Cloud Run mode (`execution_mode = "cloud_run"`), the CI/CD pipeline acts as a
+lightweight orchestrator that never executes untrusted repository build commands
+on the CI runner host. Instead, it stages repository snapshots in a Google Cloud
+Storage (`gs://`) transit bucket and dispatches isolated Google Cloud Run Jobs
+to run `find-diff`, `fix`, and `verify`.
 
 For architecture specifications, see
-[SPEC-GHA](../openspec/specs/github-actions/spec.md),
-[SPEC-WIF](../openspec/specs/wif/spec.md), and
-[SPEC-CACHE](../openspec/specs/artifact-cache/spec.md).
+[SPEC-WIF](../openspec/specs/wif/spec.md),
+[SPEC-CACHE](../openspec/specs/artifact-cache/spec.md), and
+[ADR-0010](../adr/ADR-0010-permission-isolation-and-authn-authz.md).
 
-## 1. Provision GCP & Workload Identity (`execution_mode = "cloud_run"`)
+## How It Executes
 
-Use the root [`terraform/`](../../terraform/README.md) configuration to
-provision Workload Identity Federation, the GCS transit bucket, Cloud Run Jobs,
-and least-privilege service accounts.
+1. **Keyless WIF Authentication:** The CI runner exchanges its OIDC JWT for a
+   short-lived Google Cloud token impersonating the WIF caller service account
+   (`codemender-wif-sa`).
+2. **GCS Transit & Artifact Cache (`gs://`):** Source checkout archives and scan
+   artifacts are uploaded to a dedicated Google Cloud Storage transit bucket
+   (`gs://<prefix>-reports-<suffix>`) configured with an automatic object
+   lifecycle TTL (`reports_bucket_ttl_days = 7` by default).
+3. **Dual-SA Isolation Boundary
+   ([ADR-0010](../adr/ADR-0010-permission-isolation-and-authn-authz.md)):**
+   - **WIF Caller SA (`codemender-wif-sa`):** Granted only
+     `roles/run.developer`, `roles/storage.objectUser` on the transit bucket,
+     and `roles/iam.serviceAccountUser` (`actAs`) on the Cloud Run runtime
+     service account (`codemender-runner-sa`).
+   - **Cloud Run Runtime SA (`codemender-runner-sa`):**
+     Attached to the isolated Cloud Run Job container (`codemender-runner`);
+     granted `roles/aiplatform.user`, `roles/logging.logWriter`, and
+     `roles/storage.objectUser` on the transit bucket to execute `find-diff`,
+     `fix`, and `verify` with **zero repository host credentials** inside the
+     container environment.
 
-- **Terraform Reference Guides:**
-  - [Execution Modes
-    (`cloud_run`)](../../terraform/README.md#execution-modes)
-  - [GitHub Authentication &
-    WIF](../../terraform/README.md#github-authentication)
-  - [Terraform Inputs and
-    Outputs](../../terraform/README.md#inputs-and-outputs)
-- **Step-by-Step Commands (in migration):** See
-  [Step 1 in `.github/README.md`](../../.github/README.md#step-1--provision-google-cloud--workload-identity-federation-terraform).
+## Terraform Configuration
 
-## 2. Build & Publish the Cloud Run Worker Container Image
+To provision Workload Identity Federation (`module.wif`), the GCS transit
+bucket, Artifact Registry, Cloud Run Jobs, and least-privilege service accounts
+(`module.gcp`), set the following in `terraform/terraform.tfvars`:
 
-Build and push the `cm-runner` / `cm-worker` container image to Google Artifact
-Registry so your Cloud Run Jobs can execute scans and fixes.
+```hcl
+execution_mode = "cloud_run"
 
-- **Container Packaging Reference Guides:**
-  - [Building Images (`runner.Dockerfile` &
-    `cloudrun.Dockerfile`)](../../docker/README.md#building-images)
-- **Step-by-Step Commands (in migration):** See
-  [Step 3 in `.github/README.md`](../../.github/README.md#step-3--build--publish-the-cm-runner-container-image).
+# Optional Cloud Run settings (defaults shown)
+# reports_bucket_ttl_days = 7
+# auto_build_image        = true
+# runner_cpu              = "2000m"
+# runner_memory           = "8Gi"
+# runner_timeout          = "3600s"
+# create_vpc_and_nat      = false
+```
 
-## 3. Configure GitHub Actions Secrets & Variables
+See the
+[Terraform Infrastructure Guide (`../../terraform/README.md`)](../../terraform/README.md)
+for provisioning instructions, VPC/Cloud NAT networking options, and the full
+input and output reference tables.
 
-If you did not populate `github_repositories` in `terraform.tfvars` for
-automatic secret/variable bootstrapping, configure the required secrets and
-variables in your GitHub Organization or repository settings (see the full table
-in
-[Step 2 of `.github/README.md`](../../.github/README.md#step-2--configure-github-actions-secrets--variables)).
+## Manual Setup Steps (Under the Hood)
 
-> [!IMPORTANT]
-> **Configuration Outputs Checklist & Next Step**
->
-> Before continuing to Step 3, confirm that the following GitHub Actions secrets
-> and variables are configured in your organization or repository:
->
-> - `CODEMENDER_WORKLOAD_IDENTITY_PROVIDER` (Secret)
-> - `CODEMENDER_SERVICE_ACCOUNT` (Secret)
-> - `CODEMENDER_GCP_PROJECT_ID` (Variable)
-> - `CODEMENDER_GCS_TRANSIT_BUCKET` (Variable, optional)
-> - `CODEMENDER_CLOUD_RUN_JOB_NAME` (Variable, optional)
-> - `CODEMENDER_GCP_REGION` (Variable, optional)
->
-> **Next Step:**
-> [Continue to Step 3 — Enable CodeMender on Your
-> Repositories →](../../.github/README.md#step-3)
+> [!NOTE]
+> You do not need to run these steps manually when using the
+> [Terraform module (`../../terraform/README.md`)](../../terraform/README.md)
+> (`execution_mode = "cloud_run"`). They are documented here so you can
+> understand what is provisioned and wired under the hood.
+
+### 1. Dual-SA IAM & Workload Identity Federation
+
+- **WIF Caller Service Account (`codemender-wif-sa`):** Provision a Workload
+  Identity Pool and OIDC Provider trusting your CI platform's OIDC issuer, bind
+  `roles/iam.workloadIdentityUser` to `codemender-wif-sa`, and grant
+  `codemender-wif-sa`:
+  - `roles/run.developer` (to trigger and monitor Cloud Run Job executions),
+  - `roles/storage.objectUser` on the GCS transit bucket, and
+  - `roles/iam.serviceAccountUser` (`iam.serviceAccounts.actAs`) on the Cloud
+    Run runtime service account (`codemender-runner-sa`).
+- **Cloud Run Runtime Service Account (`codemender-runner-sa`):** Create a
+  dedicated runtime service account for the `codemender-runner` Cloud Run Job
+  and grant it `roles/aiplatform.user`, `roles/logging.logWriter`, and
+  `roles/storage.objectUser` on the GCS transit bucket.
+
+### 2. GCS Transit & Artifact Cache Bucket (`gs://`)
+
+- Create a regional Google Cloud Storage bucket (`<prefix>-reports-<suffix>`)
+  with uniform bucket-level access enabled and a lifecycle rule deleting objects
+  older than `reports_bucket_ttl_days` (default `7` days).
+
+### 3. Artifact Registry & Cloud Run Jobs
+
+- Create an Artifact Registry Docker repository (`<prefix>-runner`) in your
+  target region.
+- Build and push the Cloud Run wrapper image
+  ([`docker/cloudrun.Dockerfile`](../../docker/cloudrun.Dockerfile) layered on
+  [`docker/runner.Dockerfile`](../../docker/runner.Dockerfile)) to Artifact
+  Registry via Google Cloud Build (`cloudbuild.yaml` / `make deploy-cloudrun`;
+  see
+  [Building Images in `../../docker/README.md`](../../docker/README.md#building-images)).
+- Create the `codemender-runner` Cloud Run Job attached to
+  `codemender-runner-sa` and pointing to the Artifact Registry image.
+
+### 4. Configure Your Orchestration Platform
+
+- Configure your CI/CD orchestration platform with the provisioned Workload
+  Identity Provider resource name, caller service account email, Google Cloud
+  project ID, GCS transit bucket name, Cloud Run Job name, and Google Cloud
+  region.
+- Return to your orchestration platform setup guide in
+  [Choose Your Orchestration Platform (`../../README.md`)](../../README.md#step-1-choose-your-orchestration-platform)
+  to enable workflows on your repositories.
