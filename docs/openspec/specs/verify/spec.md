@@ -35,8 +35,8 @@ interacting with cloud storage directly, `cm-runner verify` emits the updated
 single-finding SARIF 2.1.0 document on `stdout` and (when `--out DIR` is passed)
 writes a **new** file `DIR/<finding-name>.sarif`.
 
-Downstream orchestration (GitHub Actions or Cloud Run) inspects the emitted
-SARIF JSON and **skips `cm-runner fix` only when `verify` successfully
+Downstream orchestration (GitHub Actions, GitLab CI, or Cloud Run) inspects the
+emitted SARIF JSON and **skips `cm-runner fix` only when `verify` successfully
 demonstrates the finding is not exploitable (`status == "DISMISSED"`)**. If
 `verify` confirms the finding (`VERIFIED`), is inconclusive (`OPEN`), or fails
 for any reason (exit `3`), the orchestrator continues to `cm-runner fix` (see

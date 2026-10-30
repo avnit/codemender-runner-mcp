@@ -79,8 +79,6 @@ sandboxed execution environment:
 - **Orchestration Platforms (CI/CD):**
   - **[GitHub Actions](.github/SETUP.md):** Turnkey reusable workflows and
     composite actions for pull request scanning, patching, and verification.
-  - **[GitLab CI](gitlab-ci/README.md) _(In Development)_:** Merge request
-    pipeline integration for automated diff scanning and reporting.
   - **[Custom CI & CLI](packages/codemender/README.md):** Modular CLI and
     library building blocks
     ([`packages/launcher/`](packages/launcher/README.md),
@@ -160,7 +158,6 @@ follow the correct links for your particular environment. The setup steps are:
 Select your CI/CD platform or CLI workflow below to begin:
 
 - [**GitHub Actions**](.github/SETUP.md)
-- [**GitLab CI** _(In Development)_](gitlab-ci/README.md)
 - [**Custom CI**](packages/codemender/README.md)
 
 ## Component Reference

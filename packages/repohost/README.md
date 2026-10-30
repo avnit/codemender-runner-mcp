@@ -23,7 +23,7 @@ control-plane entrypoints that connect pull/merge requests to sandboxed
 ## Platform Setup Guides
 
 - [GitHub Actions Setup & Usage Guide](../../.github/SETUP.md)
-- [GitLab CI Setup & Usage Guide](../../gitlab-ci/README.md)
+- [GitLab CI Specification *(In Development)*](../../docs/openspec/specs/gitlab-ci/spec.md)
 
 ## Development & Testing
 

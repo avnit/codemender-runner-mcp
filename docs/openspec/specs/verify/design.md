@@ -17,7 +17,8 @@ sdd_cujspec_product: codemender-runner
 
 `find-diff` ([SPEC-FIND-DIFF](../find-diff/spec.md)) writes the findings for a
 pull request or scan as a SARIF 2.1.0 document, which the outer orchestrator
-(GitHub Actions or Cloud Run) splits into one SARIF file per finding. Before
+(GitHub Actions, GitLab CI, or Cloud Run) splits into one SARIF file per
+finding. Before
 spending time and model tokens on patching (`cm-runner fix`,
 [SPEC-FIX](../fix/spec.md)), E4 of the project plan asks for a verification
 step: given a repository and one local finding SARIF file (the same input that
@@ -27,7 +28,8 @@ real issue.
 
 Like `cm-runner find-diff` and `cm-runner fix`, **`cm-runner verify` is a
 generic, storage-agnostic local runner**—it is not GCS-aware. The outer
-orchestration layer in GitHub Actions or Cloud Run fetches the finding file to a
+orchestration layer in GitHub Actions, GitLab CI, or Cloud Run fetches the
+finding file to a
 local path before invoking `cm-runner verify`, and `cm-runner verify` emits the
 updated finding SARIF JSON to `stdout` and (when `--out DIR` is given) writes a
 **new** file `DIR/<finding-name>.sarif` rather than overwriting the input file
@@ -482,9 +484,9 @@ properties.status = status or 'OPEN' + updated_at"]
     fails/times out (exit `3`), the finding is not marked `DISMISSED` and the
     orchestrator continues to `cm-runner fix`.
 - **Orchestrator synchronization across concurrent or duplicate runs** → in
-  GitHub Actions or Cloud Run, if multiple workflow runs are triggered
-  concurrently and sync updated SARIF files back to shared storage (such as
-  GCS), concurrent writes could race.
+  GitHub Actions, GitLab CI, or Cloud Run, if multiple workflow runs are
+  triggered concurrently and sync updated SARIF files back to shared storage
+  (such as GCS), concurrent writes could race.
   - *Mitigation:* `cm-runner verify` never overwrites its input file in place
     and is not GCS-aware; it writes a new output file (`--out`) and emits to
     `stdout`. Storage synchronization, run-scoped prefixes, or conditional
