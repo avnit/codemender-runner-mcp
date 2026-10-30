@@ -10,6 +10,97 @@ See [SPEC-GHA](../docs/openspec/specs/github-actions/spec.md),
 [SPEC-DIST](../docs/openspec/specs/distribute/spec.md) for architecture and
 security model specifications.
 
+Follow the four steps below to set up CodeMender on GitHub Actions:
+
+1. [**Step 1 — Verify Prerequisites**](#step-1--verify-prerequisites)
+2. [**Step 2 — Provision Your Execution
+   Environment**](#step-2--provision-your-execution-environment)
+   ([Google Cloud Run Jobs](../docs/user-guides/cloud-run.md) or
+   [Local Docker + gVisor](../docs/user-guides/local-gvisor.md))
+3. [**Step 3 — Enable CodeMender on Your Repositories**](#step-3)
+   (Organization-Wide Repository Rulesets or Per-Repository Caller Workflows)
+4. [**Step 4 — Configure Automated Fixes & On-Demand
+   Verification**](#step-4--configure-automated-fixes--on-demand-verification)
+
+## Step 1 — Verify Prerequisites
+
+Before provisioning infrastructure, confirm that you have:
+
+- A **Google Cloud Project** with billing enabled and Vertex AI API access for
+  CodeMender.
+- **Terraform** (`>= 1.5`) and **Google Cloud SDK (`gcloud`)** authenticated
+  (`gcloud auth application-default login`).
+- **GitHub Authentication** (`gh auth login` or `GITHUB_TOKEN`) if you want
+  Terraform to bootstrap repository secrets and variables automatically.
+
+> [!WARNING]
+> **Work in Progress:** Detailed prerequisite checks are being consolidated into
+> this section. See [`## Prerequisites`](#prerequisites) below for the current
+> prerequisite list.
+
+## Step 2 — Provision Your Execution Environment
+
+CodeMender executes candidate patch builds and verification inside an isolated
+sandbox container. Choose **one** of the two execution environments below to
+provision Workload Identity Federation, build or configure your runner container
+image, and set up your GitHub Actions secrets and variables, then return to
+[Step 3](#step-3):
+
+| Google Cloud Run Jobs + GCS Cache (Recommended) | Local Docker + gVisor on the Runner VM |
+| :--- | :--- |
+| [**Open the Cloud Run Setup Guide (`../docs/user-guides/cloud-run.md`) →**](../docs/user-guides/cloud-run.md) | [**Open the Local Docker + gVisor Setup Guide (`../docs/user-guides/local-gvisor.md`) →**](../docs/user-guides/local-gvisor.md) |
+| Dispatches isolated serverless Google Cloud Run Jobs (`execution_mode = "cloud_run"`) and stages source archives and reports in a GCS bucket (`gs://`). Default backend for `.github/actions/codemender`. | Runs the `cm-runner` container directly on the GitHub Actions runner VM under Docker with gVisor (`runsc`) kernel isolation (`execution_mode = "local"`, `.github/actions/codemender-local`). |
+
+For standalone infrastructure and container reference documentation, see
+[`../terraform/README.md`](../terraform/README.md) and
+[`../docker/README.md`](../docker/README.md).
+
+<a id="step-3"></a>
+
+## Step 3 — Enable CodeMender on Your Repositories
+
+Once your execution environment, secrets, and variables are configured in Step
+2, choose how to roll out CodeMender workflows to your repositories:
+
+| Organization-Wide Rollout (Fork + Repository Rulesets) | Per-Repository Caller Workflow (`workflow_call` or Composite Action `uses:`) |
+| :--- | :--- |
+| **0 workflow files** in target repositories. Fork `codemender-runner` into your organization, run `make init-fork`, and enforce `.github/workflows/cm-merge-scan.yml` via a GitHub Organization Repository Ruleset for `pull_request` diff scanning (`find-diff`) and automatic inline fix suggestions (`fix`). | Adds 1 thin `.github/workflows/codemender.yml` caller workflow in the target repository while keeping `.github/actions/*` and `packages/` centralized. Supports personal GitHub accounts, single-repository rollouts, and PR-comment-triggered `@cm-runner verify` (`pull_request_review_comment`). |
+
+> [!WARNING]
+> **Work in Progress:** Detailed rollout instructions are being consolidated
+> into this section. Follow `## Step 4 — Enable CodeMender on Your Repositories`
+> ([jump to instructions](#step-4--enable-codemender-on-your-repositories)) for
+> complete Organization Ruleset and caller workflow YAML examples, then
+> continue to [Step 4 — Configure Automated Fixes & On-Demand
+> Verification](#step-4--configure-automated-fixes--on-demand-verification).
+
+## Step 4 — Configure Automated Fixes & On-Demand Verification
+
+After enabling workflows on your repositories, you can customize how CodeMender
+verifies candidate patches (`.codemender.yaml`), trigger on-demand
+exploitability verification on pull request comments (`@cm-runner verify`), and
+tune action inputs and permissions.
+
+> [!WARNING]
+> **Work in Progress:** Detailed configuration and reference tables are being
+> consolidated into this section. Refer to `## Configuring Fixes & Action
+> Reference` ([jump to section](#configuring-fixes--action-reference)) below,
+> [`../packages/repohost/README.md`](../packages/repohost/README.md),
+> [`../packages/codemender/README.md`](../packages/codemender/README.md), and
+> [`../docs/guides/calling_cm_runner.md`](../docs/guides/calling_cm_runner.md)
+> for full action input tables, `.codemender.yaml` settings, and `@cm-runner
+> verify` usage.
+
+> [!WARNING]
+> **Legacy Documentation:** The sections below are preserved while their
+> contents are being consolidated into Steps 1–4 above,
+> [`../docs/user-guides/cloud-run.md`](../docs/user-guides/cloud-run.md),
+> [`../docs/user-guides/local-gvisor.md`](../docs/user-guides/local-gvisor.md),
+> [`../terraform/README.md`](../terraform/README.md), and
+> [`../docker/README.md`](../docker/README.md).
+
+<!-- legacy-docs-start -->
+
 ## Prerequisites
 
 1. **Google Cloud Project** with billing enabled and Vertex AI API access for
@@ -390,3 +481,5 @@ code.)*
 pip install -e ./packages/codemender -e "./packages/launcher[cloudrun]" -e "./packages/repohost[github,gitlab]"
 make test
 ```
+
+<!-- legacy-docs-end -->

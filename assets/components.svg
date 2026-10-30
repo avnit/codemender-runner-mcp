@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2200 1540" width="2200" height="1540">
+  <defs>
+    <style>
+      .font-sans {
+        font-family: 'Inter', 'Roboto', 'Helvetica Neue', 'Arial', sans-serif;
+      }
+      .font-mono {
+        font-family: 'JetBrains Mono', 'Roboto Mono', 'Fira Code', 'Courier New', monospace;
+      }
+      .title-lg {
+        font-size: 28px;
+        font-weight: 700;
+        fill: #111827;
+      }
+      .title-md {
+        font-size: 25px;
+        font-weight: 700;
+        fill: #111827;
+      }
+      .subtitle {
+        font-size: 19.5px;
+        font-weight: 500;
+        fill: #334155;
+      }
+      .subtitle-sm {
+        font-size: 18px;
+        font-weight: 400;
+        fill: #475569;
+      }
+      .pill-text {
+        font-size: 20px;
+        font-weight: 600;
+        fill: #0F172A;
+      }
+      .edge-title {
+        font-size: 22px;
+        font-weight: 700;
+        fill: #0F172A;
+      }
+      .edge-sub {
+        font-size: 17.5px;
+        font-weight: 500;
+        fill: #334155;
+      }
+      .card-box {
+        fill: #FFFFFF;
+        stroke: #1E293B;
+        stroke-width: 3;
+      }
+      .blue-pill {
+        fill: #CEE1F2;
+        stroke: #192D45;
+        stroke-width: 2;
+      }
+      .cm-runner-box {
+        fill: #FDF6EC;
+        stroke: #8B6E4E;
+        stroke-width: 2.5;
+      }
+      .cm-cli-box {
+        fill: #F8E2CA;
+        stroke: #9C7A54;
+        stroke-width: 2.5;
+      }
+      .cm-cmd-box {
+        fill: #FCE8D2;
+        stroke: #886841;
+        stroke-width: 2;
+      }
+      .flow-line {
+        fill: none;
+        stroke: #1E293B;
+        stroke-width: 3;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .flow-line-dashed {
+        fill: none;
+        stroke: #1E293B;
+        stroke-width: 3;
+        stroke-dasharray: 16 12;
+        stroke-linecap: round;
+      }
+    </style>
+
+    <!-- Solid Arrowhead Marker -->
+    <marker id="arrow" viewBox="0 0 14 14" refX="12" refY="7" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+      <path d="M 1 2 L 12 7 L 1 12 z" fill="#1E293B" stroke="#1E293B" stroke-width="1" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <!-- Canvas Background -->
+  <rect x="0" y="0" width="2200" height="1540" fill="#FFFFFF"/>
+
+  <!-- ===================================================================== -->
+  <!-- 2. GCS BUCKET (CLOUD STORAGE) STANDARD BLOCK (TOP-CENTER OF PROJECT)  -->
+  <!-- ===================================================================== -->
+  <rect x="915" y="135" width="450" height="375" rx="14" class="card-box"/>
+
+  <!-- GCS Bucket Title & Subtitle -->
+  <text x="1140" y="186" text-anchor="middle" class="font-sans title-lg">Artifact Cache</text>
+  <text x="1140" y="216" text-anchor="middle" class="font-sans subtitle">(Cloud Storage/Local Files)</text>
+
+  <!-- 4 Artifacts Pills inside GCS Bucket -->
+  <g>
+    <rect x="955" y="238" width="370" height="46" rx="8" class="blue-pill"/>
+    <text x="1140" y="268" text-anchor="middle" class="font-sans pill-text">PR Diffs</text>
+
+    <rect x="955" y="296" width="370" height="46" rx="8" class="blue-pill"/>
+    <text x="1140" y="326" text-anchor="middle" class="font-sans pill-text">Source Snapshots</text>
+
+    <rect x="955" y="354" width="370" height="46" rx="8" class="blue-pill"/>
+    <text x="1140" y="384" text-anchor="middle" class="font-sans pill-text">SARIF Reports</text>
+
+    <rect x="955" y="412" width="370" height="46" rx="8" class="blue-pill"/>
+    <text x="1140" y="442" text-anchor="middle" class="font-sans pill-text">Fix Patches</text>
+  </g>
+
+  <!-- ===================================================================== -->
+  <!-- 3. ACTION RUNNER (MIDDLE-LEFT, OUTSIDE GCP PROJECT)                   -->
+  <!-- ===================================================================== -->
+  <rect x="60" y="590" width="500" height="360" rx="14" class="card-box"/>
+
+  <!-- Action Runner Labels (Dropped "Native to VCS", No UML icon) -->
+  <text x="310" y="660" text-anchor="middle" class="font-sans title-lg">Action Runner</text>
+  <text x="310" y="696" text-anchor="middle" class="font-sans subtitle">(e.g., GitHub Actions, GitLab Runners)</text>
+
+  <!-- WIF Pill inside Action Runner -->
+  <rect x="100" y="785" width="420" height="110" rx="10" class="blue-pill"/>
+  <text x="310" y="832" text-anchor="middle" class="font-sans pill-text">Workload Identity</text>
+  <text x="310" y="864" text-anchor="middle" class="font-sans pill-text">Federation (WIF)</text>
+
+  <!-- ===================================================================== -->
+  <!-- 4. REPO HOSTING CLOUD (BOTTOM-LEFT, DIRECTLY BELOW ACTION RUNNER)     -->
+  <!-- ===================================================================== -->
+  <path d="M 135,1465
+           C 62,1465 32,1412 56,1352
+           C 28,1300 64,1222 135,1215
+           C 155,1162 252,1152 310,1188
+           C 368,1152 465,1162 485,1215
+           C 556,1222 592,1300 564,1352
+           C 588,1412 558,1465 485,1465
+           C 445,1498 355,1498 310,1472
+           C 265,1498 175,1498 135,1465
+           Z"
+        fill="#FFFFFF" stroke="#1E293B" stroke-width="3" stroke-linejoin="round"/>
+
+  <!-- Repo Hosting Labels & Pill (Dropped "Enterprise VCS") -->
+  <text x="310" y="1265" text-anchor="middle" class="font-sans title-lg">Repo Hosting</text>
+  <text x="310" y="1298" text-anchor="middle" class="font-sans subtitle">(GitHub / GitLab / Bitbucket)</text>
+  <text x="310" y="1325" text-anchor="middle" class="font-sans subtitle-sm">External Source of Truth</text>
+
+  <rect x="125" y="1346" width="370" height="52" rx="9" class="blue-pill"/>
+  <text x="310" y="1379" text-anchor="middle" class="font-sans pill-text">Status &amp; Comments API</text>
+
+  <!-- ===================================================================== -->
+  <!-- 5. CLOUD RUN JOB + NESTED CM RUNNER + NESTED CODEMENDER CLI           -->
+  <!-- ===================================================================== -->
+  <rect x="1420" y="560" width="660" height="615" rx="14" class="card-box"/>
+
+  <!-- Cloud Run Job Header (No UML icon) -->
+  <text x="1750" y="614" text-anchor="middle" class="font-sans title-lg">Isolated Execution Environment</text>
+  <text x="1750" y="646" text-anchor="middle" class="font-sans subtitle">(Cloud Run / GKE)</text>
+
+  <!-- Nested CM Runner Box (No UML icon) -->
+  <rect x="1468" y="678" width="564" height="462" rx="12" class="cm-runner-box"/>
+
+  <!-- CM Runner Header -->
+  <text x="1750" y="726" text-anchor="middle" class="font-sans title-md">CM Runner</text>
+  <text x="1750" y="756" text-anchor="middle" class="font-sans subtitle-sm">Generic Runner Wrapper (State &amp; CLI Orchestration)</text>
+
+  <!-- Nested CodeMender CLI Box -->
+  <rect x="1508" y="782" width="484" height="325" rx="10" class="cm-cli-box"/>
+  <text x="1750" y="825" text-anchor="middle" class="font-sans" font-size="23" font-weight="600" fill="#1F2937">CodeMender CLI</text>
+
+  <!-- Inner Monospace Command Box -->
+  <rect x="1538" y="845" width="424" height="232" rx="8" class="cm-cmd-box"/>
+  <text x="1572" y="904" text-anchor="start" class="font-mono" font-size="24" font-weight="600" fill="#111827">cm find --diff</text>
+  <text x="1572" y="968" text-anchor="start" class="font-mono" font-size="24" font-weight="600" fill="#111827">cm verify</text>
+  <text x="1572" y="1032" text-anchor="start" class="font-mono" font-size="24" font-weight="600" fill="#111827">cm fix</text>
+
+  <!-- ===================================================================== -->
+  <!-- 6. CONNECTORS & DIRECTIONAL FLOW ARROWS (EXACT 7-ARROW TOPOLOGY)      -->
+  <!-- ===================================================================== -->
+
+  <!-- (A) Vertical UP: Repo Hosting -> Action Runner (Checkout Code) -->
+  <path class="flow-line" marker-end="url(#arrow)"
+        d="M 180,1172 L 180,956"/>
+  <rect x="55" y="1030" width="250" height="68" rx="6" fill="#FFFFFF"/>
+  <text x="180" y="1059" text-anchor="middle" class="font-sans edge-title">Checkout Code</text>
+  <text x="180" y="1086" text-anchor="middle" class="font-sans edge-sub">Trigger: PR Event</text>
+
+  <!-- (B) Vertical DOWN: Action Runner -> Repo Hosting (Publish Comment) -->
+  <path class="flow-line" marker-end="url(#arrow)"
+        d="M 440,950 L 440,1166"/>
+  <rect x="315" y="1030" width="250" height="68" rx="6" fill="#FFFFFF"/>
+  <text x="440" y="1059" text-anchor="middle" class="font-sans edge-title">Publish Comment</text>
+  <text x="440" y="1086" text-anchor="middle" class="font-sans edge-sub">Findings &amp; 1-Click Fixes</text>
+
+  <!-- (C) Top-Left Outer Elbow (y=240): Action Runner -> GCS Bucket (Repo Code) -->
+  <path class="flow-line" marker-end="url(#arrow)"
+        d="M 180,590 L 180,255 Q 180,240 195,240 L 909,240"/>
+  <rect x="45" y="345" width="270" height="72" rx="6" fill="#FFFFFF"/>
+  <text x="180" y="375" text-anchor="middle" class="font-sans edge-title">Repo Code</text>
+  <text x="180" y="402" text-anchor="middle" class="font-sans edge-sub">Stage Diffs &amp; Snapshots</text>
+
+  <!-- (D) Top-Left Inner Elbow (y=375): GCS Bucket -> Action Runner (Result Files) -->
+  <path class="flow-line" marker-end="url(#arrow)"
+        d="M 915,375 L 455,375 Q 440,375 440,390 L 440,584"/>
+  <rect x="305" y="445" width="270" height="72" rx="6" fill="#FFFFFF"/>
+  <text x="440" y="475" text-anchor="middle" class="font-sans edge-title">Result Files</text>
+  <text x="440" y="502" text-anchor="middle" class="font-sans edge-sub">Fetch Reports &amp; Patches</text>
+
+  <!-- (E) Top-Right Outer Elbow (y=240, aligned with Left Repo Code!): GCS Bucket -> Cloud Run Job (Repo Code) -->
+  <path class="flow-line" marker-end="url(#arrow)"
+        d="M 1365,240 L 1895,240 Q 1910,240 1910,255 L 1910,554"/>
+  <rect x="1775" y="345" width="270" height="72" rx="6" fill="#F4F8FC"/>
+  <text x="1910" y="375" text-anchor="middle" class="font-sans edge-title">Repo Code</text>
+  <text x="1910" y="402" text-anchor="middle" class="font-sans edge-sub">Consume Staged Data</text>
+
+  <!-- (F) Top-Right Inner Elbow (y=375, aligned with Left Result Files!): Cloud Run Job -> GCS Bucket (Result Files) -->
+  <path class="flow-line" marker-end="url(#arrow)"
+        d="M 1630,560 L 1630,390 Q 1630,375 1615,375 L 1371,375"/>
+  <rect x="1495" y="435" width="270" height="72" rx="6" fill="#F4F8FC"/>
+  <text x="1630" y="465" text-anchor="middle" class="font-sans edge-title">Result Files</text>
+  <text x="1630" y="492" text-anchor="middle" class="font-sans edge-sub">Write SARIF &amp; Patches</text>
+
+  <!-- (G) Middle Horizontal Control Line: Direct Dashed Arrow Action Runner -> Cloud Run Job -->
+  <path class="flow-line-dashed" marker-end="url(#arrow)" d="M 560,770 L 1414,770"/>
+  <rect x="900" y="720" width="420" height="38" rx="6" fill="#F4F8FC"/>
+  <rect x="870" y="780" width="480" height="34" rx="6" fill="#F4F8FC"/>
+  <text x="1110" y="748" text-anchor="middle" class="font-sans edge-title">StartJob(repo, command)</text>
+  <text x="1110" y="804" text-anchor="middle" class="font-sans edge-sub">Authenticate (WIF) &amp; Dispatch Execution Jobs</text>
+
+
+</svg>

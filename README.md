@@ -1,102 +1,166 @@
 # CodeMender Runner
 
-> [!NOTE]
-> While we hold this code to a high standard, these are canonical reference
-> implementations and should not be blindly applied in a production repository.
-> Review and adapt the workflows, container configurations, and Terraform
-> modules to fit your organization's security and infrastructure requirements.
+CodeMender Runner is an orchestrator for
+[CodeMender](https://cloud.google.com/security/codemender) for integrating
+CodeMender's advanced AI security scanning in headless, scaled environments such
+as in CI/CD pipelines. This orchestration provides:
 
-`codemender-runner` provides reference CI/CD integrations, sandbox launchers
-(Google Cloud Run Jobs and Local Docker + gVisor), and Terraform modules for
-running Google CodeMender automated security scanning (`find-diff`) and
-automated patching (`fix`) on pull and merge requests.
+1. **Predefined, customizable Workflows:** Turnkey integration for common use
+   cases.
+   - Provides default workflows for common use cases such as scanning pull
+     requests.
+   - Easy setup via provided terraform configurations.
+   - See [Supported Workflows](#supported-workflows) for this list of currently
+     provided workflows.
+   - See [Supported Environments](#supported-environments) for the environments
+     currently supported.
+1. **Building blocks for custom solutions:** Provide the toolkit for rapid
+   adaptation to unique scenarios.
+   - Provides modular components that can be adapted to each unique use case.
+   - See [Component Overview](#component-overview) and
+     [Supported Environments](#supported-environments) for more information.
+1. **Stateless, ephemeral execution:** Manage the `cm` state so `find`, `fix`,
+   and `verify` can run independently.
+   - Supports horizontal scale & long timeouts to allow parallel `fix` or
+     `verify`.
+   - Enables multi-turn state across ephemeral runs so that `fix` or `verify`
+     can be triggered asynchronously hours or even days after `find`.
+1. **Defense-in-depth sandboxing:** Contain the powerful agent at multiple
+   layers.
+   - Utilize CodeMender’s native sandbox as a first line of isolation.
+   - Strengthen this sandboxing with architecture support (e.g. VPC, gVisor) and
+     environment isolation (dedicated projects, permission isolation).
+   - Even if the agent escapes one layer of sandboxing, the impact is contained.
 
-## Quickstart by Deployment Platform
+## How It Works
 
-Choose the setup guide for your CI/CD platform or execution environment:
+CodeMender Runner separates the lightweight orchestration plane (usually the
+CI/CD runner) from sandboxed code execution. When the orchestration starts a
+CodeMender job--e.g. on a Pull Request--the orchestrator packages the repository
+checkout, dispatches the `cm-runner` container inside an isolated sandbox, and
+posts the resulting findings and candidate patches to the appropriate location.
 
-| Platform / Use Case | Setup & Usage Guide | Execution Modes Supported |
-| :--- | :--- | :--- |
-| **GitHub Actions** (Organization Rulesets, `workflow_call`, or Composite Action) | [**GitHub Actions Setup & Usage Guide (`.github/README.md`)**](.github/README.md) | Cloud Run Jobs (default) or Local Docker + gVisor |
-| **GitLab CI** (Merge Request Pipelines) | [**GitLab CI Setup & Usage Guide (`gitlab-ci/README.md`)**](gitlab-ci/README.md) | Local Docker + gVisor on a dedicated runner |
-| **Standalone CLI / Custom CI** (`cm-runner`) | [**Calling `cm-runner` Directly (`docs/guides/calling_cm_runner.md`)**](docs/guides/calling_cm_runner.md) | Container (`Dockerfile`) or local Python CLI |
+This is illustrated in the [Component Overview](#component-overview) section
+below with the currently supported environments and workflows discussed in their
+respective sections below.
 
-- **GitHub Organization Repository Rulesets (0 files in target repos):** Enforces `pull_request` diff scanning (`find-diff`) and automatic inline fix suggestions (`fix`) across an organization. Run `make init-fork` in your fork (or pin `@<ref>` to a tag/SHA) to isolate your workflows from live upstream `@main` changes.
-- **GitHub Per-Repository Caller Workflows (`workflow_call` / composite action `uses:`):** Used for personal accounts, single-repository rollouts, or PR-comment-triggered verification (`@cm-runner verify` on `pull_request_review_comment`, which GitHub Organization Rulesets do not trigger) while keeping `.github/actions/*` and `packages/` centralized in `codemender-runner`.
+### Component Overview
 
-## Shared Infrastructure & Container Packaging
+![Components](assets/components.svg)
 
-### 1. Provisioning Google Cloud & Workload Identity Federation (`terraform/`)
+CodeMender Runner uses four main components to keep repository credentials in
+your CI control plane while isolating code execution inside an ephemeral
+sandbox:
 
-The root [`terraform/`](terraform/) configuration provisions keyless Workload
-Identity Federation (`terraform/modules/wif`) and, when `execution_mode = "cloud_run"`,
-Google Cloud Run Jobs, a GCS transit bucket, and least-privilege service
-accounts (`terraform/modules/gcp`):
+1. **Repo Hosting:** Your source control platform (e.g., GitHub, GitLab,
+   Bitbucket). Pull/Merge Request events trigger CI runs, and the host's Status
+   & Comments API surfaces scan summaries, commit statuses, and 1-click fix
+   suggestions.
+1. **Action Runner:** The lightweight orchestrator running inside your CI/CD
+   pipeline (e.g., GitHub Actions, GitLab Runners). It checks out code,
+   authenticates via Workload Identity Federation (WIF), stages inputs to the
+   Artifact Cache, dispatches sandbox jobs, and publishes results back to the
+   repository host.
+1. **Artifact Cache:** Shared storage (Cloud Storage or local files) that passes
+   **PR Diffs**, **Source Snapshots**, **SARIF Reports**, and **Fix Patches**
+   between the Action Runner and the sandbox so `find`, `fix`, and `verify` can
+   share state across independent runs.
+1. **Isolated Execution Environment:** An ephemeral sandbox container (e.g.,
+   Cloud Run, GKE, or local Docker + gVisor) that runs with zero repository
+   credentials. Inside the container, **CM Runner** reads staged inputs from the
+   Artifact Cache, runs the **CodeMender CLI** (`cm find --diff`, `cm verify`,
+   `cm fix`), and writes reports and patches back to the cache.
 
-```bash
-cd terraform
-cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your gcp_project_id, github_scope_type, github_owner, and execution_mode
-terraform init
-terraform plan
-terraform apply
-```
+### Supported Environments
 
-See the [GitHub Actions Setup & Usage Guide (`.github/README.md`)](.github/README.md#step-1--provision-google-cloud--workload-identity-federation-terraform)
-for full variable documentation and manual secret/variable setup.
+CodeMender Runner pairs your CI/CD orchestration platform with your preferred
+sandboxed execution environment:
 
-### 2. Building the `cm-runner` Container Image (`Dockerfile`)
+- **Orchestration Platforms (CI/CD):**
+  - **[GitHub Actions](.github/README.md):** Turnkey reusable workflows and
+    composite actions for pull request scanning, patching, and verification.
+  - **[GitLab CI](gitlab-ci/README.md) _(In Development)_:** Merge request
+    pipeline integration for automated diff scanning and reporting.
+  - **[Custom CI & CLI](packages/codemender/README.md):** Modular CLI and
+    library building blocks
+    ([`packages/launcher/`](packages/launcher/README.md),
+    [`packages/repohost/`](packages/repohost/README.md)) for integrating with
+    other CI systems or custom automation.
+- **Sandboxed Execution Environments:**
+  - **[Google Cloud Run Jobs](docs/user-guides/cloud-run.md):** Serverless,
+    horizontally scalable container execution backed by Cloud Storage (`gs://`)
+    and keyless Workload Identity Federation (WIF) via
+    [Terraform](terraform/README.md).
+  - **[Local Docker + gVisor](docs/user-guides/local-gvisor.md):** Runs the
+    sandbox container directly on a dedicated CI runner VM using the gVisor
+    (`runsc`) kernel and a local file cache (`file://`).
+  - **[Custom Container Runtimes](docker/README.md):** Standard worker image
+    portable to GKE or other container platforms.
 
-The root [`Dockerfile`](Dockerfile) builds the universal `cm-runner` container
-image (`ENTRYPOINT ["cm-runner"]`, `CMD ["version"]`) pre-baked with Python 3.11,
-Node.js 22, OpenJDK 17, Go 1.22, and C/C++ toolchains:
+### Supported Workflows
 
-```bash
-COMMIT_SHA="$(git rev-parse HEAD)"
-IMAGE_URI="us-docker.pkg.dev/<GCP_PROJECT_ID>/<AR_REPO>/codemender-runner:${COMMIT_SHA}"
+CodeMender Runner provides two turnkey Pull/Merge Request workflows out of the
+box, along with modular building blocks for custom workflows:
 
-docker build -t "${IMAGE_URI}" .
-docker run --rm "${IMAGE_URI}" version
-```
+- **Pull Request Scan & Fix (`find --diff` + `fix`):** On a pull request, scans
+  the changed code against the base branch (`find --diff`), updates the PR
+  summary comment and commit status check, and (when enabled) launches parallel
+  sandbox jobs (`fix`)—one per finding—to generate a candidate patch and post a
+  1-click PR review suggestion.
+- **On-Demand Verification (`@cm-runner verify`):** Triggered asynchronously
+  when a reviewer comments `@cm-runner verify` on a finding—even hours or days
+  after the initial scan. Runs an exploitability check against the cached
+  snapshot in the sandbox, replies on the review thread, and automatically
+  dismisses false positives.
+- **[Custom Workflows](docs/guides/calling_cm_runner.md):** Compose the
+  standalone `cm-runner` stages (`find`, `fix`, `verify`) and
+  [`packages/launcher/`](packages/launcher/README.md) building blocks to build
+  custom scanning, triage, or remediation pipelines.
 
-For automated GitHub Container Registry (`ghcr.io`) builds or customizing
-project dependencies in the [`Dockerfile`](Dockerfile), see
-[`.github/README.md`](.github/README.md#step-3--build--publish-the-cm-runner-container-image).
+## Getting Started
 
-## Repository Layout
+### Quickstart (Terraform)
 
-| Path | Description |
-| :--- | :--- |
-| [`.github/`](.github/README.md) | GitHub Actions workflows (`.github/workflows/cm-merge-scan.yml`, `.github/workflows/build_runner_image.yml`) and composite actions (`.github/actions/codemender`, `.github/actions/codemender-local`). |
-| [`gitlab-ci/`](gitlab-ci/README.md) | GitLab CI merge request pipeline template (`gitlab-ci/templates/codemender-scan.yml`) and setup guide. |
-| [`terraform/`](terraform/) | Root Terraform module and child modules (`terraform/modules/wif`, `terraform/modules/gcp`) for GCP Workload Identity Federation, Cloud Run Jobs, and GitHub repository secret/variable bootstrapping. |
-| [`packages/codemender/`](packages/codemender/) | Scenario-independent `cm-runner` CLI orchestrator (`codemender.runner`, `codemender.cm`, `codemender.sarif`, `codemender.vcs`). See [`docs/guides/calling_cm_runner.md`](docs/guides/calling_cm_runner.md). |
-| [`packages/launcher/`](packages/launcher/) | Sandbox execution backends (`launcher.local` for Docker + gVisor, `launcher.cloudrun` for Google Cloud Run Jobs) and parallel execution interface (`launcher.base`). |
-| [`packages/repohost/`](packages/repohost/) | Repository hosting integrations (`repohost.github`, `repohost.gitlab`) and the `cm-github` CLI entrypoint for PR sticky comments, inline review suggestions, and patch routing. |
-| [`scripts/`](scripts/) | Operational helper scripts, including `scripts/set-fork-owner.sh` (`make init-fork`) for re-pointing workflow action references in forks. |
-| [`docs/`](docs/) | Architecture Decision Records (`docs/adr/`), OpenSpec specifications (`docs/openspec/specs/`), and CLI guides (`docs/guides/`). |
+All workflows and supported environments are configurable via Terraform. Follow
+our [Terraform Instructions](terraform/README.md) to quickly get started.
 
-## Development & Testing
+### Step-by-Step Guided Setup
 
-Run the full unit test suite across all workspace packages:
+There are three steps for setting up CodeMender Runner, listed below. Each step
+has its own dedicated guide linked to below. To follow the install steps, simply
+follow the correct links for your particular environment. The setup steps are:
 
-```bash
-make test
-```
+1. **Setup orchestration platform (CI/CD platform):** First we select and
+   configure the control plane for our integration. This is normally your
+   existing CI/CD platform.
+1. **Provision your sandboxed execution environment:** Then we configure the
+   sandboxed environment the `cm` binary executes in. This includes the
+   authentication and authorization methods as well as setting up the
+   ArtifactCache so that the orchestrator and the execution environment can
+   communicate.
+1. **Enable workflows on your repositories:** Finally, we tie it all together
+   and enable our desired workflows.
 
-When operating a fork of this repository, re-point workflow action references
-to your fork owner (so workflows resolve actions from your fork rather than
-upstream `@main` live):
+### Step 1: Choose Your Orchestration Platform
 
-```bash
-make init-fork
-# or explicitly:
-./scripts/set-fork-owner.sh <your-org>
-```
+Select your CI/CD platform or CLI workflow below to begin:
 
-## Contributing
+- [**GitHub Actions**](.github/README.md)
+- [**GitLab CI** _(In Development)_](gitlab-ci/README.md)
+- [**Custom CI**](packages/codemender/README.md)
 
-1. Reach out to an existing administrator to be added as a contributor.
-2. Open a pull request and request review from a maintainer or administrator.
-3. All code must be reviewed by a maintainer or administrator and maintain 90%+
-   test coverage across the test suites.
+## Component Reference
+
+Looking for standalone component references? Jump directly to:
+
+- **Execution Environment Guides:**
+  - [Google Cloud Run Jobs](docs/user-guides/cloud-run.md)
+  - [Local Docker + gVisor](docs/user-guides/local-gvisor.md)
+- **Infrastructure & Container References:**
+  - [Terraform Modules (`terraform/README.md`)](terraform/README.md)
+  - [Container Packaging (`docker/README.md`)](docker/README.md)
+- **Workspace Package Guides:**
+  - [`packages/codemender/README.md`](packages/codemender/README.md) (and
+    [`docs/guides/calling_cm_runner.md`](docs/guides/calling_cm_runner.md))
+  - [`packages/launcher/README.md`](packages/launcher/README.md)
+  - [`packages/repohost/README.md`](packages/repohost/README.md)

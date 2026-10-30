@@ -2,5 +2,5 @@
 members = ["packages/*"]
 
 [tool.pytest.ini_options]
-testpaths = ["packages"]
+testpaths = ["packages", "scripts/tests"]
 python_files = ["test_*.py"]

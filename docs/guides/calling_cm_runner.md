@@ -1,5 +1,13 @@
 # Calling cm-runner
 
+> [!WARNING]
+> **Legacy Documentation:** This guide is being consolidated into
+> [`packages/codemender/README.md`](../../packages/codemender/README.md) (for
+> the `cm-runner` CLI reference) and
+> [`.github/README.md`](../../.github/README.md) (for CI workflow
+> configuration). Refer to the sections below for complete subcommand flags and
+> shell examples while the migration is in progress.
+
 How to run the CodeMender runner from CI, Cloud Run, or your own machine, and
 what it gives back. The design reasoning is in
 [ADR-0001](../adr/ADR-0001-machine-readable-output-contract.md) (output) and
