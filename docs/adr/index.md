@@ -5,8 +5,8 @@ CodeMender Orchestrator and its deployment scenarios.
 
 | ADR | Title | Status | Date |
 | :--- | :--- | :--- | :--- |
-| [ADR-0001](ADR-0001-machine-readable-output-contract.md) | Machine-Readable Output Contract for cm-runner CLI | Accepted | 2026-09-24 |
-| ADR-0002 | Runner Layout, Build, and How to Call It | Superseded by [ADR-0008](ADR-0008-repository-layout-and-package-structure.md) | 2026-09-25 |
+| [ADR-0001](ADR-0001.md) | Foundational Technical Stack, Build Tooling, and Engineering Conventions | Accepted | 2026-10-08 |
+| [ADR-0002](ADR-0002.md) | Split-Stream Machine-Readable CLI Output and Exit Code Contract | Accepted | 2026-09-24 |
 | [ADR-0003](ADR-0003-environment-scrubbing.md) | Environment Variable Scrubbing When Running `cm` | Proposed | 2026-09-30 |
 | ADR-0004 | Project Tech Stack & Scenario-Decoupled Monorepo Architecture | Superseded by [ADR-0008](ADR-0008-repository-layout-and-package-structure.md) | 2026-09-26 |
 | [ADR-0005](ADR-0005-multi-platform-transit-storage-and-isolation.md) | Multi-Platform Transit Storage & Sandboxed Isolation Model | Proposed | 2026-09-26 |
