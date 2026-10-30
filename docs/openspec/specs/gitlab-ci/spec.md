@@ -16,7 +16,7 @@ sdd_cujspec_product: codemender-runner
 **Implements Spec:** None
 
 **Extends Spec:** [SPEC-FIND-DIFF](../find-diff/spec.md),
-[SPEC-GITLAB-SARIF](../gitlab-sarif-report/spec.md)
+[SPEC-GITLAB-SARIF](#req-0007)
 
 **Governing Journeys:**
 
@@ -63,7 +63,7 @@ This specification is governed by:
 - [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../../adr/ADR-0003-environment-scrubbing.md)
 - [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
 - [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
-- [SPEC-GITLAB-SARIF: GitLab Native SARIF 2.1.0 Normalization](../gitlab-sarif-report/spec.md)
+- [SPEC-GITLAB-SARIF: GitLab Native SARIF 2.1.0 Normalization](#req-0007)
 - [SPEC-GHA: GitHub Actions Orchestration & Execution Backends](../github-actions/spec.md)
 
 ______________________________________________________________________
@@ -473,7 +473,7 @@ MUST function identically across both execution backends:
      a non-empty `runs` array (failing closed with exit code `1` if missing or
      corrupt).
    - Normalize `report.sarif` via `normalize_sarif_file` per
-     [SPEC-GITLAB-SARIF](../gitlab-sarif-report/spec.md) and stage
+     [SPEC-GITLAB-SARIF](#req-0007) and stage
      `report.sarif`, `report.md`, and bounded `cm-logs/` into `$CI_PROJECT_DIR`
      for GitLab artifact collection.
 1. **Bot-Verified Sticky MR Commenting (`vcs/gitlab.py`):**

@@ -42,9 +42,9 @@ This specification is governed by and references:
 
 - [SPEC-FIND-DIFF](../find-diff/spec.md) — produces the SARIF this command
   consumes.
-- [ADR-0001: Machine-Readable Output Contract](../../adr/ADR-0001-machine-readable-output-contract.md)
-- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../adr/ADR-0008-repository-layout-and-package-structure.md)
-- [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../adr/ADR-0003-environment-scrubbing.md)
+- [ADR-0001: Machine-Readable Output Contract](../../../adr/ADR-0001-machine-readable-output-contract.md)
+- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
+- [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../../adr/ADR-0003-environment-scrubbing.md)
 
 ## Requirements
 
@@ -162,7 +162,7 @@ ______________________________________________________________________
 
 - **CUJ UUID:** cuj-fix-adapter-execution
 
-In accordance with [ADR-0008](../../adr/ADR-0008-repository-layout-and-package-structure.md),
+In accordance with [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
 `codemender/runner/commands/fix.py` MUST NOT import `subprocess`, `utils`, or
 `vcs.github`. All `cm` calls MUST go through the `CmAdapter` checked by
 `codemender/runner/__main__.py`, with `cwd=str(cfg.repo)`. Git calls MUST go
@@ -308,14 +308,14 @@ ______________________________________________________________________
 
 - **CUJ UUID:** cuj-fix-exit-codes
 
-In accordance with [ADR-0003](../../adr/ADR-0003-environment-scrubbing.md),
+In accordance with [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md),
 `fix` MUST call `CmAdapter.run()` with `env=None` and MUST NOT call
 `config.get_scrubbed_env()` or create `.codemender_cache/`.
 
 After a successful run, `fix` MUST leave the patch applied in `--repo` and MUST
 NOT commit it. `.cm_project` remains as `cm` left it.
 
-Exit codes, per [ADR-0001](../../adr/ADR-0001-machine-readable-output-contract.md):
+Exit codes, per [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md):
 
 - `0` (`exit_codes.OK`): the finding is `FIXED` and a non-empty diff was
   written.

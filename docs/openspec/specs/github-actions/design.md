@@ -81,7 +81,7 @@ sequenceDiagram
 
 ### 1. `CloudRunLauncher` & Co-Located `CloudRunClient` (`packages/launcher/src/launcher/cloudrun/`)
 
-`CloudRunLauncher` ([packages/launcher/src/launcher/cloudrun/cloud_run.py](file:///usr/local/google/home/brentcollier/src/local/codemender-runner/packages/launcher/src/launcher/cloudrun/cloud_run.py)) bridges the abstract `Launcher` interface directly to the co-located `CloudRunClient` Python SDK ([packages/launcher/src/launcher/cloudrun/client.py](file:///usr/local/google/home/brentcollier/src/local/codemender-runner/packages/launcher/src/launcher/cloudrun/client.py), governed by ADR-0007 Option 3 and ADR-0008 Decision 2), executing tasks in-process on the runner VM without subprocess overhead or JSON string piping.
+`CloudRunLauncher` ([packages/launcher/src/launcher/cloudrun/cloud_run.py](../../../../packages/launcher/src/launcher/cloudrun/cloud_run.py)) bridges the abstract `Launcher` interface directly to the co-located `CloudRunClient` Python SDK ([packages/launcher/src/launcher/cloudrun/client.py](../../../../packages/launcher/src/launcher/cloudrun/client.py), governed by ADR-0007 Option 3 and ADR-0008 Decision 2), executing tasks in-process on the runner VM without subprocess overhead or JSON string piping.
 
 `CloudRunLauncher` directly aligns with the Cloud Run Job container bootstrapper (`cloud-run-jobs/entrypoint.py`):
 1. **Receipt Ingestion**: The bootstrapper writes `output/receipt.json` containing status (`"SUCCESS"` or `"FAILURE"`), integer `exit_code`, `command`, `started_at` and `completed_at` timestamps, `finding_count`, `error` diagnostics, and an `artifacts` mapping (`sarif`, `log`, `report`, `patch`). `CloudRunLauncher` maps `status`, `exit_code`, and `finding_count` into the `RunResult` execution outcome.
@@ -92,7 +92,7 @@ sequenceDiagram
 
 ### 2. Launcher Factory & Entrypoint (`packages/repohost/src/repohost/github/`, `cm-github`)
 
-In `packages/repohost/src/repohost/github/` (invoked via the `cm-github = "repohost.github.__main__:main"` console script entrypoint defined in `packages/repohost/pyproject.toml` and implemented in [gha_runner.py](file:///usr/local/google/home/brentcollier/src/local/codemender-runner/packages/repohost/src/repohost/github/gha_runner.py)), `main()` inspects `CODEMENDER_BACKEND` with normalization and truthy fallback to `"cloudrun"` (or `"local"`):
+In `packages/repohost/src/repohost/github/` (invoked via the `cm-github = "repohost.github.__main__:main"` console script entrypoint defined in `packages/repohost/pyproject.toml` and implemented in [gha_runner.py](../../../../packages/repohost/src/repohost/github/gha_runner.py)), `main()` inspects `CODEMENDER_BACKEND` with normalization and truthy fallback to `"cloudrun"` (or `"local"`):
 - When `backend == "local"`: Instantiates `LocalDockerLauncher` with `CODEMENDER_RUNNER_IMAGE`, `CODEMENDER_LOG_LEVEL`, and `CODEMENDER_CONTAINER_RUNTIME`.
 - When `backend == "cloudrun"`: Lazy-loads `launcher.cloudrun.client.CloudRunClient` and `CloudRunConfig`, populating GCP project, transit bucket, job name, region, and run identifiers from ambient environment variables before instantiating `CloudRunLauncher`.
 
@@ -161,13 +161,13 @@ Because Cloud Run Job containers write structured findings to output files rathe
 
 Rather than multiplexing gVisor installation, Docker login/pull, and GCP Cloud Run SDK dependencies inside a single conditional `action.yml`, the repository provides two dedicated, pure-YAML composite actions:
 
-1. **Cloud Run Composite Action ([.github/actions/codemender/action.yml](file:///usr/local/google/home/brentcollier/src/local/codemender-runner/.github/actions/codemender/action.yml)):**
+1. **Cloud Run Composite Action ([.github/actions/codemender/action.yml](../../../../.github/actions/codemender/action.yml)):**
    - Exposes cloud configuration (`gcp_project_id`, `gcp_workload_identity_provider`, `gcp_service_account`, `cloud_run_region`, `gcs_transit_bucket`, `cloud_run_job_name`), workflow settings (`log_level`, `diff_workers`, `fix`, `max_parallel_fixes`, `artifact_retention_days`), and hardcodes `CODEMENDER_BACKEND: "cloudrun"`.
    - Bypasses gVisor installation and Docker image pulls completely, eliminating image download latency and runner disk consumption.
    - Installs `"${PKG_DIR}/codemender"`, `"${PKG_DIR}/launcher[cloudrun]"`, and `"${PKG_DIR}/repohost[github]"`.
    - Executes `cm-github`.
 
-2. **Local Docker + gVisor Composite Action ([.github/actions/codemender-local/action.yml](file:///usr/local/google/home/brentcollier/src/local/codemender-runner/.github/actions/codemender-local/action.yml)):**
+2. **Local Docker + gVisor Composite Action ([.github/actions/codemender-local/action.yml](../../../../.github/actions/codemender-local/action.yml)):**
    - Exposes local runner options (`runner_image`, `registry_token`, `container_runtime`, `gvisor_release`), cloud credentials for Vertex AI, and hardcodes `CODEMENDER_BACKEND: "local"`.
    - Installs gVisor (`runsc`), normalizes image names to lowercase, and pulls `runner_image`.
    - Installs `"${PKG_DIR}/codemender"`, `"${PKG_DIR}/launcher"` (omitting `[cloudrun]`), and `"${PKG_DIR}/repohost[github]"`.
@@ -180,7 +180,7 @@ Rather than multiplexing gVisor installation, Docker login/pull, and GCP Cloud R
 
 ### 5. Reference Workflow Template (`.github/workflows/cm-merge-scan.yml`)
 
-The reference workflow template ([.github/workflows/cm-merge-scan.yml](file:///usr/local/google/home/brentcollier/src/local/codemender-runner/.github/workflows/cm-merge-scan.yml)) demonstrates the two composite actions:
+The reference workflow template ([.github/workflows/cm-merge-scan.yml](../../../../.github/workflows/cm-merge-scan.yml)) demonstrates the two composite actions:
 - **Mode 1 (Cloud Run Jobs, Recommended for Production):** Invokes `uses: ./.github/actions/codemender` with GCP project, WIF credentials, region, transit bucket, and job name.
 - **Mode 2 (Local Docker + gVisor, Self-Contained Runner Execution):** Documented in comments illustrating `uses: ./.github/actions/codemender-local` with `runner_image`.
 

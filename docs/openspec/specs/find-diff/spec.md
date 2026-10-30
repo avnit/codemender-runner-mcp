@@ -43,9 +43,9 @@ This specification is governed by and references:
 - [Scaling CodeMender Scan Quality V2 (`go/codemender-rfc-30`)](https://docs.google.com/document/d/1_bB1A-dkDjaILxjohu7rKAndvOSWbR6dHcTghCS6NZ0/edit?tab=t.0#heading=h.rfwep4caowad)
   — Tier 0 heuristic non-production file pruning and Tier 1 impact-aware pull
   request delta scanning (`cm find --diff`).
-- [ADR-0001: Machine-Readable Output Contract (`stdout` JSON, `stderr` Logs, Coarse Exit Codes)](../../adr/ADR-0001-machine-readable-output-contract.md)
-- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../adr/ADR-0008-repository-layout-and-package-structure.md)
-- [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../adr/ADR-0003-environment-scrubbing.md)
+- [ADR-0001: Machine-Readable Output Contract (`stdout` JSON, `stderr` Logs, Coarse Exit Codes)](../../../adr/ADR-0001-machine-readable-output-contract.md)
+- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
+- [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../../adr/ADR-0003-environment-scrubbing.md)
 
 ## Requirements
 
@@ -179,7 +179,7 @@ ______________________________________________________________________
 
 - **CUJ UUID:** cuj-find-diff-adapter-execution
 
-In accordance with [ADR-0008](../../adr/ADR-0008-repository-layout-and-package-structure.md),
+In accordance with [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
 `codemender/runner/commands/find_diff.py` MUST NOT import `subprocess`, `utils`,
 or `vcs.github`, and MUST NOT invoke `run_command` or `build_cm_command`. All
 `cm` binary executions MUST go through the `CmAdapter` instance verified by
@@ -257,7 +257,7 @@ ______________________________________________________________________
 
 - **CUJ UUID:** cuj-find-diff-environment-passthrough
 
-In accordance with [ADR-0003](../../adr/ADR-0003-environment-scrubbing.md),
+In accordance with [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md),
 `codemender/runner/commands/find_diff.py` and `CmAdapter` MUST NOT import or
 call `config.get_scrubbed_env()` or reference `SENSITIVE_ENV_VARS`.
 `cm-runner find-diff` MUST invoke `CmAdapter.run()` with `env=None` (the
@@ -367,7 +367,7 @@ ______________________________________________________________________
 - **CUJ UUID:** cuj-find-diff-exit-codes
 
 `cm-runner find-diff` MUST enforce the coarse exit code contract defined in
-[ADR-0001](../../adr/ADR-0001-machine-readable-output-contract.md):
+[ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md):
 
 - `0` (`exit_codes.OK`): The differential scan and report extraction completed
   without execution errors, regardless of whether `0` or $N$ findings were

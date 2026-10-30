@@ -390,6 +390,6 @@ file required by `cm-runner verify --finding` using a two-tier strategy:
 2. All strings extracted from `cm-runner verify` output (including
    `dismiss_reason`) and from PR comments MUST be sanitized before rendering
    into Markdown replies.
-3. `.github/README.md` MUST document how to trigger on-demand
+3. `.github/SETUP.md` MUST document how to trigger on-demand
    verification (`@cm-runner verify` in a fix comment thread), who can trigger
    it, the concurrency cap (`4`), and what each verification status means.

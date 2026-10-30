@@ -43,9 +43,9 @@ working-tree edits made during verification, inspect the resulting status in
 verification outcome.
 
 Governed by [SPEC-VERIFY](spec.md),
-[ADR-0001](../../adr/ADR-0001-machine-readable-output-contract.md),
-[ADR-0002](../../adr/ADR-0002-runner-layout-and-build.md), and
-[ADR-0003](../../adr/ADR-0003-environment-scrubbing.md).
+[ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
+[ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md), and
+[ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md).
 
 ### Verification Outcomes & Expected Downstream (`fix`) Behaviour
 
@@ -73,8 +73,7 @@ to decide whether to skip `fix`:
 
 Based on `cm` 0.11.0 behaviour verified on 2026-09-30 (see
 [SPEC-FIX design.md](../fix/design.md#verified-cm-behaviour)) and empirical
-validation against `~/.codemender/state.db` (see
-[Public Preview Upgrade Design](../../architecture/codemender_public_preview_upgrade_design.md)):
+validation against `~/.codemender/state.db`:
 
 | # | Fact | Consequence for `verify` |
 | :- | :--- | :--- |

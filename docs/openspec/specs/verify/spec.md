@@ -51,9 +51,9 @@ This specification is governed by and references:
   command consumes.
 - [SPEC-FIX](../fix/spec.md) — shares `FixConfig`, pre-flight, and import logic,
   and consumes the finding SARIF input when `verify` does not dismiss it.
-- [ADR-0001: Machine-Readable Output Contract](../../adr/ADR-0001-machine-readable-output-contract.md)
-- [ADR-0002: Runner Layout and Build](../../adr/ADR-0002-runner-layout-and-build.md)
-- [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../adr/ADR-0003-environment-scrubbing.md)
+- [ADR-0001: Machine-Readable Output Contract](../../../adr/ADR-0001-machine-readable-output-contract.md)
+- [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
+- [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../../adr/ADR-0003-environment-scrubbing.md)
 
 ## Requirements
 
@@ -190,7 +190,7 @@ ______________________________________________________________________
 
 - **CUJ UUID:** cuj-verify-adapter-execution
 
-In accordance with [ADR-0002](../../adr/ADR-0002-runner-layout-and-build.md),
+In accordance with [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
 `cli/commands/verify.py` MUST NOT import `subprocess`, `utils`, `vcs.github`, or
 `storage`. All `cm` calls MUST go through the `CmAdapter` checked by
 `cli/__main__.py`, with `cwd=cfg.repo.as_posix()`. Git calls MUST go through
@@ -326,7 +326,7 @@ ______________________________________________________________________
 
 - **CUJ UUID:** cuj-verify-exit-codes
 
-In accordance with [ADR-0003](../../adr/ADR-0003-environment-scrubbing.md),
+In accordance with [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md),
 `verify` MUST call `CmAdapter.run()` with `env=None` and MUST NOT call
 `config.get_scrubbed_env()` or create `.codemender_cache/`.
 
@@ -336,7 +336,7 @@ tracked file edits and remove any untracked files outside `.cm_project` and
 temporary SARIF file created for `stdin`, so `cm-runner fix` can run immediately
 afterwards on the same repository checkout.
 
-Exit codes, per [ADR-0001](../../adr/ADR-0001-machine-readable-output-contract.md):
+Exit codes, per [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md):
 
 - `0` (`exit_codes.OK`): `cm verify` ran to completion, the working tree was
   reset, and the updated SARIF document (with `status` set to `DISMISSED`,

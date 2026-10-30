@@ -25,17 +25,39 @@ import unittest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-TARGET_DOCS: tuple[str, ...] = (
-    "README.md",
-    ".github/README.md",
-    "docs/user-guides/cloud-run.md",
-    "docs/user-guides/local-gvisor.md",
-    "docker/README.md",
-    "terraform/README.md",
-    "packages/codemender/README.md",
-    "packages/launcher/README.md",
-    "packages/repohost/README.md",
-)
+_EXCLUDED_DIRS = frozenset({
+    ".git",
+    ".bare",
+    ".venv",
+    "venv",
+    "node_modules",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".terraform",
+    "__pycache__",
+    "build",
+    "dist",
+})
+
+
+def discover_markdown_files(repo_root: Path = _REPO_ROOT) -> tuple[str, ...]:
+  """Discovers all *.md files (case-insensitive) under repo_root."""
+  return tuple(
+      sorted(
+          path.relative_to(repo_root).as_posix()
+          for path in repo_root.rglob("*")
+          if path.is_file()
+          and path.suffix.lower() == ".md"
+          and not any(
+              part in _EXCLUDED_DIRS
+              for part in path.relative_to(repo_root).parts
+          )
+      )
+  )
+
+
+TARGET_DOCS: tuple[str, ...] = discover_markdown_files(_REPO_ROOT)
 
 _EXTERNAL_SCHEMES = ("http://", "https://", "mailto:")
 _FENCED_CODE_RE = re.compile(
@@ -57,12 +79,19 @@ _HTML_ANCHOR_RE = re.compile(
     re.IGNORECASE,
 )
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
+_CUSTOM_HEADING_ID_RE = re.compile(r"\s*\{#([A-Za-z0-9_.:-]+)\}\s*$")
+_REQ_DECISION_PREFIX_RE = re.compile(
+    r"^(REQ-\d+|Decision\s+\d+)\b",
+    re.IGNORECASE,
+)
+_TEMPLATE_PLACEHOLDER_RE = re.compile(r"\{[A-Za-z0-9_.-]+\}")
 
 
 def slugify_github_heading(heading: str) -> str:
   """Converts a Markdown heading string into its GitHub anchor slug."""
-  text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", heading)
-  text = re.sub(r"[`*_]", "", text)
+  text = _CUSTOM_HEADING_ID_RE.sub("", heading)
+  text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
+  text = re.sub(r"[`*]|(?<!\w)_|_(?!\w)", "", text)
   text = text.lower().strip()
   text = re.sub(r"[^a-z0-9_ -]", "", text)
   return text.replace(" ", "-")
@@ -88,7 +117,15 @@ def collect_markdown_anchors(md_path: Path) -> set[str]:
   without_comments = _HTML_COMMENT_RE.sub("", without_fences)
   counts: dict[str, int] = {}
   for match in _HEADING_RE.finditer(without_comments):
-    slug = slugify_github_heading(match.group(1))
+    heading_text = match.group(1)
+    custom_id = _CUSTOM_HEADING_ID_RE.search(heading_text)
+    if custom_id:
+      anchors.add(custom_id.group(1))
+      heading_text = _CUSTOM_HEADING_ID_RE.sub("", heading_text)
+    prefix_match = _REQ_DECISION_PREFIX_RE.match(heading_text.strip())
+    if prefix_match:
+      anchors.add(re.sub(r"\s+", "-", prefix_match.group(1).lower()))
+    slug = slugify_github_heading(heading_text)
     if not slug:
       continue
     seen = counts.get(slug, 0)
@@ -118,9 +155,11 @@ def extract_links(markdown_text: str) -> list[str]:
 
 def validate_markdown_files(
     repo_root: Path,
-    rel_paths: Sequence[str] = TARGET_DOCS,
+    rel_paths: Sequence[str] | None = None,
 ) -> list[str]:
   """Validates relative links and anchors across target documentation files."""
+  if rel_paths is None:
+    rel_paths = discover_markdown_files(repo_root)
   errors: list[str] = []
   anchor_cache: dict[Path, set[str]] = {}
 
@@ -146,6 +185,9 @@ def validate_markdown_files(
         path_part, anchor = target.split("#", 1)
       else:
         path_part, anchor = target, ""
+
+      if _TEMPLATE_PLACEHOLDER_RE.search(path_part):
+        continue
 
       if path_part.startswith("/"):
         errors.append(
@@ -199,12 +241,31 @@ def validate_markdown_files(
 
 def test_markdown_links_and_anchors() -> None:
   """Pytest entrypoint verifying all target documentation links and anchors."""
-  errors = validate_markdown_files(_REPO_ROOT, TARGET_DOCS)
+  errors = validate_markdown_files(_REPO_ROOT)
   assert not errors, "Documentation validation failed:\n" + "\n".join(errors)
 
 
 class TestDocsLinks(unittest.TestCase):
   """Unit and integration tests for the documentation link and anchor validator."""
+
+  def test_discover_markdown_files_is_case_insensitive_and_ignores_excluded_dirs(
+      self,
+  ):
+    with tempfile.TemporaryDirectory() as tmp:
+      root = Path(tmp)
+      (root / "README.md").write_text("# Root\n", encoding="utf-8")
+      (root / "NOTES.MD").write_text("# Notes\n", encoding="utf-8")
+      (root / ".github").mkdir()
+      (root / ".github" / "SETUP.Md").write_text("# Setup\n", encoding="utf-8")
+      (root / ".git").mkdir()
+      (root / ".git" / "ignored.md").write_text("# Ignored\n", encoding="utf-8")
+      (root / ".venv").mkdir()
+      (root / ".venv" / "pkg.md").write_text("# Venv\n", encoding="utf-8")
+
+      self.assertEqual(
+          discover_markdown_files(root),
+          (".github/SETUP.Md", "NOTES.MD", "README.md"),
+      )
 
   def test_slugify_github_heading(self):
     self.assertEqual(
@@ -222,6 +283,12 @@ class TestDocsLinks(unittest.TestCase):
     self.assertEqual(
         slugify_github_heading("See [Guide](docs/guide.md) *Now* _Here_"),
         "see-guide-now-here",
+    )
+    self.assertEqual(
+        slugify_github_heading(
+            "5.1 `RunManifest` (`tasks/{task_id}/input/manifest.json`)"
+        ),
+        "51-runmanifest-taskstask_idinputmanifestjson",
     )
 
   def test_strip_ignored_regions_removes_code_blocks_and_inline_code(self):

@@ -51,8 +51,8 @@ Governed by [SPEC-GHA-FIX](spec.md), [SPEC-GHA](../github-actions/spec.md),
 | 1 | `fix` handles one finding per call. Running several, in parallel or not, is the caller's job. | [SPEC-FIX design](../fix/design.md), non-goals | The loop is ours. |
 | 2 | `fix` writes the patch to stdout as a raw unified diff, not JSON. It also writes it to `<finding>.diff` in `--out`. | SPEC-FIX REQ-0005, REQ-0006 | The launcher can't parse `fix`'s stdout as NDJSON. We read the file. |
 | 3 | `cm fix` starts with `git checkout HEAD -- . && git clean -fd`, and `fix` refuses to run on a tree with uncommitted work. | SPEC-FIX REQ-0003 | Each fix needs a clean checkout of its own. |
-| 4 | `fix` finds the ID of the finding it imported by comparing `cm report` before and after the import. | [`fix.py`](../../../../codemender-runner/cli/commands/fix.py) | Two fixes sharing a `cm` home would each see two new IDs and fail. |
-| 5 | The legacy parallel design found that the CodeMender server allows one active session per project ID. `cm` stores that ID in a `.cm_project` file inside the repository. | [parallelization_design.md](../../../architecture/parallelization_design.md) | Each fix starts from the original checkout, never from the scan's copy, which has a `.cm_project`. Not yet confirmed on `cm` 0.11.0. |
+| 4 | `fix` finds the ID of the finding it imported by comparing `cm report` before and after the import. | [`fix.py`](../../../../packages/codemender/src/codemender/runner/commands/fix.py) | Two fixes sharing a `cm` home would each see two new IDs and fail. |
+| 5 | The legacy parallel design found that the CodeMender server allows one active session per project ID. `cm` stores that ID in a `.cm_project` file inside the repository. | `parallelization_design.md` | Each fix starts from the original checkout, never from the scan's copy, which has a `.cm_project`. Not yet confirmed on `cm` 0.11.0. |
 | 6 | A fix to a 10-line file took 8–9 minutes, and `fix` enforces a per-finding timeout (`_FIX_TIMEOUT_SEC`). | SPEC-FIX design, fact 4 | Fixes one after another would take hours. They have to run at the same time. |
 | 7 | For pull requests, `actions/checkout` puts a temporary merge commit on disk by default, not the PR's head. | [GitHub docs](https://github.com/actions/checkout) | Line numbers from the scan wouldn't match the PR's *Files changed* view, where suggestions attach. |
 | 8 | `cm` gives a finding a new ID on every import. | SPEC-FIX REQ-0004 | IDs can't tell us that an earlier run already posted a fix. |
@@ -146,7 +146,7 @@ Governed by [SPEC-GHA-FIX](spec.md), [SPEC-GHA](../github-actions/spec.md),
     Later.
   - *Suggest only the parts GitHub allows:* the developer could commit half a
     fix without noticing. It's the whole patch or none of it, as in the legacy
-    code ([rejected alternative 13](../../../architecture/github_actions_orchestration_design.md)).
+    code (rejected alternative 13).
 - **Rationale:** A reviewer sees the fix where the problem is, in *Files
   changed*. Suggestions can only replace lines shown in the PR diff, and many
   real fixes touch other lines (an import at the top of the file is common), so

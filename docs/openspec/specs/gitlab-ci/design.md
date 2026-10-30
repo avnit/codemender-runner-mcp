@@ -60,7 +60,7 @@ Cloud, AWS, Azure, or on premises. A compute backend on another cloud would be
 a new `Launcher` and requirement, selected through REQ-0004's factory.
 
 Governed by [SPEC-GITLAB-CI](spec.md),
-[SPEC-GITLAB-SARIF](../gitlab-sarif-report/spec.md),
+[SPEC-GITLAB-SARIF](spec.md#req-0007),
 [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
 [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md), and
 [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
@@ -89,7 +89,7 @@ ______________________________________________________________________
 - Invoke `cm-runner find-diff` in a single self-contained sandbox/microVM
   execution per [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md) and
   give `local` and `cloudrun` the same arguments and output files, so downstream
-  SARIF normalization ([SPEC-GITLAB-SARIF](../gitlab-sarif-report/spec.md)) and
+  SARIF normalization ([SPEC-GITLAB-SARIF](spec.md#req-0007)) and
   sticky MR commenting remain backend-agnostic.
 
 ### Non-Goals
@@ -245,7 +245,7 @@ sequenceDiagram
 | `gitlab-ci/src/launcher/gvisor.py` | Implements `GvisorLauncher` for `CODEMENDER_BACKEND="local"` using a standalone `runsc` OCI v1.0.2 bundle. | Enforces read-only rootfs, symlink validation, allowlisted env, the read-only `/creds` mount, virtualized `CAP_SYS_ADMIN`, and `runsc delete -force` cleanup. |
 | `gitlab-ci/src/launcher/cloud_run.py` | Planned (REQ-0003). Implements `CloudRunLauncher` for `CODEMENDER_BACKEND="cloudrun"` via the Cloud Run client CLI. | Allowlisted subprocess environment; results come only from the files in `--out`. |
 | `gitlab-ci/src/auth/wif.py` | Writes `$GCP_OIDC_TOKEN` to `/creds/oidc.jwt` and an `external_account` ADC file to `/creds/adc.json` (`0600`), and deletes both on exit. `cm` does the token exchange. | Pops `GCP_OIDC_TOKEN` immediately; validates inputs without echoing secrets. |
-| `gitlab-ci/src/sarif_normalizer.py` | Normalizes SARIF 2.1.0 for native GitLab Security tab ingestion ([SPEC-GITLAB-SARIF](../gitlab-sarif-report/spec.md)). | Stdlib-only; synthesizes `driver.rules[]`, recovers `CRITICAL` rank from `report.md`, and enforces the `10 MiB` cap. |
+| `gitlab-ci/src/sarif_normalizer.py` | Normalizes SARIF 2.1.0 for native GitLab Security tab ingestion ([SPEC-GITLAB-SARIF](spec.md#req-0007)). | Stdlib-only; synthesizes `driver.rules[]`, recovers `CRITICAL` rank from `report.md`, and enforces the `10 MiB` cap. |
 | `gitlab-ci/src/vcs/gitlab.py` | Posts or updates the sticky Merge Request note (`<!-- codemender-summary -->`) via GitLab REST API v4, only when `CODEMENDER_GITLAB_TOKEN` is set. | Updates an existing note only if its author is the token's user, and enforces same-origin pagination. |
 
 ______________________________________________________________________
@@ -289,7 +289,7 @@ Verified hermetically via `python3 -m unittest discover -s gitlab-ci/tests -v`:
 1. **`test_vcs_gitlab.py`**: Verifies sticky MR note creation/update, bot-author
    verification, same-origin pagination, and HTTP `429`/`5xx` retry backoff.
 1. **`test_sarif_normalizer.py`**: Verifies
-   [SPEC-GITLAB-SARIF](../gitlab-sarif-report/spec.md) rule synthesis,
+   [SPEC-GITLAB-SARIF](spec.md#req-0007) rule synthesis,
    fence-aware `CRITICAL` severity recovery from `report.md`, location
    normalization, and `10 MiB` size budgeting.
 
