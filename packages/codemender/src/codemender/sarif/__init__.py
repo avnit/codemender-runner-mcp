@@ -265,6 +265,7 @@ def _resolve_rule_id(run_entry: Dict[str, Any], result: Dict[str, Any]) -> str:
   return ""
 
 
+# Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0009
 def _extract_or_compute_fingerprint(
     result: Dict[str, Any],
     path: str,
@@ -272,8 +273,12 @@ def _extract_or_compute_fingerprint(
     message: str,
     start_line: int,
 ) -> str:
-  """Returns the finding's ID from SARIF fingerprints/properties, or a deterministic hash."""
-  for bag_name in ("fingerprints", "partialFingerprints", "properties"):
+  """Returns the finding's ID from SARIF fingerprints, or a deterministic hash.
+
+  The `properties` bag holds shared non-identifier values such as
+  `security-severity`, so it is never used.
+  """
+  for bag_name in ("fingerprints", "partialFingerprints"):
     bag = result.get(bag_name)
     if isinstance(bag, dict):
       for val in bag.values():

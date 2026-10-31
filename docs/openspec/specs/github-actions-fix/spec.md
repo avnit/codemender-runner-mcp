@@ -309,9 +309,9 @@ With fixes on, the sticky comment MUST:
    expensive fixes, every comment CodeMender posts with a fix MUST contain a
    deterministic finding marker `<!-- codemender-finding:<finding_id> -->`,
    where `<finding_id>` is derived from the SARIF result's fingerprint metadata
-   (`fingerprints`, `partialFingerprints` or `properties`, falling back to a
-   deterministic hash of the file path, rule ID, start line and message when no
-   SARIF fingerprint is present).
+   (`fingerprints` or `partialFingerprints`, falling back to a deterministic
+   hash of the file path, rule ID, start line and message when no SARIF
+   fingerprint is present).
 2. Before starting fixes, the action MUST list the PR's review comments. It
    MUST skip every finding whose `finding_id` is on a comment that isn't
    outdated, and that finding's Fix cell MUST link to that comment.

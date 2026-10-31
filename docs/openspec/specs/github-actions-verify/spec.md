@@ -278,7 +278,7 @@ file required by `cm-runner verify --finding` using a two-tier strategy:
      - `level`: mapped from the severity label in the parent fix comment header (`error`, `warning`, `note`).
      - `message.text`: the finding title from the parent fix comment header (enriched with the finding's `Details` from the sticky summary comment's `<details>` block when available).
      - `locations[0].physicalLocation`: `artifactLocation.uri` set to the parent review comment's normalized repo-relative `path`, and `region.startLine` / `endLine` set to the parent review comment's `line` or `original_line` (when `> 0`).
-     - `properties.finding_id`: set to `<finding_id>`.
+     - `partialFingerprints.primaryLocationLineHash`: set to `<finding_id>`.
 
 #### Scenario: Resolving SARIF from the PR artifact
 - **GIVEN** a non-expired `codemender-report-pr-42` artifact containing `findings/finding-001.sarif` with `finding_id == "abc123def456"`
@@ -288,7 +288,7 @@ file required by `cm-runner verify --finding` using a two-tier strategy:
 #### Scenario: Falling back to comment reconstruction when the artifact has expired
 - **GIVEN** the `codemender-report-pr-42` artifact has expired or cannot be downloaded
 - **WHEN** `@cm-runner verify` runs for a fix comment on `src/db.py` line `25` with header `**CodeMender fix for finding 1:** 🔴 High / Critical · CWE-89 · SQL Injection`
-- **THEN** the action MUST construct a valid 1-result SARIF 2.1.0 document with `ruleId: "CWE-89"`, `uri: "src/db.py"`, `startLine: 25`, and `properties.finding_id`, and run `cm-runner verify` with it.
+- **THEN** the action MUST construct a valid 1-result SARIF 2.1.0 document with `ruleId: "CWE-89"`, `uri: "src/db.py"`, `startLine: 25`, and `partialFingerprints.primaryLocationLineHash` set to the finding ID, and run `cm-runner verify` with it.
 
 ---
 

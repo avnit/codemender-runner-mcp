@@ -14,10 +14,54 @@
 
 """Unit tests for `codemender.sarif`."""
 
+import hashlib
 import json
+from typing import Any, Dict
 import unittest
 
 from codemender import sarif
+
+
+def _cm_sarif() -> Dict[str, Any]:
+  """Returns a SARIF log shaped like `cm report --format sarif` output.
+
+  Like cm, every result has a `security-severity` property and no
+  `fingerprints` or `partialFingerprints`. Two results share `"7.5"`.
+  """
+  rules, results = [], []
+  for severity, rule_id, uri, start_line, title in (
+      ("9.0", "CWE-89", "routes/login.ts", 34, "SQL injection"),
+      ("7.5", "CWE-79", "routes/search.ts", 10, "Reflected XSS"),
+      ("7.5", "CWE-22", "routes/fileServer.ts", 52, "Path traversal"),
+  ):
+    rules.append({
+        "id": rule_id,
+        "shortDescription": {"text": rule_id},
+        "properties": {"security-severity": severity},
+    })
+    results.append({
+        "ruleId": rule_id,
+        "level": "error",
+        "message": {"text": title, "markdown": f"**{title}**"},
+        "locations": [{
+            "physicalLocation": {
+                "artifactLocation": {"uri": uri},
+                "region": {"startLine": start_line, "endLine": start_line + 2},
+            }
+        }],
+        "properties": {"security-severity": severity},
+    })
+  driver = {"name": "CodeMender", "version": "dev", "rules": rules}
+  return {
+      "version": "2.1.0",
+      "runs": [{"tool": {"driver": driver}, "results": results}],
+  }
+
+
+def _hash_id(path: str, rule_id: str, start_line: int, message: str) -> str:
+  """Returns the 12-hex REQ-0009 hash of path, rule ID, start line, message."""
+  key = f"{path}|{rule_id}|{start_line}|{message}"
+  return hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
 
 
 class TestSarifDocument(unittest.TestCase):
@@ -93,6 +137,73 @@ class TestSarifDocument(unittest.TestCase):
         }],
     })
     self.assertEqual(doc.active_result_count, 2)
+
+
+# Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0009
+class TestFindingId(unittest.TestCase):
+  """Tests how `SarifDocument.to_findings()` picks `Finding.finding_id`."""
+
+  def test_cm_results_sharing_a_severity_get_distinct_hash_ids(self) -> None:
+    text = json.dumps(_cm_sarif())
+    findings = sarif.SarifDocument.from_json(text).to_findings()
+    ids = [finding.finding_id for finding in findings]
+    self.assertEqual(len(set(ids)), len(ids), ids)
+    for finding_id in ids:
+      self.assertNotIn(finding_id, ("9.0", "7.5", "5.0", "2.0"))
+    self.assertEqual(
+        ids,
+        [
+            _hash_id("routes/login.ts", "CWE-89", 34, "SQL injection"),
+            _hash_id("routes/search.ts", "CWE-79", 10, "Reflected XSS"),
+            _hash_id("routes/fileServer.ts", "CWE-22", 52, "Path traversal"),
+        ],
+    )
+    findings_again = sarif.SarifDocument.from_json(text).to_findings()
+    self.assertEqual([finding.finding_id for finding in findings_again], ids)
+
+  def test_non_identifier_properties_are_ignored(self) -> None:
+    report = _cm_sarif()
+    report["runs"][0]["results"][1]["properties"] = {
+        "status": "OPEN",
+        "updated_at": "2026-10-30T00:00:00Z",
+        "dismiss_reason": "not exploitable",
+    }
+    findings = sarif.SarifDocument.from_dict(report).to_findings()
+    self.assertEqual(
+        findings[1].finding_id,
+        _hash_id("routes/search.ts", "CWE-79", 10, "Reflected XSS"),
+    )
+
+  def test_cm_finding_id_property_is_ignored(self) -> None:
+    # cm's internal finding IDs change on every run (ADR-0006).
+    report = _cm_sarif()
+    report["runs"][0]["results"][0]["properties"] = {
+        "finding_id": "9f7b066a-0d33-5ced-b834-9ad42e83aa40",
+        "confidence": 100,
+        "status": "OPEN",
+    }
+    findings = sarif.SarifDocument.from_dict(report).to_findings()
+    self.assertEqual(
+        findings[0].finding_id,
+        _hash_id("routes/login.ts", "CWE-89", 34, "SQL injection"),
+    )
+
+  def test_fingerprints_win_over_partial_fingerprints(self) -> None:
+    report = _cm_sarif()
+    result = report["runs"][0]["results"][1]
+    result["fingerprints"] = {"primary": "abc123"}
+    result["partialFingerprints"] = {"primaryLocationLineHash": "def456"}
+    findings = sarif.SarifDocument.from_dict(report).to_findings()
+    self.assertEqual(findings[1].finding_id, "abc123")
+
+  def test_partial_fingerprints_are_used_without_fingerprints(self) -> None:
+    # `@cm-runner verify` stores the finding ID in `partialFingerprints`.
+    report = _cm_sarif()
+    report["runs"][0]["results"][1]["partialFingerprints"] = {
+        "primaryLocationLineHash": "aabbcc112233"
+    }
+    findings = sarif.SarifDocument.from_dict(report).to_findings()
+    self.assertEqual(findings[1].finding_id, "aabbcc112233")
 
 
 if __name__ == "__main__":

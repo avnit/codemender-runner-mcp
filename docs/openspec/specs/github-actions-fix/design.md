@@ -238,14 +238,19 @@ Governed by [SPEC-GHA-FIX](spec.md), [SPEC-GHA](../github-actions/spec.md),
 ### Decision 9: Don't Fix or Post the Same Thing Twice {#decision-9}
 
 - **Choice:** Every suggestion and patch comment carries a hidden tag,
-  `<!-- codemender-finding:<fingerprint> -->`. `SarifDocument.to_findings()` extracts
-  each result's SARIF `partialFingerprints` / `fingerprints` (falling back to a
-  12-hex SHA-256 of rule ID + normalized file path + line range) as
-  `Finding.finding_id`. Before fixing, the action reads the PR's review comments
-  and skips every finding whose tag is on a comment that isn't outdated. Two
-  findings with the same fingerprint in one run are fixed once.
+  `<!-- codemender-finding:<fingerprint> -->`. `SarifDocument.to_findings()`
+  uses each result's first non-empty SARIF `fingerprints` value, else its first
+  non-empty `partialFingerprints` value (falling back to a 12-hex SHA-256 of
+  normalized file path + rule ID + start line + message) as
+  `Finding.finding_id`. It never reads the result's `properties` bag. Before
+  fixing, the action reads the PR's review comments and skips every finding
+  whose tag is on a comment that isn't outdated. Two findings with the same
+  fingerprint in one run are fixed once.
 - **Alternatives Considered:**
   - *`cm`'s internal database ID:* changes on every import (fact 8).
+  - *Strings in the result's `properties` bag:* not identifiers. `cm` writes
+    `security-severity` on every result, so every finding of one severity
+    would share one ID, get one fix, and block the others' verification.
 - **Rationale:** Every push runs the workflow again. Without this, each run
   would spend about 10 minutes per finding again and post the same comments
   again. When GitHub marks a comment outdated, the developer has changed those
@@ -385,6 +390,9 @@ Findings and failed fixes never fail the job, the same as findings in M1.
 2. Memory, disk and time with about five fixes at once on a 2-CPU, 8 GB runner.
 3. Does the CodeMender API return HTTP 429 when several fixes run at once?
 4. Is there still one active session per project ID on `cm` 0.11.0 (fact 5)?
-5. Does `cm`'s SARIF include `partialFingerprints` (Decision 9)?
+5. ~~Does `cm`'s SARIF include `partialFingerprints` (Decision 9)?~~ —
+   **Resolved:** No. `cm` 0.16.0 writes no `fingerprints` or
+   `partialFingerprints`, only `properties["security-severity"]`, so every
+   `cm` finding gets the hash ID.
 6. Does a PR from a fork work?
 7. A workflow with no `fix:` line runs fixes, and `fix: false` turns them off.
