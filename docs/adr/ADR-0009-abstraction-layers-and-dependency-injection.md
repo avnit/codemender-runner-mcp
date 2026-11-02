@@ -4,7 +4,7 @@
 - **Date:** 2026-10-09
 - **Builds on:** [ADR-0008](ADR-0008-repository-layout-and-package-structure.md)
   (Repository Layout, Three-Package Workspace, and Runtime Architecture),
-  [ADR-0001](ADR-0001-machine-readable-output-contract.md),
+  [ADR-0002](ADR-0002.md),
   [ADR-0003](ADR-0003-environment-scrubbing.md),
   [ADR-0006](ADR-0006-pr-remediation-routing-and-security-gate.md),
   [ADR-0007](ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)
@@ -198,7 +198,7 @@ classDiagram
      handlers (`init`, `find_diff`, `fix`, `verify`), the standalone `cm-runner`
      CLI wrapper, and `CmAdapter` (which invokes the underlying native `cm`
      binary and emits
-     [ADR-0001](ADR-0001-machine-readable-output-contract.md) NDJSON events),
+     [ADR-0002](ADR-0002.md) NDJSON events),
      deterministic SARIF 2.1.0 parsing/splitting (`codemender.sarif`), local Git
      archive/diff operations (`codemender.vcs`), and shared data models.
    - **Boundary Invariant:** Bottom of the dependency stack: **never** imports 
@@ -297,7 +297,7 @@ classDiagram
      calls the `codemender.runner.commands` Python modules directly in-process).
    - **First-Level Components Invoked:** Invokes **`CmAdapter`**, which wraps
      the underlying `cm` Go binary and emits structured
-     [ADR-0001](ADR-0001-machine-readable-output-contract.md) NDJSON events.
+     [ADR-0002](ADR-0002.md) NDJSON events.
 
 ### Example CUJ: GitHub Actions + Cloud Run (`cm-github find`)
 
@@ -913,7 +913,7 @@ symmetric workspace file parity across `local` and `cloudrun` backends):
     extended here via `ArtifactCache` to run identically across both local
     gVisor (`LocalArtifactCache`) and Cloud Run Jobs (`GcsArtifactCache`).
   - **`report.sarif` & `<finding>.diff` Output Artifacts:** Governed by
-    [ADR-0001](ADR-0001-machine-readable-output-contract.md) (cross-boundary
+    [ADR-0002](ADR-0002.md) (cross-boundary
     `--out` file artifacts produced by `cm-runner`).
 - **Conflict-Free Parallel Union & Cross-VM Storage Semantics (`file://` vs.
   `gs://` and Bridge to `ArtifactStore`):** Because every parallel `fix` and

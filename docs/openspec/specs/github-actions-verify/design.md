@@ -37,7 +37,7 @@ under the user's comment in that review thread.
 
 Governed by [SPEC-GHA-VERIFY](spec.md), [SPEC-VERIFY](../verify/spec.md),
 [SPEC-GHA-FIX](../github-actions-fix/spec.md),
-[ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
+[ADR-0002](../../../adr/ADR-0002.md),
 [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md), and
 [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md).
 

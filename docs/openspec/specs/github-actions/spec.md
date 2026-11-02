@@ -36,7 +36,7 @@ Both actions install the required workspace packages (`packages/codemender`, `pa
 
 This specification is governed by:
 - [SPEC-DIST: Customer Repository Distribution, GitHub Deployment Models & Cross-Repo Action Resolution](../distribute/spec.md)
-- [ADR-0001: Machine-Readable Output Contract](../../../adr/ADR-0001-machine-readable-output-contract.md) (NDJSON events on `stdout`, logs on `stderr`, coarse exit codes)
+- [ADR-0002: Machine-Readable Output Contract](../../../adr/ADR-0002.md) (NDJSON events on `stdout`, logs on `stderr`, coarse exit codes)
 - [ADR-0003: Environment Variable Scrubbing](../../../adr/ADR-0003-environment-scrubbing.md)
 - [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
 - [ADR-0007: Cloud Run Job Invocation Interface: CLI vs. Python Library](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)
@@ -313,7 +313,7 @@ To minimize differences between actions that execute via Cloud Run and those tha
    - Backends MUST NOT introduce backend-specific command flags, positional arguments, or alter parameter semantics.
 
 2. **Stream & Output Contract Parity**:
-   - Both backends MUST strictly satisfy [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md) by streaming live operational logs on `stderr` and emitting each command's result in its standard format on `stdout` (NDJSON events for `version`/`init`, SARIF for `find-diff` and `verify`, and raw unified diff bytes for `fix`, which the launcher keeps as raw bytes per [SPEC-GHA-FIX REQ-0003](../github-actions-fix/spec.md#req-0003)).
+   - Both backends MUST strictly satisfy [ADR-0002](../../../adr/ADR-0002.md) by streaming live operational logs on `stderr` and emitting each command's result in its standard format on `stdout` (NDJSON events for `version`/`init`, SARIF for `find-diff` and `verify`, and raw unified diff bytes for `fix`, which the launcher keeps as raw bytes per [SPEC-GHA-FIX REQ-0003](../github-actions-fix/spec.md#req-0003)).
 
 3. **Workspace Filesystem & Artifact Symmetry**:
    - File exchange across the runner boundary is the standardized communication medium. All interactions MUST be constrained to interfaces that are supportable by both local containers and remote microVMs.

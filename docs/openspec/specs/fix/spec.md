@@ -42,7 +42,7 @@ This specification is governed by and references:
 
 - [SPEC-FIND-DIFF](../find-diff/spec.md) — produces the SARIF this command
   consumes.
-- [ADR-0001: Machine-Readable Output Contract](../../../adr/ADR-0001-machine-readable-output-contract.md)
+- [ADR-0002: Machine-Readable Output Contract](../../../adr/ADR-0002.md)
 - [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
 - [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../../adr/ADR-0003-environment-scrubbing.md)
 
@@ -315,7 +315,7 @@ In accordance with [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md),
 After a successful run, `fix` MUST leave the patch applied in `--repo` and MUST
 NOT commit it. `.cm_project` remains as `cm` left it.
 
-Exit codes, per [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md):
+Exit codes, per [ADR-0002](../../../adr/ADR-0002.md):
 
 - `0` (`exit_codes.OK`): the finding is `FIXED` and a non-empty diff was
   written.

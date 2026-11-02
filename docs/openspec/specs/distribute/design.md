@@ -22,7 +22,7 @@ sdd_cujspec_product: codemender-runner
 
 This design details how `codemender-runner` supports Self-Dogfooding, Organization-Wide Policy Enforcement (via GitHub Organization Repository Rulesets and Public Cross-Org Action Reuse), and Personal Account / Single-Repository Adoption (`workflow_call` and direct composite action `uses:`) directly from the canonical repository layout without copying files into target repositories.
 
-Governed by [SPEC-DIST](spec.md), [SPEC-GHA](../github-actions/spec.md), [SPEC-GHA-FIX](../github-actions-fix/spec.md), [SPEC-WIF](../wif/spec.md), [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md), [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md), [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md), and [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md).
+Governed by [SPEC-DIST](spec.md), [SPEC-GHA](../github-actions/spec.md), [SPEC-GHA-FIX](../github-actions-fix/spec.md), [SPEC-WIF](../wif/spec.md), [ADR-0002](../../../adr/ADR-0002.md), [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md), [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md), and [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md).
 
 ---
 

@@ -22,7 +22,7 @@ Python, Rust) into a single monolithic base container results in massive images
 CVE vulnerability surface.
 
 Governed by [SPEC-0003](spec.md),
-[ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
+[ADR-0002](../../../adr/ADR-0002.md),
 [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md),
 and
 [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),

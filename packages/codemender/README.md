@@ -31,7 +31,7 @@ orchestrator that executes inside the isolated sandbox container:
 - **Global flags:** All subcommands accept `--cm-binary <path>` (override the
   `cm` binary path), `--log-level <DEBUG|INFO|WARNING|ERROR>`, and `--no-init`
   (skip automatic `cm-runner init` before `find-diff`, `fix`, or `verify`).
-- **Exit codes ([ADR-0001](../../docs/adr/ADR-0001-machine-readable-output-contract.md)):**
+- **Exit codes ([ADR-0002](../../docs/adr/ADR-0002.md)):**
   `0` on success, `2` on CLI usage or input/schema validation errors, and `3` on
   operational failure or when `cm-runner fix` cannot produce a verified patch.
 - **From `find-diff` to `fix` / `verify`:** Both `cm-runner fix` and
@@ -68,7 +68,7 @@ pytest packages/codemender
   — Single-finding patch generation (`cm-runner fix`).
 - [SPEC-VERIFY](../../docs/openspec/specs/verify/spec.md)
   — Single-finding exploitability verification (`cm-runner verify`).
-- [ADR-0001](../../docs/adr/ADR-0001-machine-readable-output-contract.md)
+- [ADR-0002](../../docs/adr/ADR-0002.md)
   — Machine-readable `stdout` / `stderr` and exit-code contract.
 - [ADR-0003](../../docs/adr/ADR-0003-environment-scrubbing.md)
   — Subprocess environment inheritance in `CmAdapter` and secret isolation at

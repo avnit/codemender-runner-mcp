@@ -39,7 +39,7 @@ Who owns what:
 
 Governed by [SPEC-GHA-FIX](spec.md), [SPEC-GHA](../github-actions/spec.md),
 [SPEC-FIX](../fix/spec.md),
-[ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
+[ADR-0002](../../../adr/ADR-0002.md),
 [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
 [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md) and
 [ADR-0006](../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md).

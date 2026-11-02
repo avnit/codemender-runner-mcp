@@ -45,7 +45,7 @@ working-tree edits made during verification, inspect the resulting status in
 verification outcome.
 
 Governed by [SPEC-VERIFY](spec.md),
-[ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
+[ADR-0002](../../../adr/ADR-0002.md),
 [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md), and
 [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md).
 

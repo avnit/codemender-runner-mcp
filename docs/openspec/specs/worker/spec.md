@@ -76,7 +76,7 @@ This specification is governed by and references:
 - [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md): Subprocess
   environment pass-through (`env=None`) without denylist scrubbing or
   `<repo_dir>/.codemender_cache` redirection.
-- [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md):
+- [ADR-0002](../../../adr/ADR-0002.md):
   Split-stream output purity (`stderr` for human diagnostics, coarse exit codes
   `0`, `2`, `3`, and cross-boundary `--out` artifacts).
 - [SPEC-0003](../runner-container-packaging/spec.md): Lean runner container
@@ -128,7 +128,7 @@ The `cm-worker` CLI entrypoint MUST accept the following command-line flags:
 If required flags are missing, empty, or invalid, or if unknown flags are
 supplied, `cm-worker` MUST write a diagnostic error message to `sys.stderr`,
 emit zero bytes to `sys.stdout`, and exit with code `2`
-([ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md)). If
+([ADR-0002](../../../adr/ADR-0002.md)). If
 opening the `ArtifactCache` for `--cache-uri` raises `CacheConfigurationError`,
 `CachePermissionError`, or `CacheTransientError` (`SPEC-ARTIFACT-CACHE`),
 `cm-worker` MUST log the failure to `sys.stderr`, emit zero bytes to
@@ -371,7 +371,7 @@ process via `codemender.runner.__main__.dispatch` using `CmAdapter`:
      credentials such as `GOOGLE_APPLICATION_CREDENTIALS` and
      `CODEMENDER_SANDBOX_*` settings flow through to `cm`).
 3. **Stream Isolation & Live Log Capture
-   ([ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
+   ([ADR-0002](../../../adr/ADR-0002.md),
    [SPEC-FIND-DIFF](../find-diff/spec.md), [SPEC-FIX](../fix/spec.md),
    [SPEC-VERIFY](../verify/spec.md)):**
    - `cm-worker` itself MUST emit zero bytes to its own `sys.stdout`.

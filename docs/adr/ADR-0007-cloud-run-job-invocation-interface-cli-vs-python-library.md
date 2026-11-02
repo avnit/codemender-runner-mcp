@@ -22,7 +22,7 @@ Should the client interface consumed by CI runners (e.g., GitHub Actions, GitLab
 *   **Hermetic Unit Testability:** The coordinator orchestration logic (archive staging, parameter encoding, execution polling, timeout enforcement, receipt validation) must be 100% testable locally via mocked GCP API clients without requiring live cloud resources or slow subprocess orchestration in test suites.
 *   **Cross-Platform Portability & Interoperability:** The interface must integrate seamlessly with diverse CI/CD platforms—including GitHub Actions composite actions, GitLab CI bash scripts, Bitbucket Pipelines, and local developer shells.
 *   **Process Isolation & Signal Safety:** Long-running executions must handle CI cancellation signals (`SIGTERM`, `SIGINT`) gracefully, cleanly propagating cancellation (`jobs.executions.cancel`) to Cloud Run to conserve Vertex AI quota without leaving orphaned background jobs.
-*   **Strict Machine-Readable Output Purity:** Execution outcomes, errors, and events must strictly adhere to the project's established split-stream CLI output contract ([ADR-0001](ADR-0001-machine-readable-output-contract.md)).
+*   **Strict Machine-Readable Output Purity:** Execution outcomes, errors, and events must strictly adhere to the project's established split-stream CLI output contract ([ADR-0002](ADR-0002.md)).
 *   **Maintainability & Ergonomics:** Python-based callers (such as `CloudRunLauncher` in `github-actions/`) should benefit from rich typing, structured dataclasses, and standard Python exception handling without fragile string parsing of subprocess stdout.
 *   **Runner Startup & Dependency Overhead:** Minimizing container cold-start and package installation latency on ephemeral CI runners.
 
@@ -128,7 +128,7 @@ Chosen option: **"Option 3: Layered Architecture: Core Python Library with Thin 
 
 *   Good, because provides typed Python APIs for programmatic callers and testing while offering a standard CLI for shell and multi-CI invocations.
 *   Good, because unit tests can isolate and thoroughly test the library logic without subprocess overhead.
-*   Good, because the CLI layer strictly enforces [ADR-0001](ADR-0001-machine-readable-output-contract.md) output conventions and standard UNIX exit codes.
+*   Good, because the CLI layer strictly enforces [ADR-0002](ADR-0002.md) output conventions and standard UNIX exit codes.
 *   Bad, because requires a small amount of additional code (~80 lines) to define the CLI argument parser and map exceptions to exit codes.
 
 ## Architecture Diagram
@@ -168,7 +168,7 @@ flowchart TB
 
 ## More Information
 
-*   [ADR-0001: Machine-Readable Output Contract for cm-runner CLI](ADR-0001-machine-readable-output-contract.md)
+*   [ADR-0002: Machine-Readable Output Contract for cm-runner CLI](ADR-0002.md)
 *   [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](ADR-0005-multi-platform-transit-storage-and-isolation.md)
 *   [ADR-0006: Pull Request Remediation Routing & Security Quality Gate](ADR-0006-pr-remediation-routing-and-security-gate.md)
 *   [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](ADR-0008-repository-layout-and-package-structure.md)

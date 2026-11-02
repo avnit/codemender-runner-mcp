@@ -44,7 +44,7 @@ The rationale and trade-offs behind each requirement are in
 This specification is governed by:
 - [SPEC-VERIFY](../verify/spec.md): `cm-runner verify` CLI contract and SARIF status metadata (`VERIFIED`, `DISMISSED`, `OPEN`).
 - [SPEC-GHA-FIX](../github-actions-fix/spec.md): PR fix comments and `<!-- codemender-finding:<finding_id> -->` fingerprinting.
-- [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md): machine-readable `stdout`, human logs on `stderr`, and coarse exit codes (`0`, `2`, `3`).
+- [ADR-0002](../../../adr/ADR-0002.md): machine-readable `stdout`, human logs on `stderr`, and coarse exit codes (`0`, `2`, `3`).
 - [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md): explicit environment allowlisting into the gVisor container.
 - [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md): `GITHUB_TOKEN` remains on the CI host and never enters the container.
 

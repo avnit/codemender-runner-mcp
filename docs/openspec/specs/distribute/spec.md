@@ -44,7 +44,7 @@ This specification is governed by and references:
 - [SPEC-GHA](../github-actions/spec.md) — GitHub Actions Orchestration & Execution Backends.
 - [SPEC-GHA-FIX](../github-actions-fix/spec.md) — Fixes on Pull Requests.
 - [SPEC-WIF](../wif/spec.md) — Unified Terraform Root & Composable Mode-Aware WIF Module (`terraform/` & `terraform/modules/{wif,gcp}`).
-- [ADR-0001: Machine-Readable Output Contract](../../../adr/ADR-0001-machine-readable-output-contract.md)
+- [ADR-0002: Machine-Readable Output Contract](../../../adr/ADR-0002.md)
 - [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../../adr/ADR-0003-environment-scrubbing.md)
 - [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
 - [ADR-0009: Abstraction Layers, Orchestration Ownership, and Dependency Injection](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)

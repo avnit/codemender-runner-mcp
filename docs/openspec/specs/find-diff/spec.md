@@ -43,7 +43,7 @@ This specification is governed by and references:
 - [Scaling CodeMender Scan Quality V2 (`go/codemender-rfc-30`)](https://docs.google.com/document/d/1_bB1A-dkDjaILxjohu7rKAndvOSWbR6dHcTghCS6NZ0/edit?tab=t.0#heading=h.rfwep4caowad)
   — Tier 0 heuristic non-production file pruning and Tier 1 impact-aware pull
   request delta scanning (`cm find --diff`).
-- [ADR-0001: Machine-Readable Output Contract (`stdout` JSON, `stderr` Logs, Coarse Exit Codes)](../../../adr/ADR-0001-machine-readable-output-contract.md)
+- [ADR-0002: Machine-Readable Output Contract (`stdout` JSON, `stderr` Logs, Coarse Exit Codes)](../../../adr/ADR-0002.md)
 - [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
 - [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../../adr/ADR-0003-environment-scrubbing.md)
 
@@ -368,7 +368,7 @@ ______________________________________________________________________
 - **CUJ UUID:** cuj-find-diff-exit-codes
 
 `cm-runner find-diff` MUST enforce the coarse exit code contract defined in
-[ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md):
+[ADR-0002](../../../adr/ADR-0002.md):
 
 - `0` (`exit_codes.OK`): The differential scan and report extraction completed
   without execution errors, regardless of whether `0` or $N$ findings were

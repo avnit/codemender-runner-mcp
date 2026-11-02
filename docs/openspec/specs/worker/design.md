@@ -31,7 +31,7 @@ Governed by [SPEC-WORKER](spec.md),
 [ADR-0007](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md),
 [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md),
 [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md),
-[ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
+[ADR-0002](../../../adr/ADR-0002.md),
 [Proposal: cloudrun-job-bootstrapper](../../proposals/cloudrun-job-bootstrapper/proposal.md),
 and
 [Proposal: vcs-cloudrun-comms](../../proposals/vcs-cloudrun-comms/proposal.md),
@@ -207,7 +207,7 @@ communicating exclusively through `ArtifactCache` (`SPEC-ARTIFACT-CACHE`:
      automatically kills (`process.kill()`) and reaps (`process.wait()`) any
      active child `cm` binary process without needing custom process-group
      locks or `os.killpg` escalation in `Worker`.
-  3. Per [ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
+  3. Per [ADR-0002](../../../adr/ADR-0002.md),
      [SPEC-FIND-DIFF](../find-diff/spec.md) (`REQ-0005`),
      [SPEC-FIX](../fix/spec.md) (`REQ-0005`), and
      [SPEC-VERIFY](../verify/spec.md) (`REQ-0006`), `find-diff`, `fix`, and
@@ -504,7 +504,7 @@ defined in `launcher.cache` (`SPEC-ARTIFACT-CACHE`, and re-exported by
 ## Error & Exit-Code Mapping Table
 
 In compliance with
-[ADR-0001](../../../adr/ADR-0001-machine-readable-output-contract.md),
+[ADR-0002](../../../adr/ADR-0002.md),
 [ADR-0007](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md),
 and `SPEC-ARTIFACT-CACHE` (`launcher.cache.errors.ArtifactCacheError`),
 `Worker.run_task` and `cm-worker` map all outcomes to five deterministic exit

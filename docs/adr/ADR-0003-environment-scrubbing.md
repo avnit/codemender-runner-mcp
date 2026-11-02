@@ -341,7 +341,7 @@ flowchart TD
 ## More Information
 
 - Related ADRs:
-  - [ADR-0001: Machine-Readable Output Contract for cm-runner CLI](ADR-0001-machine-readable-output-contract.md)
+  - [ADR-0002: Machine-Readable Output Contract for cm-runner CLI](ADR-0002.md)
   - [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](ADR-0008-repository-layout-and-package-structure.md)
 - System & Sandbox Design Documents:
   - [Scaling CodeMender in the CI/CD Pipeline (go/scaling-codemender-cicd)](http://goto.google.com/scaling-codemender-cicd)
