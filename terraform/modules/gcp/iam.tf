@@ -19,6 +19,7 @@ resource "google_service_account" "runner_sa" {
   depends_on   = [google_project_service.enabled_services["iam.googleapis.com"]]
 }
 
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0005, SPEC-WIF/REQ-0004
 # Bucket-level IAM for Runner SA
 resource "google_storage_bucket_iam_member" "runner_reports_admin" {
   bucket = google_storage_bucket.reports.name

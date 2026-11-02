@@ -12,13 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0007, ADR-0009, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0006
+# Governing: ADR-0007, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0006, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0006
 """Shared wire models for Launcher and Worker over ArtifactCache."""
 
 from collections.abc import Iterable, Mapping
 import json
 import math
-from pathlib import PurePosixPath
 from typing import Any, Self
 
 import attrs
@@ -27,9 +26,14 @@ from codemender.runner.commands.find_diff import (
     MIN_DIFF_WORKERS,
 )
 
+from launcher.cache._validation import (
+    finding_key_error,
+    relative_key_error,
+    single_segment_error,
+)
+
 VALID_WORKER_COMMANDS = frozenset({"init", "find-diff", "fix", "verify"})
 VALID_RECEIPT_STATUSES = frozenset({"SUCCESS", "FAILURE"})
-_TMP_SEGMENT_PREFIX = ".tmp."
 
 
 class ValidationError(Exception):
@@ -59,18 +63,9 @@ def _validate_optional_non_empty_str(
 
 
 def _check_safe_path_segment(value: Any, field_name: str) -> str:
-  """Validates that `value` is a single safe path segment without `.tmp.` or `:`."""
-  _check_non_empty_str(value, field_name)
-  path = PurePosixPath(value)
-  if (
-      path.is_absolute()
-      or "\\" in value
-      or ":" in value
-      or value.startswith(_TMP_SEGMENT_PREFIX)
-      or len(path.parts) != 1
-      or path.parts[0] in (".", "..")
-      or path.as_posix() != value
-  ):
+  """Validates that `value` is a single safe path segment."""
+  reason = single_segment_error(value)
+  if reason is not None:
     raise ValidationError(
         f"{field_name} must be a single safe path segment: {value!r}"
     )
@@ -85,33 +80,23 @@ def _validate_safe_path_segment(
 
 
 def _check_safe_relative_key(value: Any, field_name: str) -> str:
-  """Validates that `value` is a safe relative POSIX key without `.tmp.` or `:`."""
-  _check_non_empty_str(value, field_name)
-  path = PurePosixPath(value)
-  if (
-      path.is_absolute()
-      or "\\" in value
-      or not path.parts
-      or path.as_posix() != value
-      or any(
-          part in (".", "..")
-          or part.startswith(_TMP_SEGMENT_PREFIX)
-          or ":" in part
-          for part in path.parts
-      )
-  ):
+  """Validates that `value` is a safe relative POSIX key."""
+  reason = relative_key_error(value)
+  if reason is not None:
     raise ValidationError(
         f"{field_name} must be a normalized relative POSIX key: {value!r}"
     )
   return value
 
 
-def _validate_safe_relative_key(
+def _validate_finding_key(
     instance: Any, attribute: attrs.Attribute, value: str | None
 ) -> None:
   del instance
   if value is not None:
-    _check_safe_relative_key(value, attribute.name)
+    reason = finding_key_error(value)
+    if reason is not None:
+      raise ValidationError(f"{attribute.name} {reason}: {value!r}")
 
 
 def _validate_command(
@@ -127,8 +112,8 @@ def _validate_command(
 
 
 def _convert_int(value: Any, field_name: str) -> int:
-  """Converts `value` to an integer, rejecting booleans and non-integers."""
-  if isinstance(value, bool):
+  """Converts `value` to an int, rejecting booleans, floats, and non-ints."""
+  if isinstance(value, (bool, float)):
     raise ValidationError(f'{field_name} must be an int, got "{value}".')
   try:
     return int(value)
@@ -139,7 +124,9 @@ def _convert_int(value: Any, field_name: str) -> int:
 
 
 def _convert_optional_int(value: Any) -> int | None:
-  return None if value is None else _convert_int(value, "RunManifest.diff_workers")
+  if value is None:
+    return None
+  return _convert_int(value, "RunManifest.diff_workers")
 
 
 def _validate_diff_workers(
@@ -270,7 +257,7 @@ class RunManifest(_JsonWireModel):
       default=None, validator=_validate_optional_non_empty_str
   )
   finding_key: str | None = attrs.field(
-      default=None, validator=_validate_safe_relative_key
+      default=None, validator=_validate_finding_key
   )
   diff_workers: int | None = attrs.field(
       default=None,
@@ -324,7 +311,7 @@ class ExecutionReceipt(_JsonWireModel):
       validator=_validate_non_negative_int,
   )
   artifacts: dict[str, str] = attrs.field(
-      factory=dict, converter=_convert_artifacts
+      factory=dict, converter=_convert_artifacts, hash=False
   )
   error: str | None = attrs.field(
       default=None, validator=_validate_optional_non_empty_str
@@ -348,3 +335,4 @@ class ExecutionReceipt(_JsonWireModel):
           "ExecutionReceipt.error must be a non-empty string when exit_code is"
           f" {self.exit_code} (not 0 or 3)."
       )
+

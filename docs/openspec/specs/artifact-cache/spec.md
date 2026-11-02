@@ -38,8 +38,8 @@ freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-22' }
 
 This specification defines the normative functional requirements, atomic
 low-level storage primitives, typed client–worker protocol methods
-(`vcs-cloudrun-comms`), shared wire schemas (`RunManifest`, `ExecutionReceipt`,
-`ScanMetadata`), `<cache_root>` URI and branch-sanitization helpers
+(`vcs-cloudrun-comms`), shared wire schemas (`RunManifest`,
+`ExecutionReceipt`), `<cache_root>` URI and branch-sanitization helpers
 (`sanitize_branch_name`, `build_gcs_cache_uri`), path-traversal and symlink
 security invariants, Two-Way Door lazy-import boundary, typed exception
 hierarchy, and GCS transit bucket lifecycle/IAM configuration for
@@ -123,17 +123,7 @@ atomic read and write primitives backed by `fsspec`:
      return `Path(dest)`.
    - MUST raise `ArtifactNotFoundError` if `key` does not exist or refers to a
      directory or virtual prefix.
-5. **`exists(key: str) -> bool`:**
-   - MUST validate `key` and return `True` if and only if `key` exists under
-     `<cache_root>` as a regular file/object, returning `False` for missing keys
-     and intermediate virtual directory prefixes (e.g., `"tasks"`,
-     `"tasks/find"`).
-6. **`list_keys(prefix: str = "") -> list[str]`:**
-   - MUST validate `prefix` (permitting `""` to list the entire `<cache_root>`),
-     return a deterministically sorted `list[str]` of relative `/`-separated
-     regular file keys under `prefix` (or `[]` if `prefix` does not exist), and
-     exclude directories and any in-flight temporary staging files.
-7. **`put_json(key: str, data: dict[str, Any]) -> None` &
+5. **`put_json(key: str, data: dict[str, Any]) -> None` &
    `get_json(key: str) -> dict[str, Any]` (Atomic JSON Object Read/Write):**
    - `put_json` MUST verify that `data` is a mapping, serialize it
      deterministically as UTF-8 JSON with sorted keys and a trailing newline,
@@ -145,17 +135,15 @@ atomic read and write primitives backed by `fsspec`:
      raising `ArtifactIntegrityError` if UTF-8 decoding fails, the JSON is
      malformed or truncated, or the root JSON value is not a `dict`.
 
-#### Scenario: Atomic Round-Trip and Directory-Prefix Exclusion Across Backends
+#### Scenario: Atomic Round-Trip and Directory-Prefix Rejection Across Backends
 
 - **GIVEN** a `LocalArtifactCache` or `GcsArtifactCache` instance bound to a
   `<cache_root>`
 - **WHEN** `cache.put_json("tasks/find/input/manifest.json", {"task_id": "find"})`
   is called
-- **THEN** `cache.exists("tasks/find/input/manifest.json")` returns `True`,
-  `cache.exists("tasks/find")` returns `False`, `cache.list_keys("tasks")`
-  returns `["tasks/find/input/manifest.json"]`, and
-  `cache.get_json("tasks/find/input/manifest.json")` returns
-  `{"task_id": "find"}`.
+- **THEN** `cache.get_json("tasks/find/input/manifest.json")` returns
+  `{"task_id": "find"}`, while `cache.get_bytes("tasks/find")` raises
+  `ArtifactNotFoundError`.
 
 #### Scenario: Failed Write or Download Preserves Prior File and Leaves Zero Temporary Files
 
@@ -177,21 +165,19 @@ atomic read and write primitives backed by `fsspec`:
 
 ---
 
-### REQ-0002: Key Normalization, Cross-Platform Host Paths, Branch Sanitization & Path-Traversal Security {#req-0002}
+### REQ-0002: Key Normalization, `<cache_root>` URI Helpers, Branch Sanitization & Path-Traversal Security {#req-0002}
 
 - **CUJ UUID:** `cuj-artifact-cache-security`
 
 `ArtifactCache` MUST enforce a strict boundary between host filesystem paths,
 multi-tenant `<cache_root>` URIs, and logical cache keys:
 
-1. **Cross-Platform Host Paths & `<cache_root>` URI Helpers (`open_artifact_cache`, `sanitize_branch_name`, `build_gcs_cache_uri`):**
-   - `open_artifact_cache(uri)` MUST accept `pathlib.Path` objects, native POSIX
-     and Windows drive paths (e.g., `C:\Users\alice\.codemender-cache`), and
-     `file://` URIs (`file:///path/to/cache` or
-     `file:///C:/Users/alice/.codemender-cache`) to construct a
-     `LocalArtifactCache`, and `gs://<bucket>[/<prefix>]` URIs to construct a
-     `GcsArtifactCache`. Empty URIs or unsupported URI schemes MUST raise
-     `InvalidCacheKeyError`.
+1. **`<cache_root>` URI Helpers (`open_artifact_cache`, `sanitize_branch_name`, `build_gcs_cache_uri`):**
+   - `open_artifact_cache(uri)` MUST accept `pathlib.Path` objects and `file://`
+     URIs (`file:///path/to/cache`) to construct a `LocalArtifactCache`, and
+     `gs://<bucket>[/<prefix>]` URIs to construct a `GcsArtifactCache`. Empty
+     URIs, bare string paths without a scheme, or unsupported URI schemes MUST
+     raise `InvalidCacheKeyError`.
    - `sanitize_branch_name(branch: str) -> str` MUST strip an optional leading
      `refs/heads/` prefix, replace characters outside `[a-zA-Z0-9_.-]` with `-`,
      and return `f"{slug[:40]}-{sha256(raw_branch.encode('utf-8')).hexdigest()[:8]}"`
@@ -205,22 +191,22 @@ multi-tenant `<cache_root>` URIs, and logical cache keys:
 2. **Logical Cache Key & Single-Segment Identifier Validation:**
    - Logical cache keys MUST normalize Windows backslashes (`\`) to POSIX
      forward slashes (`/`).
-   - Logical cache keys MUST be non-empty relative strings (except `prefix=""`
-     in `list_keys`) and MUST NOT start or end with `/`, contain empty segments
-     (`//`), traversal segments (`.` or `..`), null bytes (`\x00`), Windows
-     drive prefixes (e.g., `C:`), or reserved temporary staging prefixes
-     (`.tmp.`). Any violation MUST raise `InvalidCacheKeyError`.
+   - Logical cache keys MUST be non-empty relative strings and MUST NOT start
+     or end with `/`, contain empty segments (`//`), traversal segments (`.` or
+     `..`), null bytes (`\x00`), Windows drive prefixes (e.g., `C:`), or
+     reserved temporary staging prefixes (`.tmp.`). Any violation MUST raise
+     `InvalidCacheKeyError`.
    - Domain identifiers (`task_id`, `finding_id`, `filename`) passed to typed
      protocol methods MUST each be a single non-empty path segment containing no
      `/` or `\` separators, `.`, `..`, null bytes, or `.tmp.` prefix; any
      violation MUST raise `InvalidCacheKeyError`.
 3. **Local Root Canonicalization & In-Cache Symlink Rejection:**
-   - `LocalArtifactCache` MUST canonicalize `self.root_dir = Path(root_dir).expanduser().resolve()`
-     once at initialization (permitting OS-level symbolic links in parent
-     directories *above* `root_dir`, such as macOS `/tmp` $\rightarrow$
-     `/private/tmp`), and MUST reject any symbolic link segment *inside*
-     `self.root_dir` along the resolved cache path or any path that resolves
-     outside `self.root_dir`, raising `InvalidCacheKeyError`.
+   - `LocalArtifactCache` MUST canonicalize its `root_dir` once at
+     initialization (permitting OS-level symbolic links in parent directories
+     *above* `root_dir`, such as macOS `/tmp` $\rightarrow$ `/private/tmp`),
+     and MUST reject any symbolic link segment *inside* `root_dir` along the
+     resolved cache path or any path that resolves outside `root_dir`, raising
+     `InvalidCacheKeyError`.
 
 #### Scenario: Path Traversal and Symlink Escape Rejection
 
@@ -258,15 +244,15 @@ executions never import cloud storage SDKs:
 3. **Cross-Process GCS Read-After-Write Consistency & Retries:**
    - `GcsArtifactCache` MUST disable local directory metadata caching so
      `Launcher` immediately observes objects written by `Worker` containers
-     without stale cache misses, and MUST configure automatic retries for
-     transient HTTP `429`/`5xx` responses.
+     without stale cache misses, and MUST automatically retry transient HTTP
+     `429`/`5xx` responses (see [design.md Section 3.3](design.md#33-atomic-reading-writing-and-path-resolution-design)).
 
 #### Scenario: Local Cache Operations Succeed Without Cloud Storage Packages Installed
 
 - **GIVEN** optional cloud storage packages (`gcsfs` and `google.cloud`) are
   unavailable in the Python environment
-- **WHEN** `open_artifact_cache("file:///tmp/cache")` is used to write, list,
-  and read artifacts
+- **WHEN** `open_artifact_cache("file:///tmp/cache")` is used to write and read
+  artifacts
 - **THEN** all local cache operations succeed without importing `gcsfs` or
   `google.cloud`, whereas `open_artifact_cache("gs://bucket/prefix")` raises
   `CacheConfigurationError`.
@@ -280,7 +266,7 @@ executions never import cloud storage SDKs:
 `launcher.cache` (`launcher.cache.errors`) MUST translate backend-specific
 filesystem, POSIX, and cloud storage errors into a single typed hierarchy
 rooted at `ArtifactCacheError` (carrying `op`, `uri`, and `key` context; see
-[design.md Section 5.4](design.md#54-artifactcacheerror-hierarchy--exit-code-mapping-launchercacheerrors)
+[design.md Section 5.3](design.md#53-artifactcacheerror-hierarchy--exit-code-mapping-launchercacheerrors)
 and [SPEC-WORKER (PR #73)](https://github.com/cloud-gtm/codemender-runner/pull/73)
 for `Worker` and `Launcher` process exit-code mapping):
 
@@ -296,15 +282,21 @@ for `Worker` and `Launcher` process exit-code mapping):
 3. **`ArtifactIntegrityError(ArtifactCacheError, ValueError)`:** Raised when
    `get_json` encounters invalid UTF-8, malformed JSON, or a non-`dict` root,
    `put_json` receives a non-mapping or unserializable value, or `get_manifest`
-   / `get_receipt` / `get_scan_meta` encounters a payload that fails wire schema
-   validation or whose stored `task_id` does not match the requested `task_id`.
+   / `get_receipt` encounters a payload that fails wire schema validation or
+   whose stored `task_id` does not match the requested `task_id`.
 4. **`CacheConfigurationError(ArtifactCacheError)`:** Raised when `gcsfs` is
    missing for a `gs://` URI or cloud credentials cannot be loaded.
 5. **`CachePermissionError(ArtifactCacheError, PermissionError)`:** Raised on
    cloud HTTP `401`/`403` or POSIX `EACCES`/`EPERM`.
 6. **`CacheTransientError(ArtifactCacheError, OSError)`:** Raised on cloud HTTP
-   `408`/`429`/`500`/`502`/`503`/`504`, `TimeoutError`, `ConnectionError` after
-   retries, or local `ENOSPC`.
+   `408`/`429`/`500`/`502`/`503`/`504`, `TimeoutError`, `ConnectionError`
+   (including `aiohttp` connection errors and `google.auth` `TransportError`)
+   after retries, or other OS-level I/O failures such as local `ENOSPC`.
+7. **Base `ArtifactCacheError`:** Storage conflicts (`FileExistsError`, HTTP
+   `409`/`412`) and unclassified backend exceptions MUST surface as the base
+   `ArtifactCacheError` (never `CacheTransientError`) so callers do not retry
+   deterministic failures. Translation MUST prefer structured signals
+   (`errno`, HTTP status attributes) over message text.
 
 #### Scenario: Translating Backend Permission and Transient Failures
 
@@ -327,11 +319,11 @@ into `module.wif` via [SPEC-WIF](../wif/spec.md)) for short-lived
 `GcsArtifactCache` transit hygiene and least-privilege access across `Launcher`
 and `Worker`:
 
-1. **Configurable TTL (`var.artifact_cache_ttl_days`):**
-   - `terraform/modules/gcp` MUST define `var.artifact_cache_ttl_days`
-     (`number`, `default = 3`, validated as an integer $\ge 1$).
+1. **Configurable TTL (`var.reports_bucket_ttl_days`):**
+   - `terraform/modules/gcp` MUST define `var.reports_bucket_ttl_days`
+     (`number`, `default = 7`, validated as an integer $\ge 1$).
    - `google_storage_bucket.reports` MUST configure a `Delete` lifecycle rule
-     with `condition { age = var.artifact_cache_ttl_days }` and an
+     with `condition { age = var.reports_bucket_ttl_days }` and an
      `AbortIncompleteMultipartUpload` lifecycle rule with `condition { age = 1 }`.
 2. **Immediate Expiration Without Noncurrent/Soft-Delete Retention:**
    - `google_storage_bucket.reports` MUST enforce
@@ -352,11 +344,11 @@ and `Worker`:
 #### Scenario: Default and Custom TTL Plan Verification in Terraform Tests
 
 - **GIVEN** `terraform/modules/gcp` is planned with default variables and with
-  `artifact_cache_ttl_days = 7`
+  `reports_bucket_ttl_days = 14`
 - **WHEN** `terraform test` validates the module plan
 - **THEN** `google_storage_bucket.reports` enforces disabled versioning,
   zero-second soft-delete retention, enforced public access prevention, a
-  `Delete` lifecycle rule with `age == 3` by default (and `age == 7` when
+  `Delete` lifecycle rule with `age == 7` by default (and `age == 14` when
   overridden), a 1-day `AbortIncompleteMultipartUpload` rule, and a
   `roles/storage.objectUser` binding for
   `google_service_account.runner_sa`.
@@ -368,37 +360,36 @@ and `Worker`:
 - **CUJ UUID:** `cuj-artifact-cache-typed-protocol`
 
 `launcher.cache` MUST export the shared wire schemas (`RunManifest`,
-`ExecutionReceipt`, `ScanMetadata`) and expose all typed protocol methods
-required by `Worker` ([SPEC-WORKER / PR #73](https://github.com/cloud-gtm/codemender-runner/pull/73))
+`ExecutionReceipt`) and expose all typed protocol methods required by `Worker`
+([SPEC-WORKER / PR #73](https://github.com/cloud-gtm/codemender-runner/pull/73))
 and `Launcher` on `ArtifactCache` so neither peer hardcodes internal cache paths
 or imports the other (`Launcher --> ArtifactCache <-- Worker`):
 
-1. **Wire Schemas (`RunManifest`, `ExecutionReceipt`, `ScanMetadata`):**
+1. **Wire Schemas (`RunManifest`, `ExecutionReceipt`):**
    - **`RunManifest` ([design.md Section 5.1](design.md#51-runmanifest-taskstask_idinputmanifestjson)):**
      Immutable value object (`command`, `task_id`, `base_ref`, `finding_key`,
-     `diff_workers`, `log_level`, `extra_args`) normalizing `"find"` $\rightarrow$
-     `"find-diff"`, validating `command` in `{"init", "find-diff", "fix", "verify"}`,
-     accepting `"diff_base"` for `base_ref` (required when `command == "find-diff"`),
-     requiring `finding_key` when `command in {"fix", "verify"}`, and validating
+     `diff_workers`, `log_level`, `extra_args`) validating `command` in
+     `{"init", "find-diff", "fix", "verify"}`, requiring `base_ref` when
+     `command == "find-diff"`, requiring a canonical `findings/<id>.sarif`
+     `finding_key` when `command in {"fix", "verify"}`, and validating
      `diff_workers` in `1..16` ([SPEC-FIND-DIFF `REQ-0002`](../find-diff/spec.md)).
    - **`ExecutionReceipt` ([design.md Section 5.2](design.md#52-executionreceipt-taskstask_idoutputreceiptjson)):**
      Immutable value object (`status`, `exit_code`, `command`, `task_id`,
      `started_at`, `completed_at`, `duration_seconds`, `finding_count`,
-     `artifacts`, `error`) validating `status` in
-     `{"succeeded", "failed", "cancelled", "no_fix", "error"}`, preserving
-     `error=None` on `exit_code == 0` and normal `cm-runner` exit `3`
+     `artifacts`, `error`) validating `status` in `{"SUCCESS", "FAILURE"}` and
+     `command` as a non-empty string (canonical commands `"init"`,
+     `"find-diff"`, `"fix"`, `"verify"`, or `"unknown"` when `Worker` writes a
+     failure receipt after a manifest load error), preserving `error=None` on
+     `exit_code == 0` and normal `cm-runner` exit `3`
      ([SPEC-FIX `REQ-0007`](../fix/spec.md),
      [SPEC-GHA-FIX `REQ-0005.5`](../github-actions-fix/spec.md)), and
      preserving non-dismissed `finding_count` ([SPEC-VERIFY `REQ-0005`](../verify/spec.md)).
-   - **`ScanMetadata` ([design.md Section 5.3](design.md#53-scanmetadata-sharedscan-metajson), [SPEC-GHA-FIX `REQ-0004`, `REQ-0009`](../github-actions-fix/spec.md)):**
-     Immutable value object (`base_ref`, `head_sha`, `finding_ids`,
-     `fingerprints`) with single-segment validation on each `finding_id`.
 2. **Typed Protocol Methods on `ArtifactCache`:**
    - **`get_manifest(task_id: str) -> RunManifest` &
      `put_manifest(task_id: str, manifest: RunManifest) -> None`:** Atomically
      read and write `RunManifest` at `"tasks/<task_id>/input/manifest.json"`,
      validating `task_id` as a single safe segment, raising
-     `InvalidCacheKeyError` if `put_manifest` receives a non-empty
+     `InvalidCacheKeyError` if `put_manifest` receives
      `manifest.task_id != task_id`, and translating schema or stored `task_id`
      mismatch errors in `get_manifest` into `ArtifactIntegrityError`.
    - **`get_repo_archive(dest: Path) -> Path` &
@@ -426,9 +417,6 @@ or imports the other (`Launcher --> ArtifactCache <-- Worker`):
      safe segment, raising `InvalidCacheKeyError` if `put_receipt` receives
      `receipt.task_id != task_id`, and translating schema or stored `task_id`
      mismatch errors in `get_receipt` into `ArtifactIntegrityError`.
-   - **`get_scan_meta() -> ScanMetadata` &
-     `put_scan_meta(meta: ScanMetadata) -> None`:** Atomically read and write
-     `ScanMetadata` at `"shared/scan-meta.json"` via `get_json` / `put_json`.
 
 #### Scenario: End-to-End Typed Protocol Flow Between `Launcher` and `Worker`
 

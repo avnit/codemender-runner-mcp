@@ -1,4 +1,4 @@
-# Governing: ADR-0008, SPEC-GHA/REQ-0004
+# Governing: ADR-0008, ADR-0009, SPEC-GHA/REQ-0004, SPEC-ARTIFACT-CACHE/REQ-0003
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
@@ -11,12 +11,14 @@ requires-python = ">=3.11"
 dependencies = [
     "attrs>=23.1.0",
     "codemender",
+    "fsspec>=2024.2.0",
 ]
 
 [project.optional-dependencies]
 cloudrun = [
-    "google-cloud-storage>=2.14.0",
+    "gcsfs>=2024.2.0",
     "google-cloud-run>=0.10.0",
+    "google-cloud-storage>=2.14.0",
 ]
 
 [project.scripts]

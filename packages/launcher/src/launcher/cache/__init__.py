@@ -12,16 +12,36 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0007, ADR-0009, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0004, SPEC-WORKER/REQ-0006
-"""ArtifactCache protocol seam, wire models, and safe archive unpacking utilities."""
+# Governing: ADR-0007, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0003, SPEC-ARTIFACT-CACHE/REQ-0004, SPEC-ARTIFACT-CACHE/REQ-0006, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0004, SPEC-WORKER/REQ-0006
+"""ArtifactCache public interface, factory, wire models, and archive helpers."""
+
+from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Any
 
 from launcher.cache.archive import (
     flatten_repo_if_nested,
     unpack_tar_gz_preserving_permissions,
 )
+from launcher.cache.base import (
+    ArtifactCache,
+    build_gcs_cache_uri,
+    normalize_cache_key,
+    sanitize_branch_name,
+    validate_single_segment,
+)
+from launcher.cache.errors import (
+    ArtifactCacheError,
+    ArtifactIntegrityError,
+    ArtifactNotFoundError,
+    CacheConfigurationError,
+    CachePermissionError,
+    CacheTransientError,
+    InvalidCacheKeyError,
+    translate_fs_error,
+)
+from launcher.cache.local import LocalArtifactCache
 from launcher.cache.models import (
     ExecutionReceipt,
     MAX_DIFF_WORKERS,
@@ -32,62 +52,76 @@ from launcher.cache.models import (
     ValidationError,
 )
 
-
-# TODO(b/575622914): Replace protocol/error stubs once SPEC-ARTIFACT-CACHE lands in launcher.cache.
-class ArtifactCacheError(Exception):
-  """Base exception for ArtifactCache storage and protocol errors."""
+if TYPE_CHECKING:
+  from launcher.cache.gcs import GcsArtifactCache
 
 
-class InvalidCacheKeyError(ArtifactCacheError, ValueError):
-  """Raised when a cache key, segment identifier, or URI is invalid."""
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0003, ADR-0009
+def open_artifact_cache(uri: str | Path, **kwargs: Any) -> ArtifactCache:
+  """Opens a `LocalArtifactCache` or `GcsArtifactCache` based on URI scheme.
+
+  Enforces ADR-0009's Two-Way Door lazy-import invariant: `GcsArtifactCache`
+  (and `gcsfs`) is imported only when `uri` uses the `'gs://'` scheme.
+
+  Args:
+    uri: Local directory `Path`, `file://` URI, or `gs://<bucket>[/<prefix>]`
+      URI.
+    **kwargs: Optional backend keyword arguments forwarded to the cache class.
+
+  Returns:
+    Configured `LocalArtifactCache` or `GcsArtifactCache` instance.
+
+  Raises:
+    InvalidCacheKeyError: If `uri` is empty, contains NUL bytes, or does not
+      use a supported `'file://'` or `'gs://'` scheme.
+    CacheConfigurationError: If `uri` is a `gs://` URI and `gcsfs` or cloud
+      credentials are unavailable.
+  """
+  if isinstance(uri, Path):
+    return LocalArtifactCache(uri, **kwargs)
+
+  if not isinstance(uri, str) or not uri.strip() or "\x00" in uri:
+    raise InvalidCacheKeyError(
+        "Cache URI must be a non-empty string or Path without NUL bytes",
+        op="open_artifact_cache",
+        uri=str(uri),
+    )
+
+  raw = uri.strip()
+  protocol, sep, _ = raw.lower().partition("://")
+  if not sep or not protocol:
+    # Missing "://" or nothing before "://" falls through to the default case.
+    protocol = ""
+
+  match protocol:
+    case "file":
+      return LocalArtifactCache(raw, **kwargs)
+    case "gs":
+      # pylint: disable-next=import-outside-toplevel
+      from launcher.cache.gcs import GcsArtifactCache
+
+      return GcsArtifactCache(raw, **kwargs)
+    case _:
+      raise InvalidCacheKeyError(
+          f"Unsupported ArtifactCache URI scheme {protocol!r}; expected"
+          " 'file://' or 'gs://'",
+          op="open_artifact_cache",
+          uri=raw,
+      )
 
 
-class ArtifactNotFoundError(ArtifactCacheError, FileNotFoundError):
-  """Raised when a requested cache key or local source file does not exist."""
+def __getattr__(name: str) -> Any:
+  """Lazily resolves `GcsArtifactCache` on `launcher.cache` (PEP 562).
 
+  Per ADR-0009's Two-Way Door invariant, importing `launcher.cache` or opening
+  a local `file://` cache must never import `gcsfs` or Google Cloud libraries
+  (which live in the optional `codemender-launcher[cloudrun]` extra). Module
+  `__getattr__` defers importing `launcher.cache.gcs` until a caller explicitly
+  accesses `launcher.cache.GcsArtifactCache`.
+  """
+  if name == "GcsArtifactCache":
+    # pylint: disable-next=import-outside-toplevel
+    from launcher.cache.gcs import GcsArtifactCache
 
-class ArtifactIntegrityError(ArtifactCacheError, ValueError):
-  """Raised when a cached JSON or wire model payload is corrupt or invalid."""
-
-
-class ArtifactCache(Protocol):
-  """Protocol seam for ArtifactCache operations required by `Worker`."""
-
-  def get_manifest(self, task_id: str) -> RunManifest: ...
-  def get_repo_archive(self, dest: Path | str) -> Path: ...
-  def get_finding(self, finding_key: str, dest: Path | str) -> Path: ...
-  def put_task_output(
-      self, task_id: str, filename: str, src: Path | str
-  ) -> str: ...
-  def put_receipt(self, task_id: str, receipt: ExecutionReceipt) -> None: ...
-
-
-def open_artifact_cache(uri: str | Path) -> ArtifactCache:
-  """Opens an `ArtifactCache` instance for `uri`."""
-  if not isinstance(uri, Path) and (
-      not isinstance(uri, str) or not uri.strip() or "\x00" in uri
-  ):
-    raise InvalidCacheKeyError(f"Invalid cache URI: {uri!r}")
-  raise ArtifactCacheError(
-      f"ArtifactCache backend for {uri!r} is not yet wired"
-      " (pending SPEC-ARTIFACT-CACHE)."
-  )
-
-
-__all__ = [
-    "ArtifactCache",
-    "ArtifactCacheError",
-    "ArtifactIntegrityError",
-    "ArtifactNotFoundError",
-    "ExecutionReceipt",
-    "InvalidCacheKeyError",
-    "MAX_DIFF_WORKERS",
-    "MIN_DIFF_WORKERS",
-    "RunManifest",
-    "VALID_RECEIPT_STATUSES",
-    "VALID_WORKER_COMMANDS",
-    "ValidationError",
-    "flatten_repo_if_nested",
-    "open_artifact_cache",
-    "unpack_tar_gz_preserving_permissions",
-]
+    return GcsArtifactCache
+  raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

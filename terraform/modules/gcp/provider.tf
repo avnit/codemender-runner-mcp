@@ -15,9 +15,10 @@
 terraform {
   required_version = ">= 1.5.0"
   required_providers {
+    # >= 5.22.0: google_storage_bucket.soft_delete_policy (storage.tf).
     google = {
       source  = "hashicorp/google"
-      version = ">= 5.0.0"
+      version = ">= 5.22.0"
     }
     google-beta = {
       source  = "hashicorp/google-beta"

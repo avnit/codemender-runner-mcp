@@ -17,16 +17,22 @@ data "google_project" "project" {
   depends_on = [google_project_service.enabled_services["cloudresourcemanager.googleapis.com"]]
 }
 
-# GCS Bucket for HTML & Partition Scan Reports
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0005, ADR-0005, ADR-0009
+# GCS Bucket for HTML & Partition Scan Reports and ArtifactCache Transit
 resource "google_storage_bucket" "reports" {
   name                        = var.reports_bucket_name != "" ? var.reports_bucket_name : "${var.resource_prefix}-reports-${var.project_id}"
   location                    = var.region
   project                     = var.project_id
   force_destroy               = true
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
 
   versioning {
-    enabled = true
+    enabled = false
+  }
+
+  soft_delete_policy {
+    retention_duration_seconds = 0
   }
 
   lifecycle_rule {
@@ -35,6 +41,15 @@ resource "google_storage_bucket" "reports" {
     }
     action {
       type = "Delete"
+    }
+  }
+
+  lifecycle_rule {
+    condition {
+      age = 1
+    }
+    action {
+      type = "AbortIncompleteMultipartUpload"
     }
   }
 

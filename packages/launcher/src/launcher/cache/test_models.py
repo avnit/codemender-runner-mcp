@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0006
-"""Unit tests for ArtifactCache wire models (RunManifest and ExecutionReceipt)."""
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0006, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0006
+"""Unit tests for ArtifactCache wire models."""
 
 import unittest
 
 import attrs
-from launcher.cache import (
+from launcher.cache.models import (
     ExecutionReceipt,
     RunManifest,
     ValidationError,
@@ -62,8 +62,9 @@ class TestRunManifest(unittest.TestCase):
 
   def test_validation_invariants(self):
     invalid_inputs = [
-        {"command": "find", "task_id": "t1", "base_ref": "main"},
         {"command": "unknown", "task_id": "t1"},
+        {"command": "find", "task_id": "t1", "base_ref": "main"},
+        {"command": "init", "task_id": ""},
         {"command": "init", "task_id": "../escape"},
         {"command": "init", "task_id": "sub/task"},
         {"command": "init", "task_id": "."},
@@ -93,6 +94,21 @@ class TestRunManifest(unittest.TestCase):
             "finding_key": "C:findings/f1.sarif",
         },
         {
+            "command": "fix",
+            "task_id": "fix-1",
+            "finding_key": "shared/code.tar.gz",
+        },
+        {
+            "command": "fix",
+            "task_id": "fix-1",
+            "finding_key": "findings/finding-001.json",
+        },
+        {
+            "command": "fix",
+            "task_id": "fix-1",
+            "finding_key": "finding-001",
+        },
+        {
             "command": "find-diff",
             "task_id": "find",
             "base_ref": "main",
@@ -109,6 +125,12 @@ class TestRunManifest(unittest.TestCase):
             "task_id": "find",
             "base_ref": "main",
             "diff_workers": True,
+        },
+        {
+            "command": "find-diff",
+            "task_id": "find",
+            "base_ref": "main",
+            "diff_workers": 2.5,
         },
         {
             "command": "find-diff",
@@ -175,11 +197,14 @@ class TestExecutionReceipt(unittest.TestCase):
         {"status": "FAILURE", "exit_code": 2, "error": None},
         {"status": "FAILURE", "exit_code": 143, "error": ""},
         {"status": "UNKNOWN"},
+        {"command": ""},
         {"task_id": "../escape"},
         {"task_id": ".tmp.find"},
         {"task_id": "C:find"},
+        {"exit_code": 1.5, "status": "FAILURE", "error": "err"},
         {"duration_seconds": -1.0},
         {"finding_count": -1},
+        {"finding_count": 1.5},
         {"artifacts": {"log": "../escape.log"}},
         {"artifacts": {"log": "tasks/find/output/.tmp.runner.log"}},
     ]
@@ -188,6 +213,13 @@ class TestExecutionReceipt(unittest.TestCase):
         with self.assertRaises(ValidationError):
           ExecutionReceipt.from_dict(self._base_payload(**overrides))
 
+  def test_hashable_despite_artifacts_mapping(self):
+    first = ExecutionReceipt.from_dict(self._base_payload())
+    second = ExecutionReceipt.from_dict(self._base_payload())
+    self.assertEqual(hash(first), hash(second))
+    self.assertEqual(len({first, second}), 1)
+
 
 if __name__ == "__main__":
   unittest.main()
+

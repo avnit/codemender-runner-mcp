@@ -39,8 +39,33 @@ run "storage_resources_default_names" {
   }
 
   assert {
-    condition     = tolist(tolist(google_storage_bucket.reports.lifecycle_rule)[0].condition)[0].age == 7
-    error_message = "Reports/transit bucket lifecycle rule must enforce a 7-day TTL."
+    condition     = google_storage_bucket.reports.uniform_bucket_level_access == true
+    error_message = "Reports/transit bucket must enforce uniform_bucket_level_access."
+  }
+
+  assert {
+    condition     = google_storage_bucket.reports.public_access_prevention == "enforced"
+    error_message = "Reports/transit bucket must enforce public_access_prevention."
+  }
+
+  assert {
+    condition     = tolist(google_storage_bucket.reports.versioning)[0].enabled == false
+    error_message = "Reports/transit bucket must disable object versioning for immediate transit expiration."
+  }
+
+  assert {
+    condition     = tolist(google_storage_bucket.reports.soft_delete_policy)[0].retention_duration_seconds == 0
+    error_message = "Reports/transit bucket must set soft_delete_policy retention_duration_seconds to 0."
+  }
+
+  assert {
+    condition     = tolist(tolist(google_storage_bucket.reports.lifecycle_rule)[0].condition)[0].age == 7 && tolist(tolist(google_storage_bucket.reports.lifecycle_rule)[0].action)[0].type == "Delete"
+    error_message = "Reports/transit bucket lifecycle rule must enforce a 7-day Delete TTL by default."
+  }
+
+  assert {
+    condition     = tolist(tolist(google_storage_bucket.reports.lifecycle_rule)[1].condition)[0].age == 1 && tolist(tolist(google_storage_bucket.reports.lifecycle_rule)[1].action)[0].type == "AbortIncompleteMultipartUpload"
+    error_message = "Reports/transit bucket must abort incomplete multipart uploads after 1 day."
   }
 }
 
