@@ -14,8 +14,8 @@
 
 """`cm-runner find-diff` -- impact-aware differential vulnerability scan.
 
-Runs CodeMender's differential scanner (`cm find <repo> -y --diff=<base>
---diff-workers=<N> --fail-on NONE`) followed by report extraction (`cm report
+Runs CodeMender's differential scanner (`cm find <repo> -y --bypass-warning
+--diff=<base> --diff-workers=<N> --fail-on NONE`) followed by report extraction (`cm report
 --format sarif`, and `cm report --format md` when `--out` is given) through
 `CmAdapter`.
 
@@ -166,11 +166,14 @@ def run(
     return err
 
   # Step 1: Differential scan via `cm find --diff`.
+  # `--bypass-warning` accepts `cm`'s responsibility warning on the caller's
+  # behalf, matching fix.py and verify.py; there is no terminal to ask in CI.
   find_result = adapter.run(
       [
           "find",
           cfg.repo.as_posix(),
           "-y",
+          "--bypass-warning",
           f"--diff={cfg.base}",
           f"--diff-workers={cfg.diff_workers}",
           "--fail-on",

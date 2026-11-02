@@ -56,7 +56,7 @@ exposes this native capability as a first-class subcommand of the generic
 ### Goals
 
 - Execute differential scanning via a two-step `CmAdapter` flow:
-  `cm find <repo> -y --diff=<base> --diff-workers=<N> --fail-on NONE` followed
+  `cm find <repo> -y --bypass-warning --diff=<base> --diff-workers=<N> --fail-on NONE` followed
   by `cm report --format sarif` (and `cm report --format md` when `--out DIR`
   is specified).
 - Keep the CLI surface minimal (`--repo`, `--base`, `--out`, `--diff-workers`),
@@ -93,7 +93,7 @@ exposes this native capability as a first-class subcommand of the generic
 ### Decision 1: Two-Step `cm find --diff` + `cm report --format sarif` Execution via `CmAdapter`
 
 - **Choice:** First invoke
-  `cm find <repo> -y --diff=<base> --diff-workers=<N> --fail-on NONE` through
+  `cm find <repo> -y --bypass-warning --diff=<base> --diff-workers=<N> --fail-on NONE` through
   `codemender.cm.CmAdapter` using `cm`'s built-in defaults (`1`-hop depth, `10`
   max neighbors, sandbox intact) and `<N>` concurrent workers (default `8`, see
   Decision 5) to scan the diff and persist findings into
@@ -195,7 +195,7 @@ flowchart TD
     gitCheck["codemender.vcs.git.is_git_repository(cfg.repo)
 & codemender.vcs.git.ref_exists(cfg.repo, cfg.base)"]
     cmFind["CmAdapter.run()
-cm find <repo> -y --diff=<base> --diff-workers=<N> --fail-on NONE"]
+cm find <repo> -y --bypass-warning --diff=<base> --diff-workers=<N> --fail-on NONE"]
     cmReportSarif["CmAdapter.run()
 cm report --format sarif
 & Parse SARIF 2.1.0 JSON"]

@@ -468,6 +468,7 @@ class TestFindDiffAdapterExecutionAndSarifOutput(FindDiffTestBase):
                     "find",
                     repo_path.as_posix(),
                     "-y",
+                    "--bypass-warning",
                     "--diff=origin/main",
                     "--diff-workers=8",
                     "--fail-on",
@@ -523,6 +524,7 @@ class TestFindDiffAdapterExecutionAndSarifOutput(FindDiffTestBase):
             "find",
             repo_path.as_posix(),
             "-y",
+            "--bypass-warning",
             "--diff=origin/main",
             "--diff-workers=16",
             "--fail-on",
@@ -565,7 +567,7 @@ case "$*" in
   --version)
     echo "cm version 0.9.0"
     ;;
-  "find {os.path.realpath(self.repo)} -y --diff=origin/main --diff-workers=8 --fail-on NONE")
+  "find {os.path.realpath(self.repo)} -y --bypass-warning --diff=origin/main --diff-workers=8 --fail-on NONE")
     echo "Impact-Aware PR Delta Scan"
     echo "Scanning diff..." >&2
     exit 0
@@ -618,6 +620,7 @@ class TestFindDiffOutArtifacts(FindDiffTestBase):
                 "find",
                 str(repo_path),
                 "-y",
+                "--bypass-warning",
                 "--diff=origin/main",
                 "--diff-workers=8",
                 "--fail-on",
@@ -665,6 +668,7 @@ class TestFindDiffFailureAtomicity(FindDiffTestBase):
         "find",
         str(repo_path),
         "-y",
+        "--bypass-warning",
         "--diff=HEAD",
         "--diff-workers=8",
         "--fail-on",
@@ -697,6 +701,7 @@ class TestFindDiffFailureAtomicity(FindDiffTestBase):
         "find",
         str(repo_path),
         "-y",
+        "--bypass-warning",
         "--diff=HEAD",
         "--diff-workers=8",
         "--fail-on",
@@ -1118,7 +1123,7 @@ esac
     self.assert_stdout_is_one_json_object(res)
     calls = self._cm_calls()
     self.assertIn(
-        f"find {os.path.realpath(self.repo)} -y --diff=HEAD --diff-workers=16 --fail-on NONE",
+        f"find {os.path.realpath(self.repo)} -y --bypass-warning --diff=HEAD --diff-workers=16 --fail-on NONE",
         calls,
     )
 

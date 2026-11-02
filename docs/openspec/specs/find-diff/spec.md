@@ -26,7 +26,7 @@ SARIF `stdout` output contract, and `--out` artifact contract for the
 
 `cm-runner find-diff` provides a streamlined CLI command built on CodeMender's
 native impact-aware differential scanner
-(`cm find <repo> -y --diff=<base> --diff-workers=<N> --fail-on NONE`) followed
+(`cm find <repo> -y --bypass-warning --diff=<base> --diff-workers=<N> --fail-on NONE`) followed
 by report extraction (`cm report --format sarif`, and `cm report --format md`
 when `--out` is specified). It relies on `cm`'s built-in defaults for diff
 filtering and impact resolution while configuring `--diff-workers` (default
@@ -194,6 +194,7 @@ findings to those relevant to the diff:
    using `cm`'s built-in defaults for diff filtering, neighbor depth, and
    sandbox isolation, with `--diff-workers=<cfg.diff_workers>`:
    - Positional target `<repo_path>` and non-interactive confirmation flag `-y`.
+   - `--bypass-warning` to bypass the interactive responsibility confirmation in non-interactive CI environments (matching `cm fix` and `cm verify`).
    - `--diff=<base_ref>` (where `<base_ref>` defaults to `HEAD`).
    - `--diff-workers=<cfg.diff_workers>` (`DEFAULT_DIFF_WORKERS = 8` unless the
      caller passes `--diff-workers`; valid range `1..16`, as supported by `cm`).
