@@ -609,7 +609,7 @@ executed by `make test`:
    - Verify `0o755` executable mode preservation and single-directory wrapper
      flattening (`my-repo/.git` -> `/tmp/work/repo/.git`).
 5. **End-to-End 4-Step Task Execution Tests (`find-diff`, `fix`, `verify`):**
-   - Using `_FakeArtifactCache` (or `LocalArtifactCache(tmp_path)`), an injected
+   - Using `LocalArtifactCache(self.cache_dir)`, an injected
      `CmAdapter`, and mocked `codemender.runner.commands.{init,find_diff,fix,verify}.run`
      handlers, verify that `Worker.run_task` stages `shared/code.tar.gz` and
      `findings/finding-001.sarif`, invokes the command handlers with the expected

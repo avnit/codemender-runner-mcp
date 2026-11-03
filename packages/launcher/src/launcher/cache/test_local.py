@@ -249,6 +249,7 @@ def test_parse_local_uri_or_path_validation() -> None:
       "",
       "   ",
       "file://",
+      "file://remotehost/tmp/cache",
       "/tmp/bad\x00path",
       Path("/tmp/bad\x00path"),
       "file:///tmp/bad%00path",

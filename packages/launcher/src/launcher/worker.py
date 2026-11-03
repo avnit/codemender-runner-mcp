@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0001, ADR-0003, ADR-0005, ADR-0007, ADR-0008, ADR-0009, SPEC-WORKER/REQ-0001, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0004, SPEC-WORKER/REQ-0005, SPEC-WORKER/REQ-0006, SPEC-WORKER/REQ-0007
+# Governing: ADR-0001, ADR-0002, ADR-0003, ADR-0005, ADR-0007, ADR-0008, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0004, SPEC-ARTIFACT-CACHE/REQ-0006, SPEC-WORKER/REQ-0001, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0004, SPEC-WORKER/REQ-0005, SPEC-WORKER/REQ-0006, SPEC-WORKER/REQ-0007
 """Sandbox container worker (`cm-worker`) executing tasks over ArtifactCache."""
 
 from __future__ import annotations
@@ -52,10 +52,10 @@ from launcher.cache import InvalidCacheKeyError
 from launcher.cache import open_artifact_cache
 from launcher.cache import RunManifest
 from launcher.cache import unpack_tar_gz_preserving_permissions
-from launcher.cache import ValidationError
-from launcher.cache.models import _check_safe_path_segment
-from launcher.cache.models import _validate_non_empty_str
-from launcher.cache.models import _validate_safe_path_segment
+from launcher.cache import validate_single_segment
+from launcher.validators import ValidationError
+from launcher.validators import validate_non_empty_str
+from launcher.validators import validate_safe_path_segment
 
 logger = logging.getLogger(__name__)
 
@@ -115,11 +115,11 @@ class WorkerConfig:
 
   cache_uri: str = attrs.field(
       converter=_strip_str,
-      validator=_validate_non_empty_str,
+      validator=validate_non_empty_str,
   )
   task_id: str = attrs.field(
       converter=_strip_str,
-      validator=_validate_safe_path_segment,
+      validator=validate_safe_path_segment,
   )
   work_dir: Path = attrs.field(
       default=DEFAULT_WORK_DIR,
@@ -388,8 +388,8 @@ class Worker:
     if exit_code not in (EXIT_OK, EXIT_EXECUTION_FAILURE) and not error_message:
       error_message = f"Worker exited with code {exit_code}."
     try:
-      safe_task_id = _check_safe_path_segment(task_id, "task_id")
-    except ValidationError:
+      safe_task_id = validate_single_segment(task_id, field="task_id")
+    except (InvalidCacheKeyError, ValidationError):
       safe_task_id = "invalid-task-id"
     return ExecutionReceipt(
         status="SUCCESS" if exit_code == EXIT_OK else "FAILURE",

@@ -33,6 +33,46 @@ from launcher.cache.errors import (
 )
 
 
+def _parse_file_uri(raw: str) -> Path:
+  """Parses and validates a `file://` URI into a local filesystem `Path`."""
+  parsed = urlparse(raw)
+  if parsed.params or parsed.query or parsed.fragment:
+    raise InvalidCacheKeyError(
+        f"file:// URI must not contain params, query, or fragment: {raw!r}",
+        op="open_artifact_cache",
+        uri=raw,
+    )
+  if parsed.netloc not in ("", "localhost"):
+    raise InvalidCacheKeyError(
+        f"file:// URI authority {parsed.netloc!r} is not supported: {raw!r}",
+        op="open_artifact_cache",
+        uri=raw,
+    )
+  if hasattr(Path, "from_uri"):
+    if not parsed.path:
+      raise InvalidCacheKeyError(
+          f"file:// URI must specify an absolute path: {raw!r}",
+          op="open_artifact_cache",
+          uri=raw,
+      )
+    try:
+      return Path.from_uri(raw)  # type: ignore[attr-defined]
+    except ValueError as exc:
+      raise InvalidCacheKeyError(
+          f"file:// URI must specify a valid path: {raw!r}",
+          op="open_artifact_cache",
+          uri=raw,
+      ) from exc
+  path_str = unquote(parsed.path)
+  if not path_str.startswith("/"):
+    raise InvalidCacheKeyError(
+        f"file:// URI must specify an absolute path: {raw!r}",
+        op="open_artifact_cache",
+        uri=raw,
+    )
+  return Path(path_str)
+
+
 # Governing: SPEC-ARTIFACT-CACHE/REQ-0002
 def parse_local_uri_or_path(uri_or_path: str | Path) -> Path:
   """Converts a local `Path`, path string, or `file://` URI into a `Path`."""
@@ -59,45 +99,7 @@ def parse_local_uri_or_path(uri_or_path: str | Path) -> Path:
     )
 
   raw = uri_or_path.strip()
-  if not raw.startswith("file:"):
-    return Path(raw)
-
-  parsed = urlparse(raw)
-  if parsed.params or parsed.query or parsed.fragment:
-    raise InvalidCacheKeyError(
-        "file:// URI must not contain params, query, or fragment:"
-        f" {raw!r}",
-        op="open_artifact_cache",
-        uri=raw,
-    )
-
-  # `Path.from_uri` was added in Python 3.13; fall back to `urlparse`/`unquote`
-  # on Python 3.11 and 3.12 (`requires-python = ">=3.11"`).
-  if hasattr(Path, "from_uri"):
-    try:
-      path = Path.from_uri(raw)  # type: ignore[attr-defined]
-    except ValueError as exc:
-      raise InvalidCacheKeyError(
-          f"file:// URI must specify a valid path: {raw!r}",
-          op="open_artifact_cache",
-          uri=raw,
-      ) from exc
-  else:
-    if parsed.netloc not in ("", "localhost"):
-      raise InvalidCacheKeyError(
-          f"file:// URI authority {parsed.netloc!r} is not supported: {raw!r}",
-          op="open_artifact_cache",
-          uri=raw,
-      )
-    path_str = unquote(parsed.path)
-    if not path_str.startswith("/"):
-      raise InvalidCacheKeyError(
-          f"file:// URI must specify an absolute path: {raw!r}",
-          op="open_artifact_cache",
-          uri=raw,
-      )
-    path = Path(path_str)
-
+  path = _parse_file_uri(raw) if raw.startswith("file:") else Path(raw)
   if "\x00" in str(path):
     raise InvalidCacheKeyError(
         f"file:// URI must specify a valid path without NUL bytes: {raw!r}",

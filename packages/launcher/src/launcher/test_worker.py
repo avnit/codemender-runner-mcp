@@ -12,23 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: SPEC-WORKER/REQ-0001, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0004, SPEC-WORKER/REQ-0005, SPEC-WORKER/REQ-0006, SPEC-WORKER/REQ-0007
+# Governing: ADR-0002, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0004, SPEC-ARTIFACT-CACHE/REQ-0006, SPEC-WORKER/REQ-0001, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0004, SPEC-WORKER/REQ-0005, SPEC-WORKER/REQ-0006, SPEC-WORKER/REQ-0007
 """Unit tests for Worker (`launcher.worker`) and `cm-worker` CLI entrypoint."""
 
-from collections.abc import Mapping
 import io
 import json
 import logging
 import os
-from pathlib import Path, PurePosixPath
-import shutil
+from pathlib import Path
 import signal
 import sys
 import tarfile
 import tempfile
 import threading
 import time
-from typing import Any
 import unittest
 from unittest import mock
 
@@ -40,10 +37,9 @@ from launcher.base import (
     EXIT_USAGE_ERROR,
 )
 from launcher.cache import (
-    ArtifactCacheError,
-    ArtifactIntegrityError,
-    ArtifactNotFoundError,
-    ExecutionReceipt,
+    CachePermissionError,
+    CacheTransientError,
+    LocalArtifactCache,
     RunManifest,
     ValidationError,
 )
@@ -55,85 +51,6 @@ from launcher.worker import (
     WorkerConfig,
     main,
 )
-
-
-class _FakeArtifactCache:
-  """In-test local directory test double implementing the `ArtifactCache` protocol."""
-
-  def __init__(self, root_dir: Path) -> None:
-    self.root_dir = root_dir
-    self.root_dir.mkdir(parents=True, exist_ok=True)
-
-  def get_bytes(self, key: str) -> bytes:
-    path = self.root_dir / key
-    if not path.is_file():
-      raise ArtifactNotFoundError(f"Missing key: {key}")
-    return path.read_bytes()
-
-  def put_json(self, key: str, data: Mapping[str, Any]) -> None:
-    path = self.root_dir / key
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(dict(data)), encoding="utf-8")
-
-  def get_manifest(self, task_id: str) -> RunManifest:
-    key = f"tasks/{task_id}/input/manifest.json"
-    try:
-      raw = json.loads(self.get_bytes(key).decode("utf-8"))
-      manifest = RunManifest.from_dict(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError, ValidationError) as exc:
-      raise ArtifactIntegrityError(str(exc)) from exc
-    if manifest.task_id != task_id:
-      raise ArtifactIntegrityError("Manifest task_id mismatch.")
-    return manifest
-
-  def put_manifest(self, task_id: str, manifest: RunManifest) -> None:
-    self.put_json(f"tasks/{task_id}/input/manifest.json", manifest.to_dict())
-
-  def get_repo_archive(self, dest: Path | str) -> Path:
-    src = self.root_dir / "shared/code.tar.gz"
-    if not src.is_file():
-      raise ArtifactNotFoundError("Missing shared/code.tar.gz")
-    dest_path = Path(dest)
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(src, dest_path)
-    return dest_path
-
-  def put_repo_archive(self, src: Path | str) -> None:
-    dest = self.root_dir / "shared/code.tar.gz"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(src, dest)
-
-  def get_finding(self, finding_key: str, dest: Path | str) -> Path:
-    posix = PurePosixPath(finding_key)
-    rel = f"findings/{posix.name.removesuffix('.sarif')}.sarif" if len(posix.parts) == 1 else finding_key
-    src = self.root_dir / rel
-    if not src.is_file():
-      raise ArtifactNotFoundError(f"Missing finding: {finding_key}")
-    dest_path = Path(dest)
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(src, dest_path)
-    return dest_path
-
-  def put_finding(self, finding_id: str, src: Path | str) -> str:
-    key = f"findings/{finding_id.removesuffix('.sarif')}.sarif"
-    dest = self.root_dir / key
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(src, dest)
-    return key
-
-  def put_task_output(self, task_id: str, filename: str, src: Path | str) -> str:
-    key = f"tasks/{task_id}/output/{filename}"
-    dest = self.root_dir / key
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(src, dest)
-    return key
-
-  def get_receipt(self, task_id: str) -> ExecutionReceipt:
-    raw = json.loads(self.get_bytes(f"tasks/{task_id}/output/receipt.json").decode("utf-8"))
-    return ExecutionReceipt.from_dict(raw)
-
-  def put_receipt(self, task_id: str, receipt: ExecutionReceipt) -> None:
-    self.put_json(f"tasks/{task_id}/output/receipt.json", receipt.to_dict())
 
 
 def _create_repo_tar_gz(
@@ -191,16 +108,18 @@ class TestWorkerCliAndConfig(unittest.TestCase):
       sym_dir = tmp_path / "sym_work"
       sym_dir.symlink_to(real_dir)
 
+      w = Path("/tmp/work")
+      u = "file:///cache"
       invalid_kwargs = [
-          {"cache_uri": "", "task_id": "find", "work_dir": Path("/tmp/work")},
-          {"cache_uri": "file:///cache", "task_id": "", "work_dir": Path("/tmp/work")},
-          {"cache_uri": "file:///cache", "task_id": ".", "work_dir": Path("/tmp/work")},
-          {"cache_uri": "file:///cache", "task_id": "..", "work_dir": Path("/tmp/work")},
-          {"cache_uri": "file:///cache", "task_id": "../escape", "work_dir": Path("/tmp/work")},
-          {"cache_uri": "file:///cache", "task_id": "a/b", "work_dir": Path("/tmp/work")},
-          {"cache_uri": "file:///cache", "task_id": "a\\b", "work_dir": Path("/tmp/work")},
-          {"cache_uri": "file:///cache", "task_id": ".tmp.staging", "work_dir": Path("/tmp/work")},
-          {"cache_uri": "file:///cache", "task_id": "find", "work_dir": sym_dir},
+          {"cache_uri": "", "task_id": "find", "work_dir": w},
+          {"cache_uri": u, "task_id": "", "work_dir": w},
+          {"cache_uri": u, "task_id": ".", "work_dir": w},
+          {"cache_uri": u, "task_id": "..", "work_dir": w},
+          {"cache_uri": u, "task_id": "../escape", "work_dir": w},
+          {"cache_uri": u, "task_id": "a/b", "work_dir": w},
+          {"cache_uri": u, "task_id": "a\\b", "work_dir": w},
+          {"cache_uri": u, "task_id": ".tmp.staging", "work_dir": w},
+          {"cache_uri": u, "task_id": "find", "work_dir": sym_dir},
       ]
       for kwargs in invalid_kwargs:
         with self.subTest(kwargs=kwargs):
@@ -213,6 +132,7 @@ class TestWorkerCliAndConfig(unittest.TestCase):
         ["--cache-uri", "file:///tmp/cache"],
         ["--task-id", "find"],
         ["--cache-uri", "file:///tmp/cache", "--task-id", "../escape"],
+        ["--cache-uri", "file://remotehost/tmp/cache", "--task-id", "find"],
         ["--cache-uri", "file:///tmp/cache", "--task-id", "find", "--unknown"],
     ]
     for argv in bad_argvs:
@@ -242,9 +162,49 @@ class TestWorkerCliAndConfig(unittest.TestCase):
     self.assertEqual(rc, EXIT_EXECUTION_FAILURE)
     self.assertEqual(stdout_buf.getvalue(), "")
 
+  def test_cli_end_to_end_local_file_uri_execution(self):
+    with tempfile.TemporaryDirectory() as tmp:
+      cache_dir, work_dir = Path(tmp) / "cache", Path(tmp) / "work"
+      cache = LocalArtifactCache(cache_dir)
+      cache.put_repo_archive(_create_repo_tar_gz(Path(tmp) / "code.tar.gz"))
+      cache.put_manifest("find", RunManifest(
+          command="find-diff", task_id="find",
+          base_ref="origin/main", extra_args=("--no-init",),
+      ))
+      adapter = CmAdapter("/fake/bin/cm")
+      adapter._version = "0.9.0"
+
+      def _fake_find(cfg, cm, emitter=None) -> int:
+        del emitter
+        self.assertIs(cm, adapter)
+        assert cfg.out is not None
+        sarif = '{"version":"2.1.0","runs":[{"results":[{"ruleId":"R1"}]}]}'
+        (cfg.out / "report.sarif").write_text(sarif, encoding="utf-8")
+        (cfg.out / "report.md").write_text("# Summary\n", encoding="utf-8")
+        return EXIT_OK
+
+      stdout_buf, stderr_buf = io.StringIO(), io.StringIO()
+      argv = ["--cache-uri", cache_dir.as_uri(), "--task-id", "find",
+              "--work-dir", str(work_dir)]
+      with (
+          mock.patch.object(sys, "stdout", stdout_buf),
+          mock.patch.object(sys, "stderr", stderr_buf),
+          mock.patch.object(CmAdapter, "locate", return_value=adapter),
+          mock.patch.object(find_diff, "run", side_effect=_fake_find),
+      ):
+        self.assertEqual(main(argv), EXIT_OK)
+      self.assertEqual(stdout_buf.getvalue(), "")
+      receipt = cache.get_receipt("find")
+      self.assertEqual((receipt.status, receipt.finding_count), ("SUCCESS", 1))
+      self.assertEqual(receipt.artifacts, {
+          "log": "tasks/find/output/runner.log",
+          "sarif": "tasks/find/output/report.sarif",
+          "report": "tasks/find/output/report.md",
+      })
+
 
 class TestWorkerTaskExecution(unittest.TestCase):
-  """Behavioral tests for Worker 4-step execution, stream isolation, and signals."""
+  """Behavioral tests for Worker 4-step execution, stream isolation, signals."""
 
   def setUp(self):
     super().setUp()
@@ -253,7 +213,7 @@ class TestWorkerTaskExecution(unittest.TestCase):
     self.tmp_path = Path(self._tmp.name)
     self.cache_dir = self.tmp_path / "cache"
     self.work_dir = self.tmp_path / "work"
-    self.cache = _FakeArtifactCache(self.cache_dir)
+    self.cache = LocalArtifactCache(self.cache_dir)
     self.adapter = CmAdapter("/fake/bin/cm")
 
     self.archive_src = _create_repo_tar_gz(
@@ -265,7 +225,9 @@ class TestWorkerTaskExecution(unittest.TestCase):
     self.cache.put_manifest("init", RunManifest(command="init", task_id="init"))
     self.adapter._version = "0.9.0"
 
-    def _fake_init(cfg: init.InitConfig, adapter: CmAdapter, emitter=None) -> int:
+    def _fake_init(
+        cfg: init.InitConfig, adapter: CmAdapter, emitter=None
+    ) -> int:
       self.assertIs(adapter, self.adapter)
       self.assertIsNone(emitter)
       self.assertTrue((cfg.repo / ".git" / "HEAD").is_file())
@@ -446,8 +408,10 @@ class TestWorkerTaskExecution(unittest.TestCase):
         self.cache.get_bytes(fix_receipt.artifacts["patch"]), raw_diff
     )
 
-    # 2. Normal `no_fix` (fix.run returns 3): status="FAILURE", exit_code=3, error=None.
-    def _fake_nofix(cfg: fix.FixConfig, adapter: CmAdapter, emitter=None) -> int:
+    # 2. Normal `no_fix` (fix.run returns 3): status="FAILURE", error=None.
+    def _fake_nofix(
+        cfg: fix.FixConfig, adapter: CmAdapter, emitter=None
+    ) -> int:
       del cfg, adapter, emitter
       logging.getLogger("codemender.runner.commands.fix").error(
           "No patch could be synthesized."
@@ -535,7 +499,7 @@ class TestWorkerTaskExecution(unittest.TestCase):
 
   def test_infrastructure_errors_and_fallback_log_spill(self):
     self.cache.put_manifest("init", RunManifest(command="init", task_id="init"))
-    # Missing cm binary (CmAdapter.locate returns None) -> exit code 3 with non-empty error (also test non-main thread).
+    # Missing cm binary -> exit code 3 with non-empty error (non-main thread).
     worker = Worker(self.cache, work_dir=self.work_dir)
     thread_rc: list[int] = []
     with mock.patch.object(CmAdapter, "locate", return_value=None):
@@ -549,24 +513,24 @@ class TestWorkerTaskExecution(unittest.TestCase):
     self.assertEqual(receipt.exit_code, EXIT_EXECUTION_FAILURE)
     self.assertTrue(receipt.error)
 
-    # Cache error on Step 1 + both put_task_output and put_receipt failing -> single log spill.
+    # Cache error on Step 1 + output/receipt upload failure -> single log spill.
     stderr_buf = io.StringIO()
     with (
         mock.patch.object(sys, "stderr", stderr_buf),
         mock.patch.object(
             self.cache,
             "get_manifest",
-            side_effect=ArtifactCacheError("403 forbidden"),
+            side_effect=CachePermissionError("403 forbidden"),
         ),
         mock.patch.object(
             self.cache,
             "put_task_output",
-            side_effect=ArtifactCacheError("503 output"),
+            side_effect=CacheTransientError("503 output"),
         ),
         mock.patch.object(
             self.cache,
             "put_receipt",
-            side_effect=ArtifactCacheError("503 receipt"),
+            side_effect=CacheTransientError("503 receipt"),
         ),
     ):
       rc = worker.run_task("init")

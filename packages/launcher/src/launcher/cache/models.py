@@ -21,72 +21,19 @@ import math
 from typing import Any, Self
 
 import attrs
-from codemender.runner.commands.find_diff import (
-    MAX_DIFF_WORKERS,
-    MIN_DIFF_WORKERS,
-)
+from codemender.runner.commands.find_diff import MAX_DIFF_WORKERS
+from codemender.runner.commands.find_diff import MIN_DIFF_WORKERS
 
-from launcher.cache._validation import (
-    finding_key_error,
-    relative_key_error,
-    single_segment_error,
-)
+from launcher.cache._validation import finding_key_error
+from launcher.validators import ValidationError
+from launcher.validators import check_non_empty_str
+from launcher.validators import check_safe_relative_key
+from launcher.validators import validate_non_empty_str
+from launcher.validators import validate_optional_non_empty_str
+from launcher.validators import validate_safe_path_segment
 
 VALID_WORKER_COMMANDS = frozenset({"init", "find-diff", "fix", "verify"})
 VALID_RECEIPT_STATUSES = frozenset({"SUCCESS", "FAILURE"})
-
-
-class ValidationError(Exception):
-  """Raised when a cache wire model fails schema or field validation."""
-
-
-def _check_non_empty_str(value: Any, field_name: str) -> str:
-  """Validates that `value` is a non-empty string without NUL bytes."""
-  if not isinstance(value, str) or not value.strip() or "\x00" in value:
-    raise ValidationError(f"{field_name} must be a non-empty string.")
-  return value
-
-
-def _validate_non_empty_str(
-    instance: Any, attribute: attrs.Attribute, value: str
-) -> None:
-  del instance
-  _check_non_empty_str(value, attribute.name)
-
-
-def _validate_optional_non_empty_str(
-    instance: Any, attribute: attrs.Attribute, value: str | None
-) -> None:
-  del instance
-  if value is not None:
-    _check_non_empty_str(value, attribute.name)
-
-
-def _check_safe_path_segment(value: Any, field_name: str) -> str:
-  """Validates that `value` is a single safe path segment."""
-  reason = single_segment_error(value)
-  if reason is not None:
-    raise ValidationError(
-        f"{field_name} must be a single safe path segment: {value!r}"
-    )
-  return value
-
-
-def _validate_safe_path_segment(
-    instance: Any, attribute: attrs.Attribute, value: str
-) -> None:
-  del instance
-  _check_safe_path_segment(value, attribute.name)
-
-
-def _check_safe_relative_key(value: Any, field_name: str) -> str:
-  """Validates that `value` is a safe relative POSIX key."""
-  reason = relative_key_error(value)
-  if reason is not None:
-    raise ValidationError(
-        f"{field_name} must be a normalized relative POSIX key: {value!r}"
-    )
-  return value
 
 
 def _validate_finding_key(
@@ -103,7 +50,7 @@ def _validate_command(
     instance: Any, attribute: attrs.Attribute, value: str
 ) -> None:
   del instance
-  _check_non_empty_str(value, attribute.name)
+  check_non_empty_str(value, field_name=attribute.name)
   if value not in VALID_WORKER_COMMANDS:
     raise ValidationError(
         f"Unsupported RunManifest.command {value!r}; must be one of"
@@ -196,8 +143,10 @@ def _convert_artifacts(value: Any) -> dict[str, str]:
     )
   validated: dict[str, str] = {}
   for role, key in value.items():
-    _check_non_empty_str(role, "ExecutionReceipt.artifacts role")
-    _check_safe_relative_key(key, f"ExecutionReceipt.artifacts[{role!r}]")
+    check_non_empty_str(role, field_name="ExecutionReceipt.artifacts role")
+    check_safe_relative_key(
+        key, field_name=f"ExecutionReceipt.artifacts[{role!r}]"
+    )
     validated[role] = key
   return validated
 
@@ -252,9 +201,9 @@ class RunManifest(_JsonWireModel):
   """Task input manifest (`tasks/<task_id>/input/manifest.json`)."""
 
   command: str = attrs.field(validator=_validate_command)
-  task_id: str = attrs.field(validator=_validate_safe_path_segment)
+  task_id: str = attrs.field(validator=validate_safe_path_segment)
   base_ref: str | None = attrs.field(
-      default=None, validator=_validate_optional_non_empty_str
+      default=None, validator=validate_optional_non_empty_str
   )
   finding_key: str | None = attrs.field(
       default=None, validator=_validate_finding_key
@@ -265,7 +214,7 @@ class RunManifest(_JsonWireModel):
       validator=_validate_diff_workers,
   )
   log_level: str | None = attrs.field(
-      default=None, validator=_validate_optional_non_empty_str
+      default=None, validator=validate_optional_non_empty_str
   )
   extra_args: tuple[str, ...] = attrs.field(
       default=(), converter=_convert_extra_args
@@ -298,10 +247,10 @@ class ExecutionReceipt(_JsonWireModel):
   exit_code: int = attrs.field(
       converter=lambda v: _convert_int(v, "ExecutionReceipt.exit_code")
   )
-  command: str = attrs.field(validator=_validate_non_empty_str)
-  task_id: str = attrs.field(validator=_validate_safe_path_segment)
-  started_at: str = attrs.field(validator=_validate_non_empty_str)
-  completed_at: str = attrs.field(validator=_validate_non_empty_str)
+  command: str = attrs.field(validator=validate_non_empty_str)
+  task_id: str = attrs.field(validator=validate_safe_path_segment)
+  started_at: str = attrs.field(validator=validate_non_empty_str)
+  completed_at: str = attrs.field(validator=validate_non_empty_str)
   duration_seconds: float = attrs.field(
       default=0.0, converter=_convert_duration_seconds
   )
@@ -314,7 +263,7 @@ class ExecutionReceipt(_JsonWireModel):
       factory=dict, converter=_convert_artifacts, hash=False
   )
   error: str | None = attrs.field(
-      default=None, validator=_validate_optional_non_empty_str
+      default=None, validator=validate_optional_non_empty_str
   )
 
   def __attrs_post_init__(self) -> None:
