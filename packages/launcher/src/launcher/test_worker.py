@@ -12,7 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0002, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0004, SPEC-ARTIFACT-CACHE/REQ-0006, SPEC-WORKER/REQ-0001, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0004, SPEC-WORKER/REQ-0005, SPEC-WORKER/REQ-0006, SPEC-WORKER/REQ-0007
+# Governing: ADR-0002, ADR-0009
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0004, SPEC-ARTIFACT-CACHE/REQ-0006
+# Governing: SPEC-WORKER/REQ-0001, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003
+# Governing: SPEC-WORKER/REQ-0004, SPEC-WORKER/REQ-0005, SPEC-WORKER/REQ-0006
+# Governing: SPEC-WORKER/REQ-0007
 """Unit tests for Worker (`launcher.worker`) and `cm-worker` CLI entrypoint."""
 
 import io
@@ -30,27 +35,24 @@ import unittest
 from unittest import mock
 
 from codemender.cm import CmAdapter
-from codemender.runner.commands import find_diff, fix, init, verify
-from launcher.base import (
-    EXIT_EXECUTION_FAILURE,
-    EXIT_OK,
-    EXIT_USAGE_ERROR,
-)
-from launcher.cache import (
-    CachePermissionError,
-    CacheTransientError,
-    LocalArtifactCache,
-    RunManifest,
-    ValidationError,
-)
-from launcher.worker import (
-    DEFAULT_WORK_DIR,
-    EXIT_SIGINT,
-    EXIT_SIGTERM,
-    Worker,
-    WorkerConfig,
-    main,
-)
+from codemender.runner.commands import find_diff
+from codemender.runner.commands import fix
+from codemender.runner.commands import init
+from codemender.runner.commands import verify
+from launcher.base import EXIT_EXECUTION_FAILURE
+from launcher.base import EXIT_OK
+from launcher.base import EXIT_USAGE_ERROR
+from launcher.cache import CachePermissionError
+from launcher.cache import CacheTransientError
+from launcher.cache import LocalArtifactCache
+from launcher.cache import RunManifest
+from launcher.cache import ValidationError
+from launcher.worker import DEFAULT_WORK_DIR
+from launcher.worker import EXIT_SIGINT
+from launcher.worker import EXIT_SIGTERM
+from launcher.worker import Worker
+from launcher.worker import WorkerConfig
+from launcher.worker import main
 
 
 def _create_repo_tar_gz(
@@ -107,12 +109,21 @@ class TestWorkerCliAndConfig(unittest.TestCase):
       real_dir.mkdir()
       sym_dir = tmp_path / "sym_work"
       sym_dir.symlink_to(real_dir)
+      regular_file = tmp_path / "regular_file"
+      regular_file.write_text("file", encoding="utf-8")
+      cache = LocalArtifactCache(tmp_path / "cache")
 
       w = Path("/tmp/work")
       u = "file:///cache"
       invalid_kwargs = [
           {"cache_uri": "", "task_id": "find", "work_dir": w},
+          {"cache_uri": 123, "task_id": "find", "work_dir": w},
+          {"cache_uri": None, "task_id": "find", "work_dir": w},
+          {"cache_uri": True, "task_id": "find", "work_dir": w},
           {"cache_uri": u, "task_id": "", "work_dir": w},
+          {"cache_uri": u, "task_id": 123, "work_dir": w},
+          {"cache_uri": u, "task_id": None, "work_dir": w},
+          {"cache_uri": u, "task_id": True, "work_dir": w},
           {"cache_uri": u, "task_id": ".", "work_dir": w},
           {"cache_uri": u, "task_id": "..", "work_dir": w},
           {"cache_uri": u, "task_id": "../escape", "work_dir": w},
@@ -120,11 +131,29 @@ class TestWorkerCliAndConfig(unittest.TestCase):
           {"cache_uri": u, "task_id": "a\\b", "work_dir": w},
           {"cache_uri": u, "task_id": ".tmp.staging", "work_dir": w},
           {"cache_uri": u, "task_id": "find", "work_dir": sym_dir},
+          {"cache_uri": u, "task_id": "find", "work_dir": regular_file},
+          {"cache_uri": u, "task_id": "find", "work_dir": ""},
+          {"cache_uri": u, "task_id": "find", "work_dir": "   "},
+          {"cache_uri": u, "task_id": "find", "work_dir": "/tmp/work\x00bad"},
+          {"cache_uri": u, "task_id": "find", "work_dir": 123},
       ]
       for kwargs in invalid_kwargs:
-        with self.subTest(kwargs=kwargs):
-          with self.assertRaises(ValidationError):
-            WorkerConfig(**kwargs)
+        with self.subTest(kwargs=kwargs), self.assertRaises(ValidationError):
+          WorkerConfig(**kwargs)  # type: ignore[arg-type]
+
+      for bad_work_dir in (
+          "",
+          "   ",
+          "/tmp/work\x00bad",
+          sym_dir,
+          regular_file,
+          123,
+      ):
+        with (
+            self.subTest(bad_work_dir=bad_work_dir),
+            self.assertRaises(ValidationError),
+        ):
+          Worker(cache, work_dir=bad_work_dir)  # type: ignore[arg-type]
 
   def test_cli_missing_or_invalid_args_return_2_with_clean_stdout(self):
     bad_argvs = [
@@ -541,6 +570,24 @@ class TestWorkerTaskExecution(unittest.TestCase):
     )
     self.assertIn("=== [END FALLBACK LOG SPILL] ===", stderr_buf.getvalue())
 
+  def test_invalid_task_id_returns_2_and_spills_unpublishable_receipt(self):
+    worker = Worker(self.cache, work_dir=self.work_dir, adapter=self.adapter)
+    for bad_task_id in ("", "../escape", "nested/task", ".tmp.staging"):
+      with self.subTest(task_id=bad_task_id):
+        stdout_buf, stderr_buf = io.StringIO(), io.StringIO()
+        with (
+            mock.patch.object(sys, "stdout", stdout_buf),
+            mock.patch.object(sys, "stderr", stderr_buf),
+        ):
+          rc = worker.run_task(bad_task_id)
+        self.assertEqual(rc, EXIT_USAGE_ERROR)
+        self.assertEqual(stdout_buf.getvalue(), "")
+        stderr_text = stderr_buf.getvalue()
+        self.assertEqual(stderr_text.count("=== [FALLBACK LOG SPILL:"), 1)
+        self.assertIn("Validation error:", stderr_text)
+        self.assertIn("=== [END FALLBACK LOG SPILL] ===", stderr_text)
+        self.assertFalse(self.work_dir.exists())
+
   def test_preemption_signals_terminate_child_group_and_flush_receipt(self):
     for sig, expected_rc in (
         (signal.SIGTERM, EXIT_SIGTERM),
@@ -551,13 +598,17 @@ class TestWorkerTaskExecution(unittest.TestCase):
         ready_event = threading.Event()
 
         def _slow_init(
-            cfg: init.InitConfig, adapter: CmAdapter, emitter=None
+            cfg: init.InitConfig,
+            adapter: CmAdapter,
+            emitter=None,
+            *,
+            event: threading.Event = ready_event,
         ) -> int:
           del cfg, adapter, emitter
           logging.getLogger("codemender.runner.commands.init").info(
               "starting slow task"
           )
-          ready_event.set()
+          event.set()
           time.sleep(30)
           return EXIT_OK
 
@@ -568,9 +619,12 @@ class TestWorkerTaskExecution(unittest.TestCase):
             self.cache, work_dir=self.work_dir, adapter=self.adapter
         )
 
-        def _trigger_signal():
-          ready_event.wait(timeout=5.0)
-          os.kill(os.getpid(), sig)
+        def _trigger_signal(
+            event: threading.Event = ready_event,
+            signum: signal.Signals = sig,
+        ) -> None:
+          event.wait(timeout=5.0)
+          os.kill(os.getpid(), signum)
 
         sender = threading.Thread(target=_trigger_signal, daemon=True)
         with mock.patch.object(init, "run", side_effect=_slow_init):

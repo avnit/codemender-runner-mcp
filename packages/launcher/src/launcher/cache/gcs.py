@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0005, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0003
+# Governing: ADR-0005, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0003
 """GcsArtifactCache implementation backed by gcsfs.GCSFileSystem."""
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 
-from launcher.cache._validation import single_segment_error
+from launcher import validators
 from launcher.cache.base import ArtifactCache, normalize_cache_key
 from launcher.cache.errors import (
     CacheConfigurationError,
@@ -53,7 +54,7 @@ def parse_gcs_uri(uri: str) -> tuple[str, str]:
     )
 
   bucket = parsed.netloc.strip()
-  bucket_reason = single_segment_error(bucket)
+  bucket_reason = validators.single_segment_error(bucket)
   if bucket_reason is not None:
     raise InvalidCacheKeyError(
         f"GCS cache URI has an invalid bucket name ({bucket_reason}): {uri!r}",
@@ -80,7 +81,8 @@ def parse_gcs_uri(uri: str) -> tuple[str, str]:
   return bucket, norm_prefix
 
 
-# Governing: SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0003, ADR-0009
+# Governing: ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0003
 class GcsArtifactCache(ArtifactCache):
   """Google Cloud Storage ArtifactCache implementation using gcsfs."""
 

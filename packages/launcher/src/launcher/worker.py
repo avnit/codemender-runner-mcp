@@ -12,17 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0001, ADR-0002, ADR-0003, ADR-0005, ADR-0007, ADR-0008, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0004, SPEC-ARTIFACT-CACHE/REQ-0006, SPEC-WORKER/REQ-0001, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0004, SPEC-WORKER/REQ-0005, SPEC-WORKER/REQ-0006, SPEC-WORKER/REQ-0007
+# Governing: ADR-0001, ADR-0002, ADR-0003, ADR-0005, ADR-0007, ADR-0008
+# Governing: ADR-0009
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0004, SPEC-ARTIFACT-CACHE/REQ-0006
+# Governing: SPEC-WORKER/REQ-0001, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003
+# Governing: SPEC-WORKER/REQ-0004, SPEC-WORKER/REQ-0005, SPEC-WORKER/REQ-0006
+# Governing: SPEC-WORKER/REQ-0007
 """Sandbox container worker (`cm-worker`) executing tasks over ArtifactCache."""
 
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
+from collections.abc import Sequence
 import contextlib
-from datetime import datetime, timezone
+from datetime import UTC
+from datetime import datetime
 import logging
-from pathlib import Path, PurePosixPath
+from pathlib import Path
+from pathlib import PurePosixPath
 import shutil
 import signal
 import subprocess
@@ -30,32 +39,16 @@ import sys
 import tarfile
 import threading
 import time
-from typing import Any, Self
+from typing import Any
+from typing import Self
 
 import attrs
+from codemender import sarif
 from codemender.cm import CmAdapter
-from codemender.runner.__main__ import configure_logging
-from codemender.runner.__main__ import dispatch
-from codemender.sarif import SarifDocument
-from codemender.sarif import SarifError
-
-from launcher.base import EXIT_EXECUTION_FAILURE
-from launcher.base import EXIT_OK
-from launcher.base import EXIT_USAGE_ERROR
-from launcher.cache import ArtifactCache
-from launcher.cache import ArtifactCacheError
-from launcher.cache import ArtifactIntegrityError
-from launcher.cache import ArtifactNotFoundError
-from launcher.cache import ExecutionReceipt
-from launcher.cache import flatten_repo_if_nested
-from launcher.cache import InvalidCacheKeyError
-from launcher.cache import open_artifact_cache
-from launcher.cache import RunManifest
-from launcher.cache import unpack_tar_gz_preserving_permissions
-from launcher.cache import validate_single_segment
-from launcher.validators import ValidationError
-from launcher.validators import validate_non_empty_str
-from launcher.validators import validate_safe_path_segment
+from codemender.runner import __main__ as runner_cli
+from codemender.runner import exit_codes
+from launcher import cache
+from launcher import validators
 
 logger = logging.getLogger(__name__)
 
@@ -63,12 +56,19 @@ DEFAULT_WORK_DIR = Path("/tmp/work")
 EXIT_SIGINT = 130
 EXIT_SIGTERM = 143
 _GIT_SAFE_DIR_TIMEOUT_SECONDS = 10.0
-_ROLE_BY_SUFFIX = {".sarif": "sarif", ".md": "report", ".diff": "patch"}
+_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
+_RUNNER_LOG = "runner.log"
+_ARTIFACT_ROLES = {
+    _RUNNER_LOG: "log",
+    ".sarif": "sarif",
+    ".md": "report",
+    ".diff": "patch",
+}
 _VALIDATION_ERRORS = (
-    ArtifactNotFoundError,
-    ArtifactIntegrityError,
-    InvalidCacheKeyError,
-    ValidationError,
+    cache.ArtifactNotFoundError,
+    cache.ArtifactIntegrityError,
+    cache.InvalidCacheKeyError,
+    validators.ValidationError,
     ValueError,
     tarfile.TarError,
 )
@@ -77,35 +77,43 @@ _VALIDATION_ERRORS = (
 class _PreemptionSignal(Exception):
   """Internal exception raised when a preemption signal interrupts a task."""
 
-  def __init__(self, signum: int, exit_code: int) -> None:
-    self.signum, self.exit_code = signum, exit_code
-    sig_name = (
-        signal.Signals(signum).name
-        if signum in signal.Signals._value2member_map_
-        else f"SIG{signum}"
-    )
+  def __init__(self, signum: int) -> None:
+    self.exit_code = EXIT_SIGTERM if signum == signal.SIGTERM else EXIT_SIGINT
+    sig_name = signal.Signals(signum).name
     super().__init__(f"Task preempted by signal {sig_name} ({signum}).")
 
 
-def _validate_work_dir(
-    instance: Any, attribute: attrs.Attribute[Path], value: Path
-) -> None:
-  """Attrs validator ensuring `work_dir` is not a symlink or existing file."""
-  del instance, attribute
-  if value.is_symlink() or (value.exists() and not value.is_dir()):
-    raise ValidationError(
-        f"work_dir {value} must not be a symlink or existing non-directory."
+def _convert_work_dir(value: Path | str | None) -> Path:
+  """Normalizes `work_dir` and rejects invalid, symlink, or file paths.
+
+  Args:
+    value: Candidate scratch directory path, string, or `None`.
+
+  Returns:
+    Expanded `Path` for the worker scratch directory.
+
+  Raises:
+    validators.ValidationError: If `value` is not a `Path`, non-empty `str`,
+      or `None`, or if the path is a symlink or existing non-directory.
+  """
+  if value is None:
+    path = DEFAULT_WORK_DIR
+  elif isinstance(value, (str, Path)):
+    raw = validators.check_non_empty_str(str(value), field_name="work_dir")
+    path = (
+        value.expanduser()
+        if isinstance(value, Path)
+        else Path(raw.strip()).expanduser()
     )
-
-
-def _strip_str(value: Any) -> str:
-  """Normalizes a CLI or config string value by stripping whitespace."""
-  return value.strip() if isinstance(value, str) else str(value or "").strip()
-
-
-def _normalize_work_dir(value: Path | str | None) -> Path:
-  """Normalizes `work_dir`, defaulting `None` to `DEFAULT_WORK_DIR`."""
-  return DEFAULT_WORK_DIR if value is None else Path(value).expanduser()
+  else:
+    raise validators.ValidationError(
+        f"work_dir must be a Path or non-empty string, got {value!r}."
+    )
+  if path.is_symlink() or (path.exists() and not path.is_dir()):
+    raise validators.ValidationError(
+        f"work_dir {path} must not be a symlink or existing non-directory."
+    )
+  return path
 
 
 # Governing: SPEC-WORKER/REQ-0001, ADR-0001
@@ -114,18 +122,26 @@ class WorkerConfig:
   """Validated command-line configuration for `cm-worker`."""
 
   cache_uri: str = attrs.field(
-      converter=_strip_str,
-      validator=validate_non_empty_str,
+      converter=validators.strip_if_str,
+      validator=validators.validate_non_empty_str,
   )
   task_id: str = attrs.field(
-      converter=_strip_str,
-      validator=validate_safe_path_segment,
+      converter=validators.strip_if_str,
+      validator=validators.validate_safe_path_segment,
   )
   work_dir: Path = attrs.field(
-      default=DEFAULT_WORK_DIR,
-      converter=_normalize_work_dir,
-      validator=_validate_work_dir,
+      default=DEFAULT_WORK_DIR, converter=_convert_work_dir
   )
+
+  @classmethod
+  def from_cli(cls, args: Sequence[str] | None = None) -> Self:
+    """Parses CLI `args` and returns a validated `WorkerConfig`."""
+    return cls._from_args(cls._build_parser().parse_args(args))
+
+  @classmethod
+  def _from_args(cls, args: argparse.Namespace) -> Self:
+    """Builds a validated `WorkerConfig` from parsed CLI arguments."""
+    return cls(args.cache_uri, args.task_id, args.work_dir)
 
   @staticmethod
   def _build_parser() -> argparse.ArgumentParser:
@@ -141,42 +157,26 @@ class WorkerConfig:
     parser.add_argument("--work-dir", default=DEFAULT_WORK_DIR, metavar="DIR")
     return parser
 
-  @classmethod
-  def _from_args(cls, args: argparse.Namespace) -> Self:
-    """Builds a validated `WorkerConfig` from parsed CLI arguments."""
-    return cls(
-        cache_uri=getattr(args, "cache_uri", ""),
-        task_id=getattr(args, "task_id", ""),
-        work_dir=getattr(args, "work_dir", DEFAULT_WORK_DIR),
-    )
-
-  @classmethod
-  def from_cli(cls, args: Sequence[str] | None = None) -> Self:
-    """Parses CLI `args` and returns a validated `WorkerConfig`."""
-    parser = cls._build_parser()
-    return cls._from_args(parser.parse_args(args))
-
 
 def _fmt_iso(ts: float) -> str:
   """Formats a POSIX timestamp as an ISO 8601 UTC string."""
-  return datetime.fromtimestamp(ts, tz=timezone.utc).strftime(
-      "%Y-%m-%dT%H:%M:%SZ"
-  )
+  return datetime.fromtimestamp(ts, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-# Governing: SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0004, SPEC-WORKER/REQ-0005, SPEC-WORKER/REQ-0006, SPEC-WORKER/REQ-0007
+# Governing: SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0004
+# Governing: SPEC-WORKER/REQ-0005, SPEC-WORKER/REQ-0006, SPEC-WORKER/REQ-0007
 class Worker:
   """Inside-container worker executing tasks over an `ArtifactCache`."""
 
   def __init__(
       self,
-      cache: ArtifactCache,
+      cache: cache.ArtifactCache,
       *,
       work_dir: Path | str = DEFAULT_WORK_DIR,
       adapter: CmAdapter | None = None,
   ) -> None:
     self.cache = cache
-    self.work_dir = Path(work_dir).expanduser()
+    self.work_dir = _convert_work_dir(work_dir)
     self.adapter = adapter
 
   def run_task(self, task_id: str) -> int:
@@ -193,45 +193,31 @@ class Worker:
     Returns:
       Numeric process exit code (`0`, `2`, `3`, `130`, or `143`).
     """
-    started_ts, started_monotonic = time.time(), time.monotonic()
+    started_at, started_mono = _fmt_iso(time.time()), time.monotonic()
     with (
         self._preemption_signal_handlers(),
-        self._scratch_workspace() as (repo_dir, inputs_dir, out_dir, log_path),
+        self._scratch_workspace() as workspace,
     ):
-      command_name, exit_code, error_message = self._stage_and_run_command(
-          task_id, repo_dir, inputs_dir, out_dir, log_path
-      )
-      duration = max(0.0, round(time.monotonic() - started_monotonic, 3))
+      outcome = self._stage_and_run_command(task_id, workspace)
+      duration = max(0.0, time.monotonic() - started_mono)
       return self._publish_results(
-          task_id=task_id,
-          command_name=command_name,
-          exit_code=exit_code,
-          error_message=error_message,
-          started_ts=started_ts,
-          duration_seconds=duration,
-          out_dir=out_dir,
-          log_path=log_path,
+          task_id, outcome, started_at, duration, workspace / "out"
       )
 
   @contextlib.contextmanager
-  def _preemption_signal_handlers(self) -> Iterator[None]:
-    if threading.current_thread() is not threading.main_thread():
-      yield
-      return
-    prev_sigterm = signal.getsignal(signal.SIGTERM)
-    prev_sigint = signal.getsignal(signal.SIGINT)
-
-    def _handle_signal(signum: int, _frame: Any) -> None:
-      code = EXIT_SIGTERM if signum == signal.SIGTERM else EXIT_SIGINT
-      raise _PreemptionSignal(signum, code)
-
-    signal.signal(signal.SIGTERM, _handle_signal)
-    signal.signal(signal.SIGINT, _handle_signal)
+  def _scratch_workspace(self) -> Iterator[Path]:
+    self._clean_work_dir()
+    self.work_dir.mkdir(parents=True, exist_ok=True)
     try:
-      yield
+      if self.work_dir.is_symlink():
+        raise ValueError(f"work_dir {self.work_dir} must not be a symlink.")
+      root = self.work_dir.resolve()
+      for subdir in ("repo", "inputs", "out"):
+        (root / subdir).mkdir(parents=True, exist_ok=True)
+      (root / "out" / _RUNNER_LOG).write_text("", encoding="utf-8")
+      yield root
     finally:
-      signal.signal(signal.SIGTERM, prev_sigterm)
-      signal.signal(signal.SIGINT, prev_sigint)
+      self._clean_work_dir()
 
   def _clean_work_dir(self) -> None:
     if self.work_dir.is_symlink() or self.work_dir.is_file():
@@ -239,220 +225,84 @@ class Worker:
     elif self.work_dir.exists():
       shutil.rmtree(self.work_dir, ignore_errors=True)
 
-  @contextlib.contextmanager
-  def _scratch_workspace(self) -> Iterator[tuple[Path, Path, Path, Path]]:
-    self._clean_work_dir()
-    self.work_dir.mkdir(parents=True, exist_ok=True)
-    try:
-      if self.work_dir.is_symlink():
-        raise ValueError(f"work_dir {self.work_dir} must not be a symlink.")
-      root = self.work_dir.resolve()
-      dirs = (root / "repo", root / "inputs", root / "out")
-      for directory in dirs:
-        directory.mkdir(parents=True, exist_ok=True)
-      log_path = dirs[2] / "runner.log"
-      log_path.write_text("", encoding="utf-8")
-      yield dirs[0], dirs[1], dirs[2], log_path
-    finally:
-      self._clean_work_dir()
-
   def _prepare_workspace(
-      self, task_id: str, repo_dir: Path, inputs_dir: Path
-  ) -> tuple[RunManifest, Path | None]:
+      self, task_id: str, workspace: Path
+  ) -> tuple[cache.RunManifest, Path | None]:
+    repo_dir, inputs_dir = workspace / "repo", workspace / "inputs"
     manifest = self.cache.get_manifest(task_id)
     archive_dest = inputs_dir / "code.tar.gz"
     self.cache.get_repo_archive(archive_dest)
-    unpack_tar_gz_preserving_permissions(archive_dest, repo_dir)
-    flatten_repo_if_nested(repo_dir)
-    if shutil.which("git") is not None:
-      cmd = [
-          "git",
-          "config",
-          "--global",
-          "--add",
-          "safe.directory",
-          repo_dir.as_posix(),
-      ]
-      with contextlib.suppress(OSError, subprocess.SubprocessError):
-        subprocess.run(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=_GIT_SAFE_DIR_TIMEOUT_SECONDS,
-            check=False,
-        )
-    staged_finding: Path | None = None
-    if manifest.command in ("fix", "verify"):
-      assert manifest.finding_key is not None
-      staged_finding = inputs_dir / PurePosixPath(manifest.finding_key).name
-      self.cache.get_finding(manifest.finding_key, staged_finding)
+    cache.unpack_tar_gz_preserving_permissions(archive_dest, repo_dir)
+    cache.flatten_repo_if_nested(repo_dir)
+    git_cmd = ["git", "config", "--global", "--add", "safe.directory"]
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+      subprocess.run(
+          [*git_cmd, repo_dir.as_posix()],
+          stdin=subprocess.DEVNULL,
+          capture_output=True,
+          timeout=_GIT_SAFE_DIR_TIMEOUT_SECONDS,
+          check=False,
+      )
+    if manifest.command not in ("fix", "verify") or not manifest.finding_key:
+      return manifest, None
+    staged_finding = inputs_dir / PurePosixPath(manifest.finding_key).name
+    self.cache.get_finding(manifest.finding_key, staged_finding)
     return manifest, staged_finding
 
   def _stage_and_run_command(
-      self,
-      task_id: str,
-      repo_dir: Path,
-      inputs_dir: Path,
-      out_dir: Path,
-      log_path: Path,
+      self, task_id: str, workspace: Path
   ) -> tuple[str, int, str | None]:
     """Stages workspace inputs and runs the manifest's `codemender` command."""
     command_name = "unknown"
+    log_path = workspace / "out" / _RUNNER_LOG
     try:
-      manifest, staged_finding = self._prepare_workspace(
-          task_id, repo_dir, inputs_dir
-      )
+      manifest, staged_finding = self._prepare_workspace(task_id, workspace)
       command_name = manifest.command
-      runner_rc = self._run_codemender(
-          manifest, repo_dir, out_dir, log_path, staged_finding
-      )
-      if runner_rc in (EXIT_OK, EXIT_EXECUTION_FAILURE):
+      runner_rc = self._run_codemender(manifest, workspace, staged_finding)
+      if runner_rc in (exit_codes.OK, exit_codes.FAILED):
         return command_name, runner_rc, None
-      if runner_rc == EXIT_USAGE_ERROR:
-        msg = (
-            f"codemender {command_name} failed with usage error (exit code 2)."
-        )
-        return command_name, EXIT_USAGE_ERROR, msg
-      msg = (
-          f"codemender {command_name} exited with unexpected code {runner_rc}."
-      )
-      return command_name, EXIT_EXECUTION_FAILURE, msg
+      if runner_rc == exit_codes.USAGE:
+        err = f"codemender {command_name} failed with usage error (exit 2)."
+        return command_name, exit_codes.USAGE, err
+      err = f"codemender {command_name} exited with code {runner_rc}."
+      return command_name, exit_codes.FAILED, err
     except _PreemptionSignal as sig_exc:
       self._append_log(log_path, f"{sig_exc}\n")
       return command_name, sig_exc.exit_code, str(sig_exc)
     except _VALIDATION_ERRORS as val_exc:
-      self._append_log(log_path, f"Validation error: {val_exc}\n")
-      return command_name, EXIT_USAGE_ERROR, str(val_exc)
-    except (ArtifactCacheError, OSError) as infra_exc:
-      self._append_log(log_path, f"Execution error: {infra_exc}\n")
-      return command_name, EXIT_EXECUTION_FAILURE, str(infra_exc)
+      msg = str(val_exc) or type(val_exc).__name__
+      self._append_log(log_path, f"Validation error: {msg}\n")
+      return command_name, exit_codes.USAGE, msg
+    except (cache.ArtifactCacheError, OSError) as infra_exc:
+      msg = str(infra_exc) or type(infra_exc).__name__
+      self._append_log(log_path, f"Execution error: {msg}\n")
+      return command_name, exit_codes.FAILED, msg
 
-  def _upload_outputs(
-      self, task_id: str, out_dir: Path
-  ) -> tuple[dict[str, str], int]:
-    artifacts: dict[str, str] = {}
-    finding_count = 0
-    if out_dir.is_symlink() or not out_dir.is_dir():
-      return artifacts, finding_count
-    for file_path in sorted(out_dir.iterdir()):
-      if (
-          file_path.is_symlink()
-          or not file_path.is_file()
-          or file_path.name == "receipt.json"
-      ):
-        continue
-      role = (
-          "log"
-          if file_path.name == "runner.log"
-          else _ROLE_BY_SUFFIX.get(PurePosixPath(file_path.name).suffix)
-      )
-      if role == "sarif":
-        with contextlib.suppress(OSError, UnicodeDecodeError, SarifError):
-          finding_count = SarifDocument.from_json(
-              file_path.read_text(encoding="utf-8")
-          ).active_result_count
-      key = self.cache.put_task_output(task_id, file_path.name, file_path)
-      if role is not None:
-        artifacts[role] = key
-    return artifacts, finding_count
-
-  def _spill_fallback_log(
-      self, log_path: Path, upload_failures: Sequence[str]
-  ) -> None:
-    log_content = "<runner.log unavailable>\n"
-    if not log_path.is_symlink() and log_path.is_file():
-      with contextlib.suppress(OSError):
-        log_content = log_path.read_text(encoding="utf-8", errors="replace")
-    if log_content and not log_content.endswith("\n"):
-      log_content += "\n"
-    reason = "; ".join(upload_failures)
-    sys.stderr.write(
-        f"=== [FALLBACK LOG SPILL: ArtifactCache sync failed ({reason})] ===\n"
-        f"{log_content}=== [END FALLBACK LOG SPILL] ===\n"
-    )
-    sys.stderr.flush()
-
-  def _build_receipt(
-      self,
-      *,
-      task_id: str,
-      command_name: str,
-      exit_code: int,
-      error_message: str | None,
-      started_ts: float,
-      duration_seconds: float,
-      finding_count: int,
-      artifacts: dict[str, str],
-  ) -> ExecutionReceipt:
-    if exit_code not in (EXIT_OK, EXIT_EXECUTION_FAILURE) and not error_message:
-      error_message = f"Worker exited with code {exit_code}."
-    try:
-      safe_task_id = validate_single_segment(task_id, field="task_id")
-    except (InvalidCacheKeyError, ValidationError):
-      safe_task_id = "invalid-task-id"
-    return ExecutionReceipt(
-        status="SUCCESS" if exit_code == EXIT_OK else "FAILURE",
-        exit_code=exit_code,
-        command=command_name,
-        task_id=safe_task_id,
-        started_at=_fmt_iso(started_ts),
-        completed_at=_fmt_iso(time.time()),
-        duration_seconds=duration_seconds,
-        finding_count=finding_count,
-        artifacts=artifacts,
-        error=error_message,
-    )
-
-  def _publish_results(
-      self,
-      *,
-      task_id: str,
-      command_name: str,
-      exit_code: int,
-      error_message: str | None,
-      started_ts: float,
-      duration_seconds: float,
-      out_dir: Path,
-      log_path: Path,
+  def _run_codemender(
+      self, manifest: cache.RunManifest, workspace: Path, finding: Path | None
   ) -> int:
-    artifacts, finding_count, upload_failures = {}, 0, []
-    try:
-      artifacts, finding_count = self._upload_outputs(task_id, out_dir)
-    except (ArtifactCacheError, OSError) as upload_exc:
-      exit_code = EXIT_EXECUTION_FAILURE if exit_code == EXIT_OK else exit_code
-      error_message = (
-          error_message or f"Output artifact upload failed: {upload_exc}"
-      )
-      upload_failures.append(str(upload_exc))
-    receipt = self._build_receipt(
-        task_id=task_id,
-        command_name=command_name,
-        exit_code=exit_code,
-        error_message=error_message,
-        started_ts=started_ts,
-        duration_seconds=duration_seconds,
-        finding_count=finding_count,
-        artifacts=artifacts,
-    )
-    try:
-      self.cache.put_receipt(task_id, receipt)
-    except (ArtifactCacheError, OSError) as receipt_exc:
-      exit_code = EXIT_EXECUTION_FAILURE if exit_code == EXIT_OK else exit_code
-      upload_failures.append(str(receipt_exc))
-    if exit_code != EXIT_OK and upload_failures:
-      self._spill_fallback_log(log_path, upload_failures)
-    return exit_code
+    """Executes the manifest's `codemender` command via shared `dispatch`.
 
-  def _append_log(self, log_path: Path, message: str) -> None:
-    sys.stderr.write(message)
-    sys.stderr.flush()
-    with contextlib.suppress(OSError):
-      if not log_path.parent.is_symlink():
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        if not log_path.is_symlink():
-          with log_path.open("a", encoding="utf-8") as handle:
-            handle.write(message)
+    Args:
+      manifest: Validated task manifest from `ArtifactCache`.
+      workspace: Scratch workspace root containing `repo` and `out`.
+      finding: Optional staged SARIF finding path for `fix` or `verify`.
+
+    Returns:
+      Process exit code returned by `codemender.runner.__main__.dispatch`.
+    """
+    out_dir = workspace / "out"
+    with self._capture_runner_log(out_dir / _RUNNER_LOG, manifest.log_level):
+      return runner_cli.dispatch(
+          manifest.command,
+          self._resolve_adapter(),
+          repo=workspace / "repo",
+          base=manifest.base_ref or "HEAD",
+          out=out_dir,
+          finding=finding,
+          diff_workers=manifest.diff_workers,
+          auto_init="--no-init" not in manifest.extra_args,
+      )
 
   def _resolve_adapter(self) -> CmAdapter:
     """Returns the cached `CmAdapter` or locates and verifies `cm` on PATH.
@@ -482,9 +332,7 @@ class Worker:
     if log_level is not None:
       root_logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
     file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-    )
+    file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
     root_logger.addHandler(file_handler)
     try:
       yield
@@ -493,59 +341,132 @@ class Worker:
       file_handler.close()
       root_logger.setLevel(prev_level)
 
-  def _run_codemender(
+  def _upload_outputs(
+      self, task_id: str, out_dir: Path
+  ) -> tuple[dict[str, str], int]:
+    if out_dir.is_symlink() or not out_dir.is_dir():
+      return {}, 0
+    artifacts: dict[str, str] = {}
+    finding_count = 0
+    for path in sorted(out_dir.iterdir()):
+      if path.is_symlink() or not path.is_file() or path.name == "receipt.json":
+        continue
+      role = _ARTIFACT_ROLES.get(path.name) or _ARTIFACT_ROLES.get(path.suffix)
+      if role == "sarif":
+        with contextlib.suppress(OSError, UnicodeDecodeError, sarif.SarifError):
+          doc = sarif.SarifDocument.from_json(path.read_text(encoding="utf-8"))
+          finding_count = doc.active_result_count
+      key = self.cache.put_task_output(task_id, path.name, path)
+      if role is not None:
+        artifacts[role] = key
+    return artifacts, finding_count
+
+  def _publish_results(
       self,
-      manifest: RunManifest,
-      repo_dir: Path,
+      task_id: str,
+      outcome: tuple[str, int, str | None],
+      started_at: str,
+      duration: float,
       out_dir: Path,
-      log_path: Path,
-      finding: Path | None,
   ) -> int:
-    """Executes the manifest's `codemender` command via shared `dispatch`.
-
-    Args:
-      manifest: Validated task manifest from `ArtifactCache`.
-      repo_dir: Unpacked target Git repository directory.
-      out_dir: Output directory for command artifacts and `runner.log`.
-      log_path: File path to `runner.log` for capturing log records.
-      finding: Optional staged SARIF finding path for `fix` or `verify`.
-
-    Returns:
-      Process exit code returned by `codemender.runner.__main__.dispatch`.
-    """
-    with self._capture_runner_log(log_path, manifest.log_level):
-      return dispatch(
-          manifest.command,
-          self._resolve_adapter(),
-          repo=repo_dir,
-          base=manifest.base_ref or "HEAD",
-          out=out_dir,
-          finding=finding,
-          diff_workers=manifest.diff_workers,
-          auto_init="--no-init" not in manifest.extra_args,
+    command_name, exit_code, error_message = outcome
+    artifacts, finding_count, upload_failures = {}, 0, []
+    try:
+      artifacts, finding_count = self._upload_outputs(task_id, out_dir)
+    except (cache.ArtifactCacheError, OSError) as exc:
+      exit_code = exit_code or exit_codes.FAILED
+      error_message = error_message or f"Output artifact upload failed: {exc}"
+      upload_failures.append(str(exc))
+    try:
+      receipt = cache.ExecutionReceipt(
+          status="SUCCESS" if exit_code == exit_codes.OK else "FAILURE",
+          exit_code=exit_code,
+          command=command_name,
+          task_id=task_id,
+          started_at=started_at,
+          completed_at=_fmt_iso(time.time()),
+          duration_seconds=duration,
+          finding_count=finding_count,
+          artifacts=artifacts,
+          error=error_message,
       )
+      self.cache.put_receipt(task_id, receipt)
+    except (
+        cache.ArtifactCacheError,
+        OSError,
+        validators.ValidationError,
+    ) as exc:
+      exit_code = exit_code or exit_codes.FAILED
+      upload_failures.append(str(exc))
+    if exit_code != exit_codes.OK and upload_failures:
+      self._spill_fallback_log(out_dir / _RUNNER_LOG, upload_failures)
+    return exit_code
+
+  def _spill_fallback_log(
+      self, log_path: Path, failures: Sequence[str]
+  ) -> None:
+    log_content = "<runner.log unavailable>\n"
+    if not log_path.is_symlink() and log_path.is_file():
+      with contextlib.suppress(OSError):
+        log_content = log_path.read_text(encoding="utf-8", errors="replace")
+    if log_content and not log_content.endswith("\n"):
+      log_content += "\n"
+    reason = "; ".join(failures)
+    sys.stderr.write(
+        f"=== [FALLBACK LOG SPILL: ArtifactCache sync failed ({reason})] ===\n"
+        f"{log_content}=== [END FALLBACK LOG SPILL] ===\n"
+    )
+    sys.stderr.flush()
+
+  def _append_log(self, log_path: Path, message: str) -> None:
+    sys.stderr.write(message)
+    sys.stderr.flush()
+    with contextlib.suppress(OSError):
+      if not log_path.parent.is_symlink() and not log_path.is_symlink():
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+          handle.write(message)
+
+  @contextlib.contextmanager
+  def _preemption_signal_handlers(self) -> Iterator[None]:
+    if threading.current_thread() is not threading.main_thread():
+      yield
+      return
+
+    def _raise_preemption(signum: int, _frame: Any) -> None:
+      raise _PreemptionSignal(signum)
+
+    prev = {
+        sig: signal.signal(sig, _raise_preemption)
+        for sig in (signal.SIGTERM, signal.SIGINT)
+    }
+    try:
+      yield
+    finally:
+      for sig, handler in prev.items():
+        signal.signal(sig, handler)
 
 
 # Governing: SPEC-WORKER/REQ-0001, ADR-0001, ADR-0007
 def main(argv: Sequence[str] | None = None) -> int:
   """CLI entrypoint for `cm-worker` enforcing zero-stdout purity."""
   with contextlib.redirect_stdout(sys.stderr):
-    configure_logging("info")
+    runner_cli.configure_logging("info")
     try:
       cfg = WorkerConfig.from_cli(argv)
-      cache = open_artifact_cache(cfg.cache_uri)
-      return Worker(cache, work_dir=cfg.work_dir).run_task(cfg.task_id)
+      store = cache.open_artifact_cache(cfg.cache_uri)
+      return Worker(store, work_dir=cfg.work_dir).run_task(cfg.task_id)
     except SystemExit as exc:
-      return EXIT_OK if exc.code == 0 else EXIT_USAGE_ERROR
-    except (ValidationError, InvalidCacheKeyError) as exc:
+      return exit_codes.OK if exc.code == 0 else exit_codes.USAGE
+    except (validators.ValidationError, cache.InvalidCacheKeyError) as exc:
       logger.error("Invalid cm-worker arguments: %s", exc)
-      return EXIT_USAGE_ERROR
-    except ArtifactCacheError as exc:
+      return exit_codes.USAGE
+    except cache.ArtifactCacheError as exc:
       logger.error("Failed to open ArtifactCache: %s", exc)
-      return EXIT_EXECUTION_FAILURE
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-      logger.exception("Unexpected error in cm-worker: %s", exc)
-      return EXIT_EXECUTION_FAILURE
+      return exit_codes.FAILED
+    except Exception:  # pylint: disable=broad-exception-caught
+      logger.exception("Unexpected error in cm-worker.")
+      return exit_codes.FAILED
 
 
 if __name__ == "__main__":

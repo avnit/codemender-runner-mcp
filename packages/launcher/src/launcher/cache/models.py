@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0007, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0006, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0006
+# Governing: ADR-0007, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0006
+# Governing: SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0006
 """Shared wire models for Launcher and Worker over ArtifactCache."""
 
 from collections.abc import Iterable, Mapping
@@ -23,68 +24,11 @@ from typing import Any, Self
 import attrs
 from codemender.runner.commands.find_diff import MAX_DIFF_WORKERS
 from codemender.runner.commands.find_diff import MIN_DIFF_WORKERS
-
-from launcher.cache._validation import finding_key_error
+from launcher import validators
 from launcher.validators import ValidationError
-from launcher.validators import check_non_empty_str
-from launcher.validators import check_safe_relative_key
-from launcher.validators import validate_non_empty_str
-from launcher.validators import validate_optional_non_empty_str
-from launcher.validators import validate_safe_path_segment
 
 VALID_WORKER_COMMANDS = frozenset({"init", "find-diff", "fix", "verify"})
 VALID_RECEIPT_STATUSES = frozenset({"SUCCESS", "FAILURE"})
-
-
-def _validate_finding_key(
-    instance: Any, attribute: attrs.Attribute, value: str | None
-) -> None:
-  del instance
-  if value is not None:
-    reason = finding_key_error(value)
-    if reason is not None:
-      raise ValidationError(f"{attribute.name} {reason}: {value!r}")
-
-
-def _validate_command(
-    instance: Any, attribute: attrs.Attribute, value: str
-) -> None:
-  del instance
-  check_non_empty_str(value, field_name=attribute.name)
-  if value not in VALID_WORKER_COMMANDS:
-    raise ValidationError(
-        f"Unsupported RunManifest.command {value!r}; must be one of"
-        f" {sorted(VALID_WORKER_COMMANDS)}."
-    )
-
-
-def _convert_int(value: Any, field_name: str) -> int:
-  """Converts `value` to an int, rejecting booleans, floats, and non-ints."""
-  if isinstance(value, (bool, float)):
-    raise ValidationError(f'{field_name} must be an int, got "{value}".')
-  try:
-    return int(value)
-  except (ValueError, TypeError) as exc:
-    raise ValidationError(
-        f'{field_name} must be an int, got "{value}".'
-    ) from exc
-
-
-def _convert_optional_int(value: Any) -> int | None:
-  if value is None:
-    return None
-  return _convert_int(value, "RunManifest.diff_workers")
-
-
-def _validate_diff_workers(
-    instance: Any, attribute: attrs.Attribute, value: int | None
-) -> None:
-  del instance, attribute
-  if value is not None and not (MIN_DIFF_WORKERS <= value <= MAX_DIFF_WORKERS):
-    raise ValidationError(
-        f"RunManifest.diff_workers must be in"
-        f" {MIN_DIFF_WORKERS}..{MAX_DIFF_WORKERS}, got {value!r}."
-    )
 
 
 def _convert_extra_args(value: Any) -> tuple[str, ...]:
@@ -104,14 +48,6 @@ def _convert_extra_args(value: Any) -> tuple[str, ...]:
       )
     coerced.append(arg)
   return tuple(coerced)
-
-
-def _validate_non_negative_int(
-    instance: Any, attribute: attrs.Attribute, value: int
-) -> None:
-  del instance
-  if value < 0:
-    raise ValidationError(f"{attribute.name} must be >= 0, got {value!r}.")
 
 
 def _convert_duration_seconds(value: Any) -> float:
@@ -143,23 +79,14 @@ def _convert_artifacts(value: Any) -> dict[str, str]:
     )
   validated: dict[str, str] = {}
   for role, key in value.items():
-    check_non_empty_str(role, field_name="ExecutionReceipt.artifacts role")
-    check_safe_relative_key(
+    validators.check_non_empty_str(
+        role, field_name="ExecutionReceipt.artifacts role"
+    )
+    validators.check_safe_relative_key(
         key, field_name=f"ExecutionReceipt.artifacts[{role!r}]"
     )
     validated[role] = key
   return validated
-
-
-def _validate_receipt_status(
-    instance: Any, attribute: attrs.Attribute, value: str
-) -> None:
-  del instance, attribute
-  if value not in VALID_RECEIPT_STATUSES:
-    raise ValidationError(
-        f"ExecutionReceipt.status must be one of"
-        f" {sorted(VALID_RECEIPT_STATUSES)}, got {value!r}."
-    )
 
 
 class _JsonWireModel:
@@ -200,21 +127,28 @@ class _JsonWireModel:
 class RunManifest(_JsonWireModel):
   """Task input manifest (`tasks/<task_id>/input/manifest.json`)."""
 
-  command: str = attrs.field(validator=_validate_command)
-  task_id: str = attrs.field(validator=validate_safe_path_segment)
+  command: str = attrs.field(
+      validator=validators.validate_in(VALID_WORKER_COMMANDS)
+  )
+  task_id: str = attrs.field(validator=validators.validate_safe_path_segment)
   base_ref: str | None = attrs.field(
-      default=None, validator=validate_optional_non_empty_str
+      default=None, validator=validators.validate_optional_non_empty_str
   )
   finding_key: str | None = attrs.field(
-      default=None, validator=_validate_finding_key
+      default=None, validator=validators.validate_optional_finding_key
   )
   diff_workers: int | None = attrs.field(
       default=None,
-      converter=_convert_optional_int,
-      validator=_validate_diff_workers,
+      converter=attrs.converters.optional(
+          validators.convert_int(
+              "RunManifest.diff_workers",
+              min_value=MIN_DIFF_WORKERS,
+              max_value=MAX_DIFF_WORKERS,
+          )
+      ),
   )
   log_level: str | None = attrs.field(
-      default=None, validator=validate_optional_non_empty_str
+      default=None, validator=validators.validate_optional_non_empty_str
   )
   extra_args: tuple[str, ...] = attrs.field(
       default=(), converter=_convert_extra_args
@@ -238,32 +172,36 @@ class RunManifest(_JsonWireModel):
     return {key: val for key, val in raw.items() if val is not None}
 
 
-# Governing: SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0006, ADR-0001, ADR-0007, ADR-0009
+# Governing: SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0006, ADR-0001, ADR-0007
+# Governing: ADR-0009
 @attrs.define(frozen=True)
 class ExecutionReceipt(_JsonWireModel):
   """Task completion receipt (`tasks/<task_id>/output/receipt.json`)."""
 
-  status: str = attrs.field(validator=_validate_receipt_status)
-  exit_code: int = attrs.field(
-      converter=lambda v: _convert_int(v, "ExecutionReceipt.exit_code")
+  status: str = attrs.field(
+      validator=validators.validate_in(VALID_RECEIPT_STATUSES)
   )
-  command: str = attrs.field(validator=validate_non_empty_str)
-  task_id: str = attrs.field(validator=validate_safe_path_segment)
-  started_at: str = attrs.field(validator=validate_non_empty_str)
-  completed_at: str = attrs.field(validator=validate_non_empty_str)
+  exit_code: int = attrs.field(
+      converter=validators.convert_int("ExecutionReceipt.exit_code")
+  )
+  command: str = attrs.field(validator=validators.validate_non_empty_str)
+  task_id: str = attrs.field(validator=validators.validate_safe_path_segment)
+  started_at: str = attrs.field(validator=validators.validate_non_empty_str)
+  completed_at: str = attrs.field(validator=validators.validate_non_empty_str)
   duration_seconds: float = attrs.field(
       default=0.0, converter=_convert_duration_seconds
   )
   finding_count: int = attrs.field(
       default=0,
-      converter=lambda v: _convert_int(v, "ExecutionReceipt.finding_count"),
-      validator=_validate_non_negative_int,
+      converter=validators.convert_int(
+          "ExecutionReceipt.finding_count", min_value=0
+      ),
   )
   artifacts: dict[str, str] = attrs.field(
       factory=dict, converter=_convert_artifacts, hash=False
   )
   error: str | None = attrs.field(
-      default=None, validator=validate_optional_non_empty_str
+      default=None, validator=validators.validate_optional_non_empty_str
   )
 
   def __attrs_post_init__(self) -> None:

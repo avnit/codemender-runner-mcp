@@ -126,16 +126,17 @@ packages/launcher/
         ├── cache/
         │   ├── __init__.py      # Exports ArtifactCache, LocalArtifactCache, GcsArtifactCache, open_artifact_cache, sanitize_branch_name, build_gcs_cache_uri, models, errors
         │   ├── models.py        # Wire schemas: RunManifest, ExecutionReceipt
-        │   ├── test_models.py   # Co-located unit tests for models.py & _validation.py
+        │   ├── test_models.py   # Co-located unit tests for models.py
         │   ├── errors.py        # Typed exception hierarchy & fsspec error translation
         │   ├── test_errors.py   # Co-located unit tests for errors.py
         │   ├── base.py          # ArtifactCache ABC (atomic fsspec primitives + typed protocol methods + URI/branch helpers)
         │   ├── test_base.py     # Co-located unit tests for base.py
-        │   ├── _validation.py   # Shared segment/key/finding-key predicates (imports nothing from launcher.cache)
         │   ├── local.py         # LocalArtifactCache (file:// via LocalFileSystem + atomic os.replace writes)
         │   ├── test_local.py    # Co-located unit tests for local.py
         │   ├── gcs.py           # GcsArtifactCache (gs:// via gcsfs.GCSFileSystem, lazily imported)
         │   └── test_gcs.py      # Co-located unit tests for gcs.py & open_artifact_cache
+        ├── validators.py        # Shared attrs field validators, converters, and path/finding-key predicates
+        ├── test_validators.py   # Co-located unit tests for validators.py
         └── worker.py            # Inside-container Worker server (SPEC-WORKER, imports from launcher.cache)
 ```
 

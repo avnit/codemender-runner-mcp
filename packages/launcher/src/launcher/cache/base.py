@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0007, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0006
+# Governing: ADR-0007, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0006
 """Abstract base class, protocol methods, and URI helpers for ArtifactCache."""
 
 from __future__ import annotations
@@ -29,15 +30,7 @@ from typing import Any
 from uuid import uuid4
 
 import fsspec
-
-from launcher.cache._validation import (
-    SARIF_SUFFIX,
-    TEMP_PREFIX,
-    canonical_finding_key,
-    finding_key_error,
-    relative_key_error,
-    single_segment_error,
-)
+from launcher import validators
 from launcher.cache.errors import (
     ArtifactCacheError,
     ArtifactIntegrityError,
@@ -85,7 +78,7 @@ def normalize_cache_key(
     )
 
   normalized = key.replace("\\", "/")
-  reason = relative_key_error(normalized)
+  reason = validators.relative_key_error(normalized)
   if reason is not None:
     raise InvalidCacheKeyError(
         f"Cache key {reason}",
@@ -105,7 +98,7 @@ def validate_single_segment(
     op: str = "",
 ) -> str:
   """Validates that `value` is a single safe path segment without separators."""
-  reason = single_segment_error(value)
+  reason = validators.single_segment_error(value)
   if reason is not None:
     raise InvalidCacheKeyError(
         f"{field} must be a single safe path segment ({reason}): {value!r}",
@@ -220,7 +213,8 @@ def build_gcs_cache_uri(
   )
 
 
-# Governing: SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0006, ADR-0009
+# Governing: ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0006
 class ArtifactCache(ABC):
   """Root-scoped transit cache and client-worker protocol over fsspec.
 
@@ -461,8 +455,10 @@ class ArtifactCache(ABC):
           uri=self._uri,
           key=str(finding_key),
       )
-    resolved_key = canonical_finding_key(finding_key.replace("\\", "/"))
-    reason = finding_key_error(resolved_key)
+    resolved_key = validators.canonical_finding_key(
+        finding_key.replace("\\", "/")
+    )
+    reason = validators.finding_key_error(resolved_key)
     if reason is not None:
       raise InvalidCacheKeyError(
           f"finding_key {reason}, got {finding_key!r}",
@@ -482,12 +478,12 @@ class ArtifactCache(ABC):
           key=str(finding_id),
       )
     safe_id = validate_single_segment(
-        finding_id.removesuffix(SARIF_SUFFIX),
+        finding_id.removesuffix(validators.SARIF_SUFFIX),
         field="finding_id",
         uri=self._uri,
         op="put_finding",
     )
-    key = canonical_finding_key(safe_id)
+    key = validators.canonical_finding_key(safe_id)
     self.put_file(key, src)
     return key
 
@@ -586,7 +582,8 @@ class ArtifactCache(ABC):
   @staticmethod
   def _staging_sibling(target: Path) -> Path:
     """Returns a unique `.tmp.<uuid>.<name>` staging path next to `target`."""
-    return target.parent / f"{TEMP_PREFIX}{uuid4().hex}.{target.name}"
+    name = f"{validators.TEMP_PREFIX}{uuid4().hex}.{target.name}"
+    return target.parent / name
 
   @staticmethod
   def _discard_staging(tmp_path: Path) -> None:

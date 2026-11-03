@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0006, ADR-0009
-"""Unit and contract tests for launcher.cache.base and _validation."""
+# Governing: ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0006
+"""Unit and contract tests for `launcher.cache.base`."""
 
 from __future__ import annotations
 

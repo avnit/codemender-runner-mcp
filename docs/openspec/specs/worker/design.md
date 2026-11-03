@@ -451,9 +451,9 @@ parameters staged by `Launcher` and consumed by `Worker.run_task`.
 ### 2. `ExecutionReceipt` (`tasks/<task_id>/output/receipt.json`)
 
 `ExecutionReceipt` is a frozen `attrs` class (`@attrs.define(frozen=True)`)
-defined in `launcher.cache` (`SPEC-ARTIFACT-CACHE`, and re-exported by
-`launcher.worker`) representing the structured task completion record written by
-`Worker` to `tasks/<task_id>/output/receipt.json`.
+defined in `launcher.cache` (`SPEC-ARTIFACT-CACHE`, and used as
+`cache.ExecutionReceipt` by `launcher.worker`) representing the structured task
+completion record written by `Worker` to `tasks/<task_id>/output/receipt.json`.
 
 | Field | Python Type | Required | Description |
 | :--- | :--- | :--- | :--- |
@@ -549,7 +549,7 @@ When `Worker.run_task(task_id)` executes, it registers handlers for
 `signal.SIGTERM` and `signal.SIGINT` (restoring previous signal handlers in a
 `finally` block when `run_task` returns):
 - On `SIGTERM` (`exit_code = 143`) or `SIGINT` (`exit_code = 130`), the signal
-  handler raises `_PreemptionSignal(signum, exit_code)`.
+  handler raises `_PreemptionSignal(signum)`.
 - As `_PreemptionSignal` unwinds the call stack through `CmAdapter.run`,
   `subprocess.run`'s built-in exception handler automatically kills and reaps any
   active child `cm` process.
