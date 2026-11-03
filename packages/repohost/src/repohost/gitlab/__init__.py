@@ -15,5 +15,3 @@
 # Governing: ADR-0008
 
 """GitLab repository hosting platform integration."""
-
-__all__: list[str] = []

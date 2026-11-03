@@ -99,7 +99,6 @@ class TestReExports(unittest.TestCase):
     )
     for name in expected_branch_names:
       self.assertIs(getattr(github_pkg, name), getattr(branches, name))
-      self.assertIn(name, github_pkg.__all__)
 
     for client_name in (
         "post_or_update_sticky_comment",

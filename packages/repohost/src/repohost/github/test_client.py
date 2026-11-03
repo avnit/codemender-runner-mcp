@@ -86,7 +86,6 @@ class TestReExports(unittest.TestCase):
     }
     for name, obj in expected_symbols.items():
       self.assertIs(getattr(github_pkg, name), obj)
-      self.assertIn(name, github_pkg.__all__)
 
 
 class TestTruncateAndFormatting(unittest.TestCase):

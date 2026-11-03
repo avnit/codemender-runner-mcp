@@ -21,11 +21,6 @@ import shutil
 import tarfile
 import tempfile
 
-__all__ = [
-    "flatten_repo_if_nested",
-    "unpack_tar_gz_preserving_permissions",
-]
-
 
 def _validate_tar_member(member: tarfile.TarInfo, abs_dest: Path) -> Path:
   """Validates a single tar member before extraction, returning its target path.

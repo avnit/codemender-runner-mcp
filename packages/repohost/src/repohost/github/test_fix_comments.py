@@ -109,7 +109,6 @@ class TestReExports(unittest.TestCase):
     )
     for name in expected_names:
       self.assertIs(getattr(github_pkg, name), getattr(fix_comments, name))
-      self.assertIn(name, github_pkg.__all__)
 
 
 class TestPlanFixes(unittest.TestCase):
