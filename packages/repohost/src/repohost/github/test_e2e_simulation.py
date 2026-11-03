@@ -246,6 +246,14 @@ def _make_mock_client_module(client_cls=MockCloudRunClient):
 class TestEndToEndSimulation(unittest.TestCase):
   """End-to-end simulation of gha_runner with Cloud Run client execution."""
 
+  def setUp(self):
+    super().setUp()
+    self._delete_comments_patcher = patch.object(
+        gha_runner, "delete_codemender_review_comments", return_value=0
+    )
+    self.mock_delete_comments = self._delete_comments_patcher.start()
+    self.addCleanup(self._delete_comments_patcher.stop)
+
   def test_e2e_cloudrun_simulation_success(self):
     """Simulates gha_runner.main() with Cloud Run backend and mock in-process client.
 

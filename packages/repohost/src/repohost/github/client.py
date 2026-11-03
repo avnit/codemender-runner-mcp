@@ -82,16 +82,6 @@ class ReviewResult:
 
 
 @dataclasses.dataclass(frozen=True)
-class FindingComment:
-  """An existing CodeMender review comment on the PR carrying a finding tag."""
-
-  url: str
-  outdated: bool
-  kind: str
-  comment_id: int = 0
-
-
-@dataclasses.dataclass(frozen=True)
 class VerifyComment:
   """An existing CodeMender verification reply comment on the PR."""
 
@@ -167,19 +157,45 @@ def post_or_update_sticky_comment(
     return None
 
 
-def list_finding_comments(
+def delete_review_comment(repo: str, comment_id: int, token: str) -> bool:
+  """Deletes a single PR review comment (`DELETE /repos/{repo}/pulls/comments/{comment_id}`).
+
+  Args:
+    repo: Repository in `owner/name` form.
+    comment_id: Positive review comment ID to delete.
+    token: GitHub token with `pull-requests: write`.
+
+  Returns:
+    `True` if the comment was deleted or already absent (`404`), `False` otherwise.
+  """
+  if not _positive_id(comment_id):
+    return False
+  return _delete(
+      f"{GITHUB_API_URL}/repos/{repo}/pulls/comments/{comment_id}",
+      token,
+      f"review comment {comment_id} in {repo}",
+  )
+
+
+def delete_codemender_review_comments(
     repo: str, pr_number: int, token: str
-) -> Optional[Dict[str, FindingComment]]:
-  """Lists existing bot review comments on the PR keyed by their finding tag.
+) -> Optional[int]:
+  """Deletes all existing bot-authored CodeMender review comments on the PR.
+
+  Identifies bot-authored review comments carrying a finding tag
+  (`<!-- codemender-finding:... -->`), a verification tag
+  (`<!-- codemender-verify:... -->`), or replying to a root CodeMender review
+  comment (such as a same-lines overlap note), and deletes replies before root
+  comments.
 
   Args:
     repo: Repository in `owner/name` form.
     pr_number: Pull request number.
-    token: GitHub token with `pull-requests: read`.
+    token: GitHub token with `pull-requests: write`.
 
   Returns:
-    Mapping from `finding_id` to `FindingComment` (preferring non-outdated
-    comments when multiple exist), or `None` if the API request failed.
+    Number of review comments deleted, or `None` if listing or any deletion
+    failed.
   """
   comments = _get_pages(
       f"{GITHUB_API_URL}/repos/{repo}/pulls/{pr_number}/comments?per_page=100",
@@ -188,30 +204,46 @@ def list_finding_comments(
   )
   if comments is None:
     return None
-  found: Dict[str, FindingComment] = {}
+
+  root_cm_ids: Set[int] = set()
   for comment in comments:
-    if not is_bot_comment(comment) or comment.get("in_reply_to_id"):
+    if not is_bot_comment(comment):
+      continue
+    cid = _positive_id(comment.get("id"))
+    body = str(comment.get("body") or "")
+    if cid and (FINDING_TAG_RE.search(body) or VERIFY_TAG_RE.search(body)):
+      root_cm_ids.add(cid)
+
+  reply_ids: List[int] = []
+  root_ids: List[int] = []
+  for comment in comments:
+    if not is_bot_comment(comment):
+      continue
+    cid = _positive_id(comment.get("id"))
+    if not cid:
       continue
     body = str(comment.get("body") or "")
-    tags = FINDING_TAG_RE.findall(body)
-    if not tags:
+    parent_id = _positive_id(comment.get("in_reply_to_id"))
+    is_cm = bool(
+        FINDING_TAG_RE.search(body)
+        or VERIFY_TAG_RE.search(body)
+        or (parent_id and parent_id in root_cm_ids)
+    )
+    if not is_cm:
       continue
-    outdated = (
-        False
-        if comment.get("subject_type") == "file"
-        else (comment.get("line") is None and comment.get("position") is None)
-    )
-    entry = FindingComment(
-        url=str(comment.get("html_url") or ""),
-        outdated=outdated,
-        kind="suggestion" if _has_suggestion_block(body) else "patch",
-        comment_id=_positive_id(comment.get("id")),
-    )
-    for fid in tags:
-      prev = found.get(fid)
-      if prev is None or (prev.outdated and not entry.outdated):
-        found[fid] = entry
-  return found
+    if parent_id:
+      reply_ids.append(cid)
+    else:
+      root_ids.append(cid)
+
+  deleted = 0
+  all_ok = True
+  for cid in (*reply_ids, *root_ids):
+    if delete_review_comment(repo, cid, token):
+      deleted += 1
+    else:
+      all_ok = False
+  return deleted if all_ok else None
 
 
 def get_pr_diff_line_ranges(
@@ -315,12 +347,9 @@ def create_review_with_suggestions(
       comment["start_side"] = "RIGHT"
     comments.append(comment)
 
-  in_parts = f" in {len(hunks)} parts" if len(hunks) > 1 else ""
   payload: Dict[str, Any] = {
       "event": "COMMENT",
-      "body": _join_blocks(
-          tag, header, [f"CodeMender suggests a fix{in_parts}."]
-      ),
+      "body": "",
       "comments": comments,
   }
   if head_sha:
@@ -965,26 +994,26 @@ def _terminate_open_fence(text: str) -> str:
   return f"{text}\n{open_delim}" if open_delim else text
 
 
-def _has_suggestion_block(body: str) -> bool:
-  open_fence = ""
-  for line in body.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-    match = _MD_FENCE_RE.match(line)
-    if not match:
-      continue
-    fence, info = match.group(1), match.group(2)
-    if not open_fence:
-      if fence[0] == "`" and "`" in info:
-        continue
-      words = info.split()
-      if words and words[0] == "suggestion":
-        return True
-      open_fence = fence
-    elif (
-        fence[0] == open_fence[0]
-        and len(fence) >= len(open_fence)
-        and not info.strip()
-    ):
-      open_fence = ""
+@retry_on_exception(max_tries=3, initial_delay=3, backoff_factor=2)
+def _delete_with_retries(url: str, token: str) -> Any:
+  with requests.Session() as session:
+    resp = session.delete(
+        url, headers=_headers(token), timeout=_POST_TIMEOUT_SECONDS
+    )
+  _raise_if_retryable(resp)
+  return resp
+
+
+def _delete(url: str, token: str, what: str) -> bool:
+  try:
+    resp = _delete_with_retries(url, token)
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.warning("Failed to delete %s: %s", what, e)
+    return False
+  status = resp.status_code
+  if 200 <= status < 300 or status == 404:
+    return True
+  logger.warning("Failed to delete %s: HTTP %d", what, status)
   return False
 
 

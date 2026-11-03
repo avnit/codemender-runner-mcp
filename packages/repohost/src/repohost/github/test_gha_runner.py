@@ -161,11 +161,20 @@ def _launcher(scan_result=None, error=None):
 @patch.object(gha_runner, "post_or_update_sticky_comment", return_value="https://c")
 class TestRunPr(unittest.TestCase):
 
+  def setUp(self):
+    super().setUp()
+    self._delete_comments_patcher = patch.object(
+        gha_runner, "delete_codemender_review_comments", return_value=0
+    )
+    self.mock_delete_comments = self._delete_comments_patcher.start()
+    self.addCleanup(self._delete_comments_patcher.stop)
+
   def test_clean_scan_posts_no_vulnerabilities_comment(self, mock_post):
     launcher = _launcher()
 
     self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 0)
 
+    self.mock_delete_comments.assert_called_once_with("o/r", 7, "tok")
     self.assertEqual(
         launcher.run.call_args_list,
         [
@@ -244,6 +253,20 @@ class TestRunPr(unittest.TestCase):
     )
     self.assertIn("<details>", body)
     self.assertIn("Untrusted filename user_archive", body)
+
+  def test_delete_review_comments_failure_warns_without_failing_run(
+      self, mock_post
+  ):
+    del mock_post
+    self.mock_delete_comments.return_value = None
+    launcher = _launcher()
+    with patch("builtins.print") as mock_print:
+      self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 0)
+    printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+    self.assertIn(
+        "::warning::Could not delete CodeMender's earlier review comments",
+        printed,
+    )
 
   def test_fork_pr_runs_and_handles_comment_failure(self, mock_post):
     launcher = _launcher()
@@ -372,14 +395,12 @@ class TestRunPr(unittest.TestCase):
     self.assertIn("✅ **No vulnerabilities found**", body_posted_ok)
 
   # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0001, SPEC-GHA-FIX
-  @patch.object(gha_runner, "list_finding_comments", return_value={})
   @patch.object(gha_runner.fix_comments, "checked_out_commit", return_value="aaaabbbbccccdddd")
   @patch.object(gha_runner.fix_comments, "FixPoster")
   def test_M2CloudRunParallelFixes(
       self,
       mock_poster_cls,
       _mock_head,
-      _mock_earlier,
       mock_post,
   ):
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -427,6 +448,7 @@ class TestRunPr(unittest.TestCase):
         rc = gha_runner.run_pr(_pr_event(), env, launcher, out_dir=out_dir)
 
       self.assertEqual(rc, 0)
+      self.mock_delete_comments.assert_called_once_with("o/r", 7, "tok")
       launcher.run_parallel.assert_called_once()
       self.assertEqual(launcher.run_parallel.call_args.kwargs["max_workers"], 2)
       self.assertTrue(
@@ -772,14 +794,14 @@ class TestM2FixConfigAndOrchestration(unittest.TestCase):
       )
 
   @patch.object(gha_runner, "post_or_update_sticky_comment", return_value="https://c")
-  @patch.object(gha_runner, "list_finding_comments", return_value={})
+  @patch.object(gha_runner, "delete_codemender_review_comments", return_value=2)
   @patch.object(gha_runner.fix_comments, "checked_out_commit", return_value="aaaabbbbccccdddd")
   @patch.object(gha_runner.fix_comments, "FixPoster")
   def test_run_pr_with_fixes_updates_sticky_comment_in_place(
       self,
       mock_poster_cls,
       _mock_head,
-      _mock_earlier,
+      mock_delete_comments,
       mock_post_sticky,
   ):
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -825,6 +847,7 @@ class TestM2FixConfigAndOrchestration(unittest.TestCase):
         rc = gha_runner.run_pr(_pr_event(), env, launcher, out_dir=out_dir)
 
       self.assertEqual(rc, 0)
+      mock_delete_comments.assert_called_once_with("o/r", 7, "tok")
       self.assertEqual(launcher.run_parallel.call_args.kwargs["max_workers"], 3)
       self.assertTrue(
           os.path.isfile(os.path.join(out_dir, "findings", "finding-001.sarif"))

@@ -27,20 +27,20 @@ import repohost.github as github_pkg
 from repohost.github import client as github
 from repohost.github.client import (
     FINDING_TAG_RE,
-    FindingComment,
     GITHUB_API_URL,
     MAX_COMMENT_BODY_CHARS,
     ReviewResult,
     STICKY_SUMMARY_MARKER,
     code_fence,
     create_review_with_suggestions,
+    delete_codemender_review_comments,
+    delete_review_comment,
     fetch_finding_sarif_from_artifact,
     finding_tag,
     format_patch_comment,
     get_pr_diff_line_ranges,
     get_review_comment,
     get_sticky_comment_body,
-    list_finding_comments,
     list_verify_comments,
     post_or_update_sticky_comment,
     post_patch_comment,
@@ -67,17 +67,17 @@ class TestReExports(unittest.TestCase):
   def test_github_package_reexports_client_symbols(self):
     expected_symbols = {
         "FINDING_TAG_RE": FINDING_TAG_RE,
-        "FindingComment": FindingComment,
         "GITHUB_API_URL": GITHUB_API_URL,
         "MAX_COMMENT_BODY_CHARS": MAX_COMMENT_BODY_CHARS,
         "ReviewResult": ReviewResult,
         "STICKY_SUMMARY_MARKER": STICKY_SUMMARY_MARKER,
         "code_fence": code_fence,
         "create_review_with_suggestions": create_review_with_suggestions,
+        "delete_codemender_review_comments": delete_codemender_review_comments,
+        "delete_review_comment": delete_review_comment,
         "finding_tag": finding_tag,
         "format_patch_comment": format_patch_comment,
         "get_pr_diff_line_ranges": get_pr_diff_line_ranges,
-        "list_finding_comments": list_finding_comments,
         "post_or_update_sticky_comment": post_or_update_sticky_comment,
         "post_patch_comment": post_patch_comment,
         "reply_to_comment": reply_to_comment,
@@ -142,7 +142,9 @@ class TestGitHubApi(unittest.TestCase):
     )
 
   @patch.object(github.requests, "Session")
-  def test_list_finding_comments_and_pr_diff_ranges(self, mock_session_cls):
+  def test_delete_codemender_review_comments_and_pr_diff_ranges(
+      self, mock_session_cls
+  ):
     session = mock_session_cls.return_value.__enter__.return_value
     session.get.return_value = _response([
         {
@@ -150,23 +152,50 @@ class TestGitHubApi(unittest.TestCase):
             "user": {"type": "Bot"},
             "body": "<!-- codemender-finding:aabbcc112233 -->\n```suggestion\nx\n```",
             "html_url": "https://c/1",
-            "line": 10,
-            "subject_type": "line",
         },
         {
             "id": 2,
             "user": {"type": "Bot"},
-            "body": "<!-- codemender-finding:ddeeff445566 -->\n```diff\nx\n```",
+            "in_reply_to_id": 1,
+            "body": "This fix changes the same lines as the fix for finding 2.",
             "html_url": "https://c/2",
-            "line": None,
-            "subject_type": "line",
+        },
+        {
+            "id": 3,
+            "user": {"type": "Bot"},
+            "in_reply_to_id": 1,
+            "body": verify_tag("done", "aabbcc112233", "VERIFIED") + "\nVerified",
+            "html_url": "https://c/3",
+        },
+        {
+            "id": 4,
+            "user": {"type": "User"},
+            "in_reply_to_id": 1,
+            "body": "@cm-runner verify",
+            "html_url": "https://c/4",
+        },
+        {
+            "id": 5,
+            "user": {"type": "Bot"},
+            "body": "Unrelated bot comment from another integration",
+            "html_url": "https://c/5",
         },
     ])
-    comments = list_finding_comments("o/r", 7, "tok")
-    self.assertFalse(comments["aabbcc112233"].outdated)
-    self.assertEqual(comments["aabbcc112233"].kind, "suggestion")
-    self.assertTrue(comments["ddeeff445566"].outdated)
-    self.assertEqual(comments["ddeeff445566"].kind, "patch")
+    session.delete.return_value = _response({}, 204)
+
+    deleted = delete_codemender_review_comments("o/r", 7, "tok")
+    self.assertEqual(deleted, 3)
+    deleted_urls = [c.args[0] for c in session.delete.call_args_list]
+    # Replies (2, 3) are deleted before root comment (1); user/unrelated comments (4, 5) are untouched.
+    self.assertEqual(
+        deleted_urls,
+        [
+            f"{GITHUB_API_URL}/repos/o/r/pulls/comments/2",
+            f"{GITHUB_API_URL}/repos/o/r/pulls/comments/3",
+            f"{GITHUB_API_URL}/repos/o/r/pulls/comments/1",
+        ],
+    )
+    self.assertFalse(delete_review_comment("o/r", 0, "tok"))
 
     session.get.return_value = _response([
         {
@@ -195,6 +224,11 @@ class TestGitHubApi(unittest.TestCase):
     self.assertTrue(res.ok)
     self.assertEqual(res.url, "https://r/1")
     self.assertEqual(res.comment_id, 11)
+    self.assertEqual(session.post.call_args.kwargs["json"]["body"], "")
+    self.assertIn(
+        "<!-- codemender-finding:aabbcc112233 -->",
+        session.post.call_args.kwargs["json"]["comments"][0]["body"],
+    )
 
     # Line comment fails with 422 -> falls back to file-level comment.
     session.post.reset_mock()

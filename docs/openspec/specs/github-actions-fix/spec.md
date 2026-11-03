@@ -1,5 +1,5 @@
 <!--*
-freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-23' }
+freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-31' }
 *-->
 
 <!--
@@ -247,8 +247,9 @@ With fixes on, the sticky comment MUST:
 - **CUJ UUID:** `cuj-gha-fix-suggestion`
 
 1. The action MUST post a `fixed` patch as one review per finding, with
-   `event: COMMENT`, `commit_id` set to the PR head SHA and one ` ```suggestion `
-   comment per contiguous change, but only if all of these hold:
+   `event: COMMENT`, an empty review `body` (`""`), `commit_id` set to the PR
+   head SHA and one ` ```suggestion ` comment per contiguous change, but only if
+   all of these hold:
    - every file in the patch is modified, not added, deleted, renamed or binary;
    - every line the patch changes is inside the new side of the PR diff's
      hunks;
@@ -263,7 +264,7 @@ With fixes on, the sticky comment MUST:
 #### Scenario: A fix inside the PR's changes
 - **GIVEN** a patch that changes only lines the PR added
 - **WHEN** the action posts it
-- **THEN** it MUST post one review with suggestions and `commit_id` equal to the PR head SHA.
+- **THEN** it MUST post one review with suggestions, an empty review `body` (`""`), and `commit_id` equal to the PR head SHA.
 
 #### Scenario: A fix that adds an import at the top of the file
 - **GIVEN** a patch that also changes line 3, which the PR didn't touch
@@ -301,36 +302,42 @@ With fixes on, the sticky comment MUST:
 
 ---
 
-### REQ-0009: Don't Fix or Post the Same Thing Twice {#req-0009}
+### REQ-0009: Fresh PR Review Comments per Run and Intra-Run Deduplication {#req-0009}
 
 - **CUJ UUID:** `cuj-gha-fix-dedup`
 
-1. To correlate findings across pushes on the same PR without re-running
-   expensive fixes, every comment CodeMender posts with a fix MUST contain a
-   deterministic finding marker `<!-- codemender-finding:<finding_id> -->`,
-   where `<finding_id>` is derived from the SARIF result's fingerprint metadata
+1. To correlate findings for intra-run deduplication and on-demand verification
+   (`@cm-runner verify`, [SPEC-GHA-VERIFY](../github-actions-verify/spec.md)),
+   every comment CodeMender posts with a fix MUST contain a deterministic
+   finding marker `<!-- codemender-finding:<finding_id> -->`, where
+   `<finding_id>` is derived from the SARIF result's fingerprint metadata
    (`fingerprints` or `partialFingerprints`, falling back to a deterministic
    hash of the file path, rule ID, start line and message when no SARIF
    fingerprint is present).
-2. Before starting fixes, the action MUST list the PR's review comments. It
-   MUST skip every finding whose `finding_id` is on a comment that isn't
-   outdated, and that finding's Fix cell MUST link to that comment.
-3. A line comment is outdated when GitHub no longer gives it a line. A finding
-   whose `finding_id` is only on outdated comments MUST be fixed again.
-4. Findings with the same `finding_id` in one run MUST be fixed once and share
-   the result.
+2. On every PR scan run (`run_pr`), the action MUST list the PR's review
+   comments and delete all existing bot-authored CodeMender review comments
+   (`DELETE /repos/{repo}/pulls/comments/{comment_id}` for comments carrying a
+   `<!-- codemender-finding:... -->` or `<!-- codemender-verify:... -->` marker
+   or replying to a CodeMender finding comment), even when `find-diff` reports
+   `0` findings or `fix: false`, while updating the sticky summary comment in
+   place (`<!-- codemender-summary -->`).
+3. Every finding reported by `find-diff` in the current run MUST be fixed fresh
+   (never skipped because an earlier run posted a comment).
+4. Findings with the same `finding_id` within a single run MUST be fixed once
+   and share the result.
 
-#### Scenario: A second push skips a fixed finding
-- **GIVEN** a PR where an earlier run posted a suggestion for a finding
-- **AND** the developer pushed a change to another file
-- **WHEN** the workflow runs again and `find-diff` reports the same finding
-- **THEN** the action MUST NOT run `fix` for it
-- **AND** its Fix cell MUST link to the earlier suggestion.
+#### Scenario: A second push deletes earlier CodeMender review comments and fixes fresh
+- **GIVEN** a PR where an earlier run posted a suggestion or patch comment for a finding
+- **AND** the developer pushes a new commit to the PR
+- **WHEN** the workflow runs again and `find-diff` reports findings
+- **THEN** the action MUST delete the earlier bot-authored CodeMender review comments on the PR
+- **AND** it MUST run `fix` and post fresh comments for the current run's findings.
 
-#### Scenario: An outdated suggestion is fixed again
-- **GIVEN** an earlier suggestion for a finding that GitHub now shows as outdated
-- **WHEN** `find-diff` reports that finding again with the same fingerprint
-- **THEN** the action MUST run `fix` for it again.
+#### Scenario: A clean re-run wipes earlier CodeMender review comments
+- **GIVEN** a PR where an earlier run posted CodeMender review comments
+- **WHEN** a subsequent PR scan run reports `0` findings (or runs with `fix: false`)
+- **THEN** the action MUST still delete all earlier bot-authored CodeMender review comments on the PR
+- **AND** update the sticky summary comment in place.
 
 ---
 

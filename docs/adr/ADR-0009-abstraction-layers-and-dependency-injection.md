@@ -749,7 +749,7 @@ sequenceDiagram
          - **Stage 3 (`report` — Single Fan-In Aggregator):** A single job runs
            after all `Stage 2` shards finish (`if: always()` in GitHub Actions /
            `when: always` in GitLab CI), reads the merged `ArtifactCache` across
-           all shards, deduplicates against `RepoHost.list_existing_comments()`,
+           all shards, wipes earlier bot-authored CodeMender review comments,
            posts inline suggestions and fallback patches, updates the single
            sticky summary comment once, and sets the final
            `CodeMender / Security Gate` commit status.
@@ -902,7 +902,7 @@ symmetric workspace file parity across `local` and `cloudrun` backends):
     2.1.0 files) and
     [SPEC-GHA-FIX REQ-0009](../openspec/specs/github-actions-fix/spec.md#req-0009)
     (recording deterministic finding fingerprints and scan metadata in
-    `scan-meta.json` for cross-job correlation and comment deduplication).
+    `scan-meta.json` for intra-run deduplication and on-demand verification correlation).
   - **`tasks/<task_id>/input/manifest.json` (`RunManifest`) &
     `tasks/<task_id>/output/{receipt.json, runner.log}` (`ExecutionReceipt`):**
     Governed by

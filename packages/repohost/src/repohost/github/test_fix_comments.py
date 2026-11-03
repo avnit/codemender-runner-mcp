@@ -113,9 +113,9 @@ class TestReExports(unittest.TestCase):
 
 class TestPlanFixes(unittest.TestCase):
 
-  def test_findings_without_earlier_comments_are_all_fixed(self):
+  def test_all_distinct_findings_are_planned_as_working(self):
     findings = [_finding(1, start=1, end=1), _finding(2, start=3, end=3)]
-    plan = fix_comments.plan_fixes(findings, {})
+    plan = fix_comments.plan_fixes(findings)
     self.assertEqual([f.index for f in plan.to_fix], [1, 2])
     self.assertEqual(
         plan.cells,
@@ -124,22 +124,9 @@ class TestPlanFixes(unittest.TestCase):
     self.assertEqual(plan.shared, {1: [1], 2: [2]})
     self.assertEqual(plan.fingerprints[2], findings[1].finding_id)
 
-  def test_current_earlier_comment_is_linked_and_outdated_is_fixed_again(self):
-    f1, f2, f3 = _finding(1, start=1), _finding(2, start=2), _finding(3, start=3)
-    earlier = {
-        f1.finding_id: github.FindingComment(url="https://c/1", outdated=False, kind="suggestion"),
-        f2.finding_id: github.FindingComment(url="https://c/2", outdated=False, kind="patch"),
-        f3.finding_id: github.FindingComment(url="https://c/3", outdated=True, kind="suggestion"),
-    }
-    plan = fix_comments.plan_fixes([f1, f2, f3], earlier)
-    self.assertEqual([f.index for f in plan.to_fix], [3])
-    self.assertEqual(plan.cells[1], fix_comments.FixCell("suggested", "https://c/1"))
-    self.assertEqual(plan.cells[2], fix_comments.FixCell("patch", "https://c/2"))
-    self.assertEqual(plan.cells[3], fix_comments.FixCell("working"))
-
   def test_same_fingerprint_is_fixed_once_and_shared(self):
     findings = [_finding(1, fp="dup"), _finding(2, fp="dup"), _finding(3, fp="other")]
-    plan = fix_comments.plan_fixes(findings, {})
+    plan = fix_comments.plan_fixes(findings)
     self.assertEqual([f.index for f in plan.to_fix], [1, 3])
     self.assertEqual(plan.shared, {1: [1, 2], 3: [3]})
     self.assertEqual(plan.cells[2], fix_comments.FixCell("working"))

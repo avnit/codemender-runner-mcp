@@ -1,5 +1,5 @@
 <!--*
-freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-23' }
+freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-31' }
 *-->
 
 <!--
@@ -235,26 +235,38 @@ Governed by [SPEC-GHA-FIX](spec.md), [SPEC-GHA](../github-actions/spec.md),
   themselves. SPEC-FIX left it as a product decision (open question 3). A plain
   note is enough at the demo stage.
 
-### Decision 9: Don't Fix or Post the Same Thing Twice {#decision-9}
+### Decision 9: Wipe Earlier CodeMender Review Comments on Every Run {#decision-9}
 
 - **Choice:** Every suggestion and patch comment carries a hidden tag,
   `<!-- codemender-finding:<fingerprint> -->`. `SarifDocument.to_findings()`
   uses each result's first non-empty SARIF `fingerprints` value, else its first
   non-empty `partialFingerprints` value (falling back to a 12-hex SHA-256 of
   normalized file path + rule ID + start line + message) as
-  `Finding.finding_id`. It never reads the result's `properties` bag. Before
-  fixing, the action reads the PR's review comments and skips every finding
-  whose tag is on a comment that isn't outdated. Two findings with the same
-  fingerprint in one run are fixed once.
+  `Finding.finding_id`. It never reads the result's `properties` bag. On every
+  PR scan run (`run_pr`), the action lists the PR's review comments and deletes
+  all earlier bot-authored CodeMender review comments
+  (`DELETE /repos/{repo}/pulls/comments/{comment_id}` for finding,
+  verification, and overlap-reply comments), even if the scan finds `0`
+  vulnerabilities or `fix: false`. Suggestion reviews are posted with an empty
+  review wrapper body (`"body": ""`) so deleting their inline comments leaves no
+  empty review header banner in the PR timeline. Every finding from the current
+  scan is fixed fresh; two findings with the same `finding_id` in one run are
+  fixed once (`plan_fixes`).
 - **Alternatives Considered:**
   - *`cm`'s internal database ID:* changes on every import (fact 8).
   - *Strings in the result's `properties` bag:* not identifiers. `cm` writes
     `security-severity` on every result, so every finding of one severity
     would share one ID, get one fix, and block the others' verification.
-- **Rationale:** Every push runs the workflow again. Without this, each run
-  would spend about 10 minutes per finding again and post the same comments
-  again. When GitHub marks a comment outdated, the developer has changed those
-  lines, so the finding is fixed again.
+  - *Cross-run fingerprint deduplication:* skipping findings whose fingerprint
+    matched a non-outdated comment from an earlier run proved brittle when LLM
+    findings or rule/line hashes shifted across runs, leaving duplicate or stale
+    comments on the PR.
+- **Rationale:** Treating each PR scan run as a clean slate for inline review
+  comments (while updating the sticky summary comment in place) guarantees the
+  PR never accumulates duplicate or stale CodeMender comments across pushes. The
+  `<!-- codemender-finding:<fingerprint> -->` tag remains on each new fix
+  comment for intra-run deduplication and on-demand `@cm-runner verify`
+  ([SPEC-GHA-VERIFY](../github-actions-verify/spec.md)).
 
 ### Decision 10: The Launcher Runs Parallel Containers and Hands Patches Over as Files {#decision-10}
 
@@ -284,9 +296,9 @@ Governed by [SPEC-GHA-FIX](spec.md), [SPEC-GHA](../github-actions/spec.md),
 
 ```mermaid
 flowchart TD
-  A["find-diff (runs init automatically)"] --> B["Sticky comment: findings table, Fix column says Working"]
-  B --> C["Skip findings that already have a current comment"]
-  C --> D["Convert SARIF to findings via SarifDocument.to_findings()"]
+  A["find-diff (runs init automatically)"] --> B["Delete earlier bot-authored CodeMender review comments on the PR"]
+  B --> C["Sticky comment: findings table, Fix column says Working"]
+  C --> D["Convert SARIF to findings via SarifDocument.to_findings() and plan intra-run fixes"]
   D --> E1["Container 1: fix finding 1"]
   D --> E2["Container 2: fix finding 2"]
   D --> E3["Container N: fix finding N"]
@@ -294,7 +306,7 @@ flowchart TD
   E2 --> F
   E3 --> F
   F --> G{"Fixed, and every changed line is in the PR diff?"}
-  G -->|"yes"| H["Review with one-click suggestions"]
+  G -->|"yes"| H["Review with one-click suggestions (empty review body)"]
   G -->|"fixed, but it can't be a suggestion"| I["Patch comment on the flagged line"]
   G -->|"no fix, or failed"| J["Nothing posted"]
   H --> K["Update that finding's row in the sticky comment"]
@@ -332,9 +344,9 @@ Findings and failed fixes never fail the job, the same as findings in M1.
 | :--- | :--- |
 | `packages/codemender/src/codemender/cm.py`, `sarif/__init__.py`, `vcs/git.py` | Shared `Finding` model, `SarifDocument.to_findings()`, and `parse_patch_to_suggestions`. |
 | `packages/launcher/src/launcher/base.py`, `packages/launcher/src/launcher/local/local_docker.py` | Raw stdout, `run_parallel()`, per-run log file, container names, `docker kill` on timeout, `stop()`, and `with_dirs()`. |
-| `packages/repohost/src/repohost/github/fix_comments.py` | Deduplicating findings (`plan_fixes`) and posting review suggestions or fallback patch comments (`FixPoster`). |
-| `packages/repohost/src/repohost/github/client.py` | Reviews, patch comments, the PR diff's line ranges, and reading earlier tags. |
-| `packages/repohost/src/repohost/github/__main__.py` (`cm-github`) | The `fix` and `max_parallel_fixes` inputs, the parallel runs, posting, and the Fix column. |
+| `packages/repohost/src/repohost/github/fix_comments.py` | Intra-run finding deduplication (`plan_fixes`) and posting review suggestions or fallback patch comments (`FixPoster`). |
+| `packages/repohost/src/repohost/github/client.py` | Reviews (with empty wrapper body), patch comments, the PR diff's line ranges, and deleting earlier CodeMender review comments. |
+| `packages/repohost/src/repohost/github/__main__.py` (`cm-github`) | The `fix` and `max_parallel_fixes` inputs, wiping earlier review comments, the parallel runs, posting, and the Fix column. |
 | `.github/actions/codemender/action.yml`, `.github/actions/codemender-local/action.yml`, `.github/workflows/cm-merge-scan.yml`, `dist/README.md` | The inputs, the head checkout, the 60-minute timeout, the artifacts and the documentation. |
 
 ## Security
@@ -373,8 +385,10 @@ Findings and failed fixes never fail the job, the same as findings in M1.
 - **Cancelled runs.** A new push cancels the running workflow
   (`cancel-in-progress`), and the job times out after 60 minutes. Each fix is
   posted as soon as it ends, so only the fixes still running are lost.
-- **Outdated suggestions** can't be committed once those lines change. The next
-  run fixes the finding again (Decision 9).
+- **Re-running fixes on every push.** Wiping earlier CodeMender review comments
+  and fixing all findings fresh on every push guarantees a clean PR without
+  duplicate or stale comments, at the cost of re-running `fix` on unchanged
+  findings until cross-run deduplication is revisited (Decision 9).
 
 ## Rollout & Rollback
 

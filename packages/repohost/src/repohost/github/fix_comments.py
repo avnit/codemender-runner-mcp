@@ -17,8 +17,8 @@
 """Plans and posts Pull Request fix comments (SPEC-GHA-FIX REQ-0006 to REQ-0010).
 
 Public entry points:
-  - `plan_fixes`: Deduplicates findings by fingerprint (`finding.finding_id`) and
-    skips findings that already have an active (non-outdated) CodeMender comment.
+  - `plan_fixes`: Plans which findings to fix, deduplicating findings that share
+    the same fingerprint (`finding.finding_id`) within a single run.
   - `FixPoster`: Posts each completed fix as a one-click GitHub suggestion review
     when all modified lines fall within the PR diff, or falls back to a line/file
     patch comment.
@@ -73,9 +73,8 @@ class FixPlan:
 
 def plan_fixes(
     findings: Sequence[Finding],
-    earlier: Mapping[str, github.FindingComment],
 ) -> FixPlan:
-  """Decides which findings need a new fix run (SPEC-GHA-FIX REQ-0009)."""
+  """Decides which findings need a fix run, deduplicating identical fingerprints in one run (SPEC-GHA-FIX REQ-0009)."""
   to_fix: List[Finding] = []
   cells: Dict[int, FixCell] = {}
   fingerprints: Dict[int, str] = {}
@@ -85,11 +84,6 @@ def plan_fixes(
   for finding in findings:
     fp = finding.finding_id
     fingerprints[finding.index] = fp
-    comment = earlier.get(fp)
-    if comment is not None and not comment.outdated:
-      status = SUGGESTED if comment.kind == "suggestion" else PATCH
-      cells[finding.index] = FixCell(status, comment.url)
-      continue
     cells[finding.index] = FixCell(WORKING)
     first = first_with.get(fp)
     if first is None:

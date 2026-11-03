@@ -21,12 +21,14 @@ Flow:
   2. Stage an isolated copy of `$GITHUB_WORKSPACE` and run
      `cm-runner find-diff --repo /workspace --base <base_sha> --out /out
      --diff-workers <N>` (which automatically runs `cm-runner init` beforehand).
-  3. Parse the SARIF v2.1.0 output via `SarifDocument` and post or update the
+  3. Parse the SARIF v2.1.0 output via `SarifDocument`, delete earlier
+     bot-authored CodeMender review comments on the PR, and post or update the
      sticky summary comment on the PR.
-  4. When findings exist and `fix` is enabled, deduplicate against earlier PR
-     comments, run `cm-runner fix` in parallel isolated containers via
-     `launcher.run_parallel(...)`, post each fix as a review suggestion or patch
-     comment as it completes, and update the sticky comment's Fix column.
+  4. When findings exist and `fix` is enabled, deduplicate identical finding
+     fingerprints within the current run, run `cm-runner fix` in parallel
+     isolated containers via `launcher.run_parallel(...)`, post each fix as a
+     review suggestion or patch comment as it completes, and update the sticky
+     comment's Fix column.
 
 Configuration comes from environment variables set by `action.yml`:
   CODEMENDER_BACKEND             `cloudrun` (default) or `local`.
@@ -90,8 +92,8 @@ from launcher.local import (
 )
 # Governing: ADR-0008, SPEC-GHA, SPEC-GHA-FIX, SPEC-GHA-VERIFY
 from repohost.github import (
+    delete_codemender_review_comments,
     fix_comments,
-    list_finding_comments,
     post_or_update_sticky_comment,
 )
 from repohost.github.client import (
@@ -480,6 +482,20 @@ def run_pr(
         backend=backend,
     )
 
+  # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0009, SPEC-GHA-FIX
+  if (
+      delete_codemender_review_comments(
+          env.get("GITHUB_REPOSITORY", ""),
+          int(pr_number),
+          env.get("GITHUB_TOKEN", ""),
+      )
+      is None
+  ):
+    print(
+        "::warning::Could not delete CodeMender's earlier review comments on"
+        " this PR."
+    )
+
   # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0001, SPEC-GHA-FIX
   if runner_ok and findings and fix_enabled(env):
     if env.get("GITHUB_WORKSPACE"):
@@ -535,14 +551,7 @@ def _run_fixes(
         " actions/checkout step."
     )
 
-  earlier = list_finding_comments(repo, pr_number, token)
-  if earlier is None:
-    print(
-        "::warning::Could not read CodeMender's earlier comments on this PR,"
-        " so every finding gets a new fix."
-    )
-    earlier = {}
-  plan = fix_comments.plan_fixes(findings, earlier)
+  plan = fix_comments.plan_fixes(findings)
   cells: Dict[int, FixCell] = dict(plan.cells)
 
   if not _post_sticky_comment(env, pr_number, render(cells, _fix_status(cells)), fork):
