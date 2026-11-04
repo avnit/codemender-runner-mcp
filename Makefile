@@ -30,12 +30,11 @@ test:
 test-cov:
 	GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 PYTHONPATH="$(PACKAGE_SRCS)" pytest $(COV_FLAGS) --cov-report=term-missing
 
-# Governing: ADR-0008, ADR-0009, SPEC-0003, REQ-9428, REQ-9429, REQ-9430
 build-runner:
 	docker build -f docker/runner.Dockerfile -t $(RUNNER_IMAGE) .
 
-build-cloudrun:
-	docker build -f docker/runner.Dockerfile -t $(CLOUDRUN_IMAGE) .
+build-cloudrun: build-runner
+	docker build -f docker/cloudrun.Dockerfile --build-arg BASE_IMAGE=$(RUNNER_IMAGE) -t $(CLOUDRUN_IMAGE) .
 
 build-gitlab:
 	docker build -f docker/gitlab.Dockerfile -t $(GITLAB_IMAGE) .

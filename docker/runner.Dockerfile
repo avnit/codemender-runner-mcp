@@ -54,13 +54,12 @@ RUN set -eu && \
     rm -f /tmp/cm.bin && \
     chmod +x /usr/local/bin/cm
 
-# Governing: ADR-0008, ADR-0009, SPEC-0003, REQ-9428, REQ-9429, REQ-9430
-# 4. Isolated Python virtual environment & packages/{codemender,launcher} installation
+# 4. Isolated Python virtual environment & packages/codemender installation
 WORKDIR /opt/codemender
 RUN python3.11 -m venv /opt/codemender/venv
 COPY packages/codemender ./packages/codemender/
-COPY packages/launcher ./packages/launcher/
-RUN /opt/codemender/venv/bin/pip install --no-cache-dir ./packages/codemender "./packages/launcher[cloudrun]"
+RUN /opt/codemender/venv/bin/pip install --no-cache-dir ./packages/codemender
 
 # 5. Container contract
-ENTRYPOINT ["cm-worker"]
+ENTRYPOINT ["cm-runner"]
+CMD ["version"]

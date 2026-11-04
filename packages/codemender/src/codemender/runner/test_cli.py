@@ -33,8 +33,10 @@ exactly how the contract has been broken before.
 
 import ast
 import hashlib
+from io import StringIO
 import json
 import os
+from pathlib import Path
 import shutil
 import stat
 import subprocess
@@ -42,9 +44,6 @@ import sys
 import tempfile
 import tomllib
 import unittest
-from io import StringIO
-from pathlib import Path
-
 import setuptools
 
 # Directory containing the `codemender` package, used as cwd so `python -m codemender.runner` works.
@@ -539,10 +538,11 @@ class TestCliArchitectureRules(unittest.TestCase):
         "name_reference": " _ = SENSITIVE_ENV_VARS\n".lstrip(),
     }
     for label, snippet in synthetic_violations.items():
-      with self.subTest(synthetic=label), self.assertRaises(AssertionError):
-        self._assert_no_env_scrubbing_in_tree(
-            ast.parse(snippet, filename="<synthetic>"), "<synthetic>"
-        )
+      with self.subTest(synthetic=label):
+        with self.assertRaises(AssertionError):
+          self._assert_no_env_scrubbing_in_tree(
+              ast.parse(snippet, filename="<synthetic>"), "<synthetic>"
+          )
 
   def test_cli_modules_do_not_import_subprocess(self):
     """CLI modules must never import subprocess directly; cm runs through codemender.cm.CmAdapter, git through codemender.vcs.git."""
@@ -679,36 +679,34 @@ class TestStdoutRedirectDuringCommand(unittest.TestCase):
     self.assertIn("restored=True", res.stderr)
 
 
-# Governing: ADR-0008, ADR-0009, SPEC-0003, REQ-9428, REQ-9429, REQ-9430
+# Governing: ADR-0008, SPEC-0003
 class TestPackagingAndDockerContract(unittest.TestCase):
-  """Verifies ADR-0008/0009 and SPEC-0003 packaging and Docker contracts."""
+  """ADR-0008 & SPEC-0003 packaging, .dockerignore, and runner.Dockerfile contracts."""
 
   def test_pyproject_toml_package_exclusions_and_entrypoint(self):
-    """Checks codemender pyproject.toml script and test exclusion rules."""
+    """packages/codemender/pyproject.toml defines cm-runner script and excludes tests/testdata."""
     pyproject_path = _REPO_ROOT / "packages" / "codemender" / "pyproject.toml"
     self.assertTrue(pyproject_path.is_file(), f"Missing {pyproject_path}")
-    pyproject_data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+    data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
 
     self.assertEqual(
-        pyproject_data["project"]["scripts"].get("cm-runner"),
+        data["project"]["scripts"].get("cm-runner"),
         "codemender.runner.__main__:main",
     )
-    find_cfg = pyproject_data["tool"]["setuptools"]["packages"]["find"]
+    find_cfg = data["tool"]["setuptools"]["packages"]["find"]
     self.assertEqual(find_cfg.get("where"), ["src"])
     self.assertEqual(find_cfg.get("include"), ["codemender*"])
     for pattern in ("test_*", "*_test", "testdata*"):
       self.assertIn(pattern, find_cfg.get("exclude", []))
 
-    exclude_pkg_data = pyproject_data["tool"]["setuptools"][
-        "exclude-package-data"
-    ].get("*", [])
+    exclude_pkg_data = data["tool"]["setuptools"]["exclude-package-data"].get(
+        "*", []
+    )
     for pattern in ("**/test_*.py", "**/*_test.py", "**/testdata/**"):
       self.assertIn(pattern, exclude_pkg_data)
 
-  def test_setuptools_package_finder_discovers_only_codemender_subpackages(
-      self,
-  ):
-    """Checks PackageFinder.find discovers only the 5 codemender packages."""
+  def test_setuptools_package_finder_discovers_only_codemender_subpackages(self):
+    """setuptools.PackageFinder.find discovers only the 5 expected codemender packages."""
     discovered = setuptools.PackageFinder.find(
         where=_PKG_DIR,
         include=["codemender*"],
@@ -726,7 +724,7 @@ class TestPackagingAndDockerContract(unittest.TestCase):
     )
 
   def test_root_dockerignore_excludes_non_runner_dirs_and_tests(self):
-    """Checks .dockerignore excludes repohost, non-package dirs, and tests."""
+    """Root .dockerignore excludes non-package directories, caches, tests, and testdata."""
     dockerignore_path = _REPO_ROOT / ".dockerignore"
     self.assertTrue(dockerignore_path.is_file(), f"Missing {dockerignore_path}")
     entries = {
@@ -738,21 +736,17 @@ class TestPackagingAndDockerContract(unittest.TestCase):
         ".git/",
         "docs/",
         "cloud-run-jobs/",
-        "packages/repohost/",
+        "!cloud-run-jobs/entrypoint.py",
         "scripts/",
         "dist/",
         ".venv/",
         "**/__pycache__/",
         "**/*.pyc",
         "**/test_*.py",
-        "**/*_test.py",
         "**/testdata/",
     }
     for entry in expected_entries:
       self.assertIn(entry, entries, f"Missing {entry!r} in root .dockerignore")
-    self.assertNotIn("!cloud-run-jobs/entrypoint.py", entries)
-    self.assertNotIn("packages/codemender/", entries)
-    self.assertNotIn("packages/launcher/", entries)
     self.assertNotIn("codemender-runner/", entries)
     self.assertNotIn("github-actions/", entries)
     self.assertFalse(
@@ -761,7 +755,7 @@ class TestPackagingAndDockerContract(unittest.TestCase):
     )
 
   def test_runner_dockerfile_contract(self):
-    """Checks runner.Dockerfile installs codemender and launcher[cloudrun]."""
+    """docker/runner.Dockerfile installs packages/codemender into /opt/codemender/venv after cm binary."""
     dockerfile_path = _REPO_ROOT / "docker" / "runner.Dockerfile"
     self.assertTrue(dockerfile_path.is_file(), f"Missing {dockerfile_path}")
     content = dockerfile_path.read_text(encoding="utf-8")
@@ -769,60 +763,44 @@ class TestPackagingAndDockerContract(unittest.TestCase):
     self.assertIn("VIRTUAL_ENV=/opt/codemender/venv", content)
     self.assertIn("/opt/codemender/venv/bin", content)
     self.assertIn("ARG CM_VERSION", content)
-    self.assertIn("COPY packages/codemender ./packages/codemender/", content)
-    self.assertIn("COPY packages/launcher ./packages/launcher/", content)
     self.assertIn(
-        "/opt/codemender/venv/bin/pip install --no-cache-dir"
-        ' ./packages/codemender "./packages/launcher[cloudrun]"',
+        "/opt/codemender/venv/bin/pip install --no-cache-dir ./packages/codemender",
         content,
     )
-    self.assertNotIn("packages/repohost", content)
-    self.assertIn('ENTRYPOINT ["cm-worker"]', content)
-    self.assertNotIn('ENTRYPOINT ["cm-runner"]', content)
-    self.assertNotIn("CMD", content)
+    self.assertIn('ENTRYPOINT ["cm-runner"]', content)
+    self.assertIn('CMD ["version"]', content)
 
     cm_install_idx = content.index("/usr/local/bin/cm")
-    copy_codemender_idx = content.index("COPY packages/codemender")
-    copy_launcher_idx = content.index("COPY packages/launcher")
-    self.assertLess(cm_install_idx, copy_codemender_idx)
-    self.assertLess(cm_install_idx, copy_launcher_idx)
+    copy_pkg_idx = content.index("COPY packages/codemender")
+    self.assertLess(
+        cm_install_idx,
+        copy_pkg_idx,
+        "cm binary installation must precede COPY packages/codemender to preserve layer caching",
+    )
 
-  # Governing: ADR-0008, ADR-0009, SPEC-0003, REQ-0005, REQ-9431
-  def test_build_runner_image_workflow_contract(self):
-    """Checks build_runner_image.yml triggers and cm-worker contract steps."""
-    wf_path = _REPO_ROOT / ".github" / "workflows" / "build_runner_image.yml"
-    self.assertTrue(wf_path.is_file(), f"Missing {wf_path}")
-    content = wf_path.read_text(encoding="utf-8")
+  def test_cloudbuild_yaml_and_makefile_targets(self):
+    """Root cloudbuild.yaml and Makefile define two-stage Cloud Build and deploy-cloudrun/build-cloudrun targets."""
+    cloudbuild_path = _REPO_ROOT / "cloudbuild.yaml"
+    self.assertTrue(cloudbuild_path.is_file(), f"Missing {cloudbuild_path}")
+    cb_content = cloudbuild_path.read_text(encoding="utf-8")
+    self.assertIn("docker/runner.Dockerfile", cb_content)
+    self.assertIn("docker/cloudrun.Dockerfile", cb_content)
+    self.assertIn("BASE_IMAGE=codemender-runner:base", cb_content)
+    self.assertIn("--all-tags", cb_content)
+    self.assertIn("logging: CLOUD_LOGGING_ONLY", cb_content)
+    self.assertNotIn("substitutions:", cb_content)
+    self.assertIn(
+        "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/codemender-runner:${_IMAGE_TAG}",
+        cb_content,
+    )
+    self.assertIn(
+        "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/codemender-runner:latest",
+        cb_content,
+    )
 
-    self.assertGreaterEqual(content.count("- 'packages/launcher/**'"), 2)
-    self.assertIn('test "$ENTRYPOINT" = \'["cm-worker"]\'', content)
-    self.assertNotIn('test "$ENTRYPOINT" = \'["cm-runner"]\'', content)
-    self.assertIn('test "$CMD" = "null" -o "$CMD" = "[]"', content)
-    self.assertNotIn('test "$CMD" = \'["version"]\'', content)
-    self.assertIn(
-        "import codemender, codemender.runner, codemender.sarif,"
-        " codemender.vcs, launcher, launcher.worker, launcher.cache",
-        content,
-    )
-    self.assertIn(
-        "! docker run --rm --entrypoint /opt/codemender/venv/bin/python"
-        ' codemender-runner:test -c "import repohost" 2>/dev/null',
-        content,
-    )
-    self.assertIn("docker run --rm codemender-runner:test --help", content)
-    self.assertIn(
-        "docker run --rm --entrypoint cm-runner codemender-runner:test version",
-        content,
-    )
-    self.assertIn(
-        "docker run --rm --entrypoint /opt/codemender/venv/bin/cm-runner"
-        " codemender-runner:test version",
-        content,
-    )
-    self.assertNotIn("docker run --rm codemender-runner:test version", content)
+    makefile_path = _REPO_ROOT / "Makefile"
+    self.assertTrue(makefile_path.is_file(), f"Missing {makefile_path}")
 
-  def _clean_make_env(self) -> dict[str, str]:
-    """Returns a copy of os.environ with Makefile override variables removed."""
     clean_env = os.environ.copy()
     for var in (
         "GCP_PROJECT_ID",
@@ -836,10 +814,7 @@ class TestPackagingAndDockerContract(unittest.TestCase):
         "TFVARS_FILE",
     ):
       clean_env.pop(var, None)
-    return clean_env
 
-  def _compute_expected_image_tag(self) -> str:
-    """Computes the expected 12-char SHA-256 IMAGE_TAG for Makefile tests."""
     static_files = [
         "docker/runner.Dockerfile",
         "docker/cloudrun.Dockerfile",
@@ -849,44 +824,31 @@ class TestPackagingAndDockerContract(unittest.TestCase):
     pkg_dir = _REPO_ROOT / "packages" / "codemender"
     codemender_files = sorted(
         rel
-        for path in pkg_dir.rglob("*")
-        if path.is_file()
-        for rel in [path.relative_to(pkg_dir).as_posix()]
+        for p in pkg_dir.rglob("*")
+        if p.is_file()
+        for rel in [p.relative_to(pkg_dir).as_posix()]
         if "__pycache__/" not in rel
         and ".egg-info/" not in rel
         and not rel.startswith("build/")
         and "/testdata/" not in rel
-        and not path.name.endswith(".pyc")
-        and not path.name.startswith("test_")
-        and not path.name.endswith("_test.py")
+        and not p.name.endswith(".pyc")
+        and not p.name.startswith("test_")
+        and not p.name.endswith("_test.py")
     )
+    sha256_file = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+    expected_hash = hashlib.sha256(
+        "".join([
+            *(sha256_file(_REPO_ROOT / f) for f in static_files),
+            *(f"{f}:{sha256_file(pkg_dir / f)}" for f in codemender_files),
+        ]).encode("utf-8")
+    ).hexdigest()[:12]
 
-    def _sha256_file(file_path: Path) -> str:
-      return hashlib.sha256(file_path.read_bytes()).hexdigest()
-
-    digest_input = "".join([
-        *(_sha256_file(_REPO_ROOT / rel) for rel in static_files),
-        *(f"{rel}:{_sha256_file(pkg_dir / rel)}" for rel in codemender_files),
-    ])
-    return hashlib.sha256(digest_input.encode("utf-8")).hexdigest()[:12]
-
-  def test_cloudbuild_yaml_and_makefile_targets(self):
-    """Checks cloudbuild.yaml and Makefile deploy-cloudrun targets."""
-    cloudbuild_path = _REPO_ROOT / "cloudbuild.yaml"
-    self.assertTrue(cloudbuild_path.is_file(), f"Missing {cloudbuild_path}")
-    cb_content = cloudbuild_path.read_text(encoding="utf-8")
-    self.assertIn("docker/runner.Dockerfile", cb_content)
-    self.assertIn("--all-tags", cb_content)
-    self.assertIn("logging: CLOUD_LOGGING_ONLY", cb_content)
-    self.assertNotIn("substitutions:", cb_content)
-
-    clean_env = self._clean_make_env()
-    expected_hash = self._compute_expected_image_tag()
     with tempfile.TemporaryDirectory() as tmp:
       tfvars = Path(tmp) / "terraform.tfvars"
       tfvars.write_text(
           '# comment\ngcp_project_id = "my-gcp-proj" # inline\n'
           'gcp_region = "us-west1"\n'
+          '# resource_prefix = "ignored"\n'
           'resource_prefix = "custom-prefix"\n',
           encoding="utf-8",
       )
@@ -899,53 +861,67 @@ class TestPackagingAndDockerContract(unittest.TestCase):
           check=False,
       )
       self.assertEqual(res_deploy.returncode, 0, msg=res_deploy.stderr)
-      self.assertIn(f"_IMAGE_TAG={expected_hash} .", res_deploy.stdout)
       self.assertIn(
-          f"codemender-runner:{expected_hash}",
+          f"gcloud builds submit --config=cloudbuild.yaml --project=my-gcp-proj --substitutions=_REGION=us-west1,_REPO_NAME=custom-prefix-runner,_IMAGE_TAG={expected_hash} .",
+          res_deploy.stdout,
+      )
+      self.assertIn(
+          f"gcloud run jobs update custom-prefix-runner --image us-west1-docker.pkg.dev/my-gcp-proj/custom-prefix-runner/codemender-runner:{expected_hash}",
           res_deploy.stdout,
       )
       self.assertNotIn("custom-prefix-worker", res_deploy.stdout)
 
-  def test_makefile_check_gcp_project_and_build_targets(self):
-    """Checks Makefile check-gcp-project and two-way door build targets."""
-    clean_env = self._clean_make_env()
-    with tempfile.TemporaryDirectory() as tmp:
-      tfvars_missing = Path(tmp) / "missing_region.tfvars"
-      tfvars_missing.write_text(
-          'gcp_project_id = "my-proj"\n', encoding="utf-8"
+      tfvars_missing_region = Path(tmp) / "missing_region.tfvars"
+      tfvars_missing_region.write_text(
+          'gcp_project_id = "my-gcp-proj"\n',
+          encoding="utf-8",
       )
-      res_missing = subprocess.run(
-          ["make", "check-gcp-project", f"TFVARS_FILE={tfvars_missing}"],
+      res_missing_region = subprocess.run(
+          [
+              "make",
+              "check-gcp-project",
+              f"TFVARS_FILE={tfvars_missing_region}",
+          ],
           cwd=str(_REPO_ROOT),
           env=clean_env,
           capture_output=True,
           text=True,
           check=False,
       )
-      self.assertNotEqual(res_missing.returncode, 0)
-      self.assertIn("Error: GCP_REGION is not set", res_missing.stderr)
+      self.assertNotEqual(res_missing_region.returncode, 0)
+      self.assertIn("Error: GCP_REGION is not set", res_missing_region.stderr)
 
-    for target, dockerfile, image_tag in (
-        ("build-runner", "docker/runner.Dockerfile", "codemender-runner:local"),
-        (
-            "build-cloudrun",
-            "docker/runner.Dockerfile",
-            "codemender-cloudrun:local",
-        ),
-        ("build-gitlab", "docker/gitlab.Dockerfile", "codemender-gitlab:local"),
-    ):
-      expected_cmd = f"docker build -f {dockerfile} -t {image_tag} ."
-      res = subprocess.run(
-          ["make", "-n", target],
+      res_build = subprocess.run(
+          ["make", "-n", "build-cloudrun"],
           cwd=str(_REPO_ROOT),
           env=clean_env,
           capture_output=True,
           text=True,
           check=False,
       )
-      self.assertEqual(res.returncode, 0, msg=res.stderr)
-      self.assertIn(expected_cmd, res.stdout)
-      self.assertNotIn("docker/cloudrun.Dockerfile", res.stdout)
+      self.assertEqual(res_build.returncode, 0, msg=res_build.stderr)
+      self.assertIn(
+          "docker build -f docker/runner.Dockerfile -t codemender-runner:local .",
+          res_build.stdout,
+      )
+      self.assertIn(
+          "docker build -f docker/cloudrun.Dockerfile --build-arg BASE_IMAGE=codemender-runner:local -t codemender-cloudrun:local .",
+          res_build.stdout,
+      )
+
+      res_gitlab = subprocess.run(
+          ["make", "-n", "build-gitlab"],
+          cwd=str(_REPO_ROOT),
+          env=clean_env,
+          capture_output=True,
+          text=True,
+          check=False,
+      )
+      self.assertEqual(res_gitlab.returncode, 0, msg=res_gitlab.stderr)
+      self.assertIn(
+          "docker build -f docker/gitlab.Dockerfile -t codemender-gitlab:local .",
+          res_gitlab.stdout,
+      )
 
 
 if __name__ == "__main__":
