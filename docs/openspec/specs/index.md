@@ -19,6 +19,7 @@ capabilities.
 | [SPEC-GITLAB-CI-FIX](gitlab-ci-fix/spec.md)     | [gitlab-ci-fix](gitlab-ci-fix/design.md)                           | Component | Draft       | Fixes & Verification on Merge Requests (GitLab CI): fixes on Cloud Run posted as they finish, inline suggestions (`suggestion:-N+0`) & patch comments, on-demand `cm-gitlab verify` |
 | [SPEC-WORKER](worker/spec.md)                   | [worker](worker/design.md)                                         | Component | Draft       | Unified Sandbox Container Worker Entrypoint & 4-Step Task Execution (`launcher.worker` / `cm-worker`) |
 | [SPEC-ARTIFACT-CACHE](artifact-cache/spec.md)   | [artifact-cache](artifact-cache/design.md)                         | Component | Draft       | `fsspec`-Backed Atomic `ArtifactCache` & Typed `vcs-cloudrun-comms` Protocol (`launcher.cache`) |
+| [SPEC-WORKFLOW](workflow/spec.md)               | [workflow](workflow/design.md)                                     | Component | Draft       | Generic CI Workflow Orchestrator & Dependency Injection Engine (`repohost.workflow`) |
 | [SPEC-LAUNCHER](launcher/spec.md)               | [launcher](launcher/design.md)                                     | Component | Draft       | Host-Side Client, Workflow Orchestration & Dual Execution Backends (`launcher.base`) |
 
 ## Process & Governance
