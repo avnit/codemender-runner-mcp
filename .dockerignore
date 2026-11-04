@@ -1,11 +1,12 @@
+# Governing: ADR-0008, ADR-0009, ADR-0010, SPEC-0003, REQ-9428, REQ-9429, REQ-9430
 # Git, CI/CD, and non-package directories
 .git/
 .github/
 docs/
 cloud-run-jobs/
-!cloud-run-jobs/entrypoint.py
 github-actions/
 codemender-runner/
+packages/repohost/
 scripts/
 dist/
 terraform/

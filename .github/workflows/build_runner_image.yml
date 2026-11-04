@@ -1,3 +1,4 @@
+# Governing: ADR-0008, ADR-0009, SPEC-0003, REQ-0005, REQ-9431
 name: Build & Publish CodeMender Runner Image
 
 on:
@@ -6,6 +7,7 @@ on:
       - main
     paths:
       - 'packages/codemender/**'
+      - 'packages/launcher/**'
       - 'docker/runner.Dockerfile'
       - '.dockerignore'
       - '.github/workflows/build_runner_image.yml'
@@ -14,6 +16,7 @@ on:
   pull_request:
     paths:
       - 'packages/codemender/**'
+      - 'packages/launcher/**'
       - 'docker/runner.Dockerfile'
       - '.dockerignore'
       - '.github/workflows/build_runner_image.yml'
@@ -73,13 +76,15 @@ jobs:
           CMD=$(docker inspect --format='{{json .Config.Cmd}}' codemender-runner:test)
           echo "Entrypoint: $ENTRYPOINT"
           echo "Cmd: $CMD"
-          test "$ENTRYPOINT" = '["cm-runner"]'
-          test "$CMD" = '["version"]'
-          docker run --rm --entrypoint /opt/codemender/venv/bin/python codemender-runner:test -c "import codemender, codemender.runner, codemender.sarif, codemender.vcs"
+          test "$ENTRYPOINT" = '["cm-worker"]'
+          test "$CMD" = "null" -o "$CMD" = "[]"
+          docker run --rm --entrypoint /opt/codemender/venv/bin/python codemender-runner:test -c "import codemender, codemender.runner, codemender.sarif, codemender.vcs, launcher, launcher.worker, launcher.cache"
+          ! docker run --rm --entrypoint /opt/codemender/venv/bin/python codemender-runner:test -c "import repohost" 2>/dev/null
 
       - name: Verify Version Command
         run: |
-          docker run --rm codemender-runner:test version
+          docker run --rm codemender-runner:test --help
+          docker run --rm --entrypoint cm-runner codemender-runner:test version
           docker run --rm --entrypoint /opt/codemender/venv/bin/cm-runner codemender-runner:test version
 
       - name: Push Runner Image
