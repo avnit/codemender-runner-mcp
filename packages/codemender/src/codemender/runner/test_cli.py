@@ -50,7 +50,6 @@ import setuptools
 # Directory containing the `codemender` package, used as cwd so `python -m codemender.runner` works.
 _PKG_DIR = str(Path(__file__).resolve().parents[2])
 _REPO_ROOT = Path(__file__).resolve().parents[5]
-_LEGACY_RUNNER_DIR = str(_REPO_ROOT / "codemender-runner")
 if _PKG_DIR not in sys.path:
   sys.path.insert(0, _PKG_DIR)
 
@@ -423,21 +422,27 @@ class TestExitCodes(unittest.TestCase):
     self.assertEqual(exit_codes.FAILED, 3)
 
 
-class TestCmRunnerScript(unittest.TestCase):
-  """Tests for the bin/cm-runner wrapper script."""
+# Governing: docs/adr/ADR-0008-repository-layout-and-package-structure.md#decision-1
+class TestLegacyRunnerDirectoryRemoved(unittest.TestCase):
+  """Verifies legacy codemender-runner/ directory is removed and module execution works."""
 
-  def setUp(self):
-    super().setUp()
-    self._script = os.path.join(_LEGACY_RUNNER_DIR, "bin", "cm-runner")
+  def test_legacy_runner_directory_does_not_exist(self):
+    self.assertFalse(
+        (_REPO_ROOT / "codemender-runner").exists(),
+        "Legacy codemender-runner/ directory must be removed per ADR-0008",
+    )
 
-  def test_script_exists_and_is_executable(self):
-    self.assertTrue(os.path.isfile(self._script))
-    self.assertTrue(os.access(self._script, os.X_OK))
-
-  def test_script_runs_version(self):
+  def test_module_execution_runs_version(self):
     stub = _write_stub_cm(_temp_dir(self))
     result = subprocess.run(
-        [self._script, "version", "--cm-binary", stub],
+        [
+            sys.executable,
+            "-m",
+            "codemender.runner",
+            "version",
+            "--cm-binary",
+            stub,
+        ],
         cwd=_PKG_DIR,
         capture_output=True,
         text=True,
@@ -448,51 +453,10 @@ class TestCmRunnerScript(unittest.TestCase):
     payload = json.loads(result.stdout.strip())
     self.assertEqual(payload["event"], "version")
 
-  def test_script_exit_code_propagation(self):
+  def test_module_execution_usage_on_missing_command(self):
     result = subprocess.run(
-        [self._script, "--nonexistent-option"],
+        [sys.executable, "-m", "codemender.runner"],
         cwd=_PKG_DIR,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    self.assertEqual(result.returncode, exit_codes.USAGE)
-
-  def test_script_respects_cm_runner_python(self):
-    env = dict(os.environ)
-    env["CM_RUNNER_PYTHON"] = os.path.join(_temp_dir(self), "custom", "python")
-    result = subprocess.run(
-        [self._script, "version"],
-        cwd=_PKG_DIR,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    self.assertEqual(result.returncode, 127)
-
-
-class TestPackageDirectoryExecution(unittest.TestCase):
-  """Tests for running the codemender-runner package directory directly via python3."""
-
-  def test_package_directory_runs_version(self):
-    stub = _write_stub_cm(_temp_dir(self))
-    result = subprocess.run(
-        [sys.executable, _LEGACY_RUNNER_DIR, "version", "--cm-binary", stub],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    self.assertEqual(result.returncode, exit_codes.OK, result.stderr)
-    payload = json.loads(result.stdout.strip())
-    self.assertEqual(payload["event"], "version")
-
-  def test_package_directory_usage_on_missing_command(self):
-    result = subprocess.run(
-        [sys.executable, _LEGACY_RUNNER_DIR],
         capture_output=True,
         text=True,
         timeout=30,
@@ -774,8 +738,6 @@ class TestPackagingAndDockerContract(unittest.TestCase):
         ".git/",
         "docs/",
         "cloud-run-jobs/",
-        "github-actions/",
-        "codemender-runner/",
         "packages/repohost/",
         "scripts/",
         "dist/",
@@ -791,11 +753,11 @@ class TestPackagingAndDockerContract(unittest.TestCase):
     self.assertNotIn("!cloud-run-jobs/entrypoint.py", entries)
     self.assertNotIn("packages/codemender/", entries)
     self.assertNotIn("packages/launcher/", entries)
-
-    legacy_dockerignore = _REPO_ROOT / "codemender-runner" / ".dockerignore"
-    self.assertTrue(
-        legacy_dockerignore.is_file(),
-        "codemender-runner/.dockerignore must remain intact",
+    self.assertNotIn("codemender-runner/", entries)
+    self.assertNotIn("github-actions/", entries)
+    self.assertFalse(
+        (_REPO_ROOT / "codemender-runner").exists(),
+        "Legacy codemender-runner/ directory must not exist",
     )
 
   def test_runner_dockerfile_contract(self):

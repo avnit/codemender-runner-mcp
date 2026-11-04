@@ -1,7 +1,3 @@
-<!--*
-freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-13' }
-*-->
-
 <!--
 sdd_spec_id: SPEC-VERIFY
 sdd_implements: None
@@ -22,7 +18,7 @@ sdd_cujspec_product: codemender-runner
 This specification defines the command-line interface, input contract, SARIF
 metadata update contract, `stdout` output contract, and `--out` artifact
 contract for the `cm-runner verify` subcommand
-(`codemender-runner/cli/commands/verify.py`).
+(`packages/codemender/src/codemender/runner/commands/verify.py`).
 
 `cm-runner verify` is a generic, storage-agnostic local CLI runner that takes
 **one finding as a local SARIF file** (or on `stdin` with `--finding -`)—the
@@ -61,9 +57,9 @@ This specification is governed by and references:
 
 - **CUJ UUID:** cuj-verify-cli-args
 
-The orchestrator CLI (`codemender-runner/cli/__main__.py`) MUST register the
-`verify` subcommand and dispatch it to
-`codemender-runner/cli/commands/verify.py` via
+The orchestrator CLI (`packages/codemender/src/codemender/runner/__main__.py`)
+MUST register the `verify` subcommand and dispatch it to
+`packages/codemender/src/codemender/runner/commands/verify.py` via
 `verify.run(verify.config_from_args(args), adapter, emitter)`.
 
 `VerifyConfig` MUST inherit `finding`, `repo`, `out`, path normalisation, and
@@ -153,8 +149,9 @@ ______________________________________________________________________
 - **CUJ UUID:** cuj-verify-preflight
 
 Before calling `cm`, `verify` MUST check the repository via
-`fix._check_repository(cfg.repo, command="verify")` (`vcs/git.py`). On failure
-it MUST log the reason to `stderr`, write nothing to `stdout`, and exit `3`
+`fix._check_repository(cfg.repo, command="verify")`
+(`packages/codemender/src/codemender/vcs/git.py`). On failure it MUST log the
+reason to `stderr`, write nothing to `stdout`, and exit `3`
 (`exit_codes.FAILED`):
 
 1. `--repo` is not inside a Git working tree (`vcs.git.is_git_repository`,
@@ -191,10 +188,12 @@ ______________________________________________________________________
 - **CUJ UUID:** cuj-verify-adapter-execution
 
 In accordance with [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
-`cli/commands/verify.py` MUST NOT import `subprocess`, `utils`, `vcs.github`, or
-`storage`. All `cm` calls MUST go through the `CmAdapter` checked by
-`cli/__main__.py`, with `cwd=cfg.repo.as_posix()`. Git calls MUST go through
-`vcs/git.py`.
+`packages/codemender/src/codemender/runner/commands/verify.py` MUST NOT import
+`subprocess`, `utils`, `vcs.github`, or `storage`. All `cm` calls MUST go
+through the `CmAdapter` checked by
+`packages/codemender/src/codemender/runner/__main__.py`, with
+`cwd=cfg.repo.as_posix()`. Git calls MUST go through
+`packages/codemender/src/codemender/vcs/git.py`.
 
 `verify` MUST run these steps in order, stopping at the first execution failure:
 
@@ -355,7 +354,7 @@ ______________________________________________________________________
 
 - **CUJ UUID:** cuj-verify-caller-guide
 
-`docs/guides/calling_cm_runner.md` MUST show how an orchestrator chains
+`packages/codemender/README.md` MUST show how an orchestrator chains
 `find-diff`, `verify`, and `fix` using local SARIF files outside the repository
 and only skips `fix` when `verify` outputs `status == "DISMISSED"`:
 

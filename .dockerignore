@@ -4,8 +4,6 @@
 .github/
 docs/
 cloud-run-jobs/
-github-actions/
-codemender-runner/
 packages/repohost/
 scripts/
 dist/

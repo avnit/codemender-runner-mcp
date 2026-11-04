@@ -41,7 +41,7 @@ from launcher.cloudrun import (  # pylint: disable=g-import-not-at-top
 from repohost.github import gha_runner  # pylint: disable=g-import-not-at-top
 
 _ENTRYPOINT_PY = os.path.join(_REPO_ROOT, "cloud-run-jobs", "entrypoint.py")
-_BIN_DIR = os.path.join(_REPO_ROOT, "codemender-runner", "bin")
+_CODEMENDER_SRC_DIR = os.path.join(_REPO_ROOT, "packages", "codemender", "src")
 
 
 class MockExecutionReceipt:
@@ -457,6 +457,16 @@ if cmd == "report" and "--format" in args:
 sys.exit(0)
 """)
         os.chmod(mock_cm_path, 0o755)
+        mock_cm_runner_path = os.path.join(mock_bin_dir, "cm-runner")
+        with open(mock_cm_runner_path, "w", encoding="utf-8") as f:
+          f.write(
+              "#!/usr/bin/env python3\n"
+              "import sys\n"
+              f"sys.path.insert(0, {_CODEMENDER_SRC_DIR!r})\n"
+              "from codemender.runner.__main__ import main\n"
+              "sys.exit(main())\n"
+          )
+        os.chmod(mock_cm_runner_path, 0o755)
 
         # 1. Simulate entrypoint.py version invocation
         version_ws = os.path.join(temp_dir, "version_ws")
@@ -464,7 +474,7 @@ sys.exit(0)
         bootstrapper_env = dict(os.environ)
         bootstrapper_env["HOME"] = home_dir
         bootstrapper_env["PATH"] = (
-            f"{_BIN_DIR}:{mock_bin_dir}:{bootstrapper_env.get('PATH', '')}"
+            f"{mock_bin_dir}:{bootstrapper_env.get('PATH', '')}"
         )
         bootstrapper_env["EPHEMERAL_SCRATCH_DIR"] = version_ws
         bootstrapper_env["WORKSPACE_DIR"] = version_ws
@@ -563,7 +573,7 @@ sys.exit(0)
             job_out = os.path.join(job_ws, "output")
             c_env = dict(os.environ)
             c_env["HOME"] = home_dir
-            c_env["PATH"] = f"{_BIN_DIR}:{mock_bin_dir}:{c_env.get('PATH', '')}"
+            c_env["PATH"] = f"{mock_bin_dir}:{c_env.get('PATH', '')}"
             c_env["EPHEMERAL_SCRATCH_DIR"] = job_ws
             c_env["WORKSPACE_DIR"] = job_ws
             c_env["OUTPUT_DIR"] = job_out

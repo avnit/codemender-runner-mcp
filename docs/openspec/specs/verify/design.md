@@ -1,7 +1,3 @@
-<!--*
-freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-13' }
-*-->
-
 <!--
 sdd_spec_id: SPEC-VERIFY
 sdd_implements: None
@@ -118,8 +114,9 @@ validation against `~/.codemender/state.db`:
 - Retrying a failed verification or freeing local TCP ports inside `verify`
   (callers or container sandboxes isolate each run).
 - Fixing the finding (`cm-runner fix`, SPEC-FIX), committing changes, or posting
-  to a pull request (the CI job, per ADR-0002).
-- Querying or mutating `cm`'s SQLite `state.db` directly from `cli/`.
+  to a pull request (the CI job, per ADR-0008).
+- Querying or mutating `cm`'s SQLite `state.db` directly from
+  `codemender.runner`.
 
 ## Decisions
 
@@ -467,11 +464,11 @@ properties.status = status or 'OPEN' + updated_at"]
 
 | Module | Responsibility | Boundary Constraints |
 | :--- | :--- | :--- |
-| `cli/__main__.py` | Registers `verify` (`--finding`, `--repo`, `--out`), builds `VerifyConfig` via `verify.config_from_args()`, calls `verify.run(cfg, adapter, emitter)`. | Redirects stray `stdout` writes to `stderr` while a command runs; runs `init` automatically unless `--no-init` is passed. |
-| `cli/commands/verify.py` | `VerifyConfig(fix.FixConfig)`, `config_from_args()`, `run()`, `_run_verify()`, `_apply_verification_result()`, `_update_sarif_status()`, `_write_out_sarif()`. Reuses `fix._read_finding`, `fix._check_repository`, `fix._import`, and `fix._CM_OWN_PATHS`. | **MUST NOT** import `subprocess`, `utils`, `vcs.github`, `storage`, or `get_scrubbed_env`. `cm` only through `CmAdapter` (`env=None`). |
-| `cli/sarif.py` | `SarifDocument` (`from_json()`, `results`, `result_count`, `to_json()`). | Shared across `find-diff`, `fix`, and `verify`. |
-| `codemender/cm.py` | `Finding` dataclass (`finding_id`, `status`, `dismiss_reason`, `is_fixed`, `is_verified`, `is_dismissed`) and `CmAdapter` (`list_findings`, `import_finding`, `get_finding`). | Shared with `cm-runner fix` ([SPEC-FIX](../fix/spec.md)), so both commands import findings and inspect statuses identically. |
-| `vcs/git.py` | `is_git_repository`, `list_uncommitted_paths`, and `reset_working_tree` (excluding `.cm_project` and `.exploit/`). | Git subprocesses stay here, run directly with `subprocess`, not `utils.run_command`. Diagnostics go to `stderr`. |
+| `packages/codemender/src/codemender/runner/__main__.py` | Registers `verify` (`--finding`, `--repo`, `--out`), builds `VerifyConfig` via `verify.config_from_args()`, calls `verify.run(cfg, adapter, emitter)`. | Redirects stray `stdout` writes to `stderr` while a command runs; runs `init` automatically unless `--no-init` is passed. |
+| `packages/codemender/src/codemender/runner/commands/verify.py` | `VerifyConfig(fix.FixConfig)`, `config_from_args()`, `run()`, `_run_verify()`, `_apply_verification_result()`, `_update_sarif_status()`, `_write_out_sarif()`. Reuses `fix._read_finding`, `fix._check_repository`, `fix._import`, and `fix._CM_OWN_PATHS`. | **MUST NOT** import `subprocess`, `utils`, `vcs.github`, `storage`, or `get_scrubbed_env`. `cm` only through `CmAdapter` (`env=None`). |
+| `packages/codemender/src/codemender/sarif/__init__.py` | `SarifDocument` (`from_json()`, `results`, `result_count`, `to_json()`). | Shared across `find-diff`, `fix`, and `verify`. |
+| `packages/codemender/src/codemender/cm.py` | `Finding` dataclass (`finding_id`, `status`, `dismiss_reason`, `is_fixed`, `is_verified`, `is_dismissed`) and `CmAdapter` (`list_findings`, `import_finding`, `get_finding`). | Shared with `cm-runner fix` ([SPEC-FIX](../fix/spec.md)), so both commands import findings and inspect statuses identically. |
+| `packages/codemender/src/codemender/vcs/git.py` | `is_git_repository`, `list_uncommitted_paths`, and `reset_working_tree` (excluding `.cm_project` and `.exploit/`). | Git subprocesses stay here, run directly with `subprocess`, not `utils.run_command`. Diagnostics go to `stderr`. |
 
 ## Risks / Trade-offs
 
@@ -504,15 +501,16 @@ properties.status = status or 'OPEN' + updated_at"]
 
 ## Deployment & Rollback
 
-- **Deployment:** `codemender-runner/cli/commands/verify.py`, registered in
-  `cli/__main__.py`, `Finding.is_verified` and `Finding.is_dismissed` in
-  `codemender/cm.py`, `git.reset_working_tree` in `vcs/git.py`, caller guide in
-  `docs/guides/calling_cm_runner.md`, and unit tests in
-  `codemender-runner/tests/test_cli_verify.py`.
+- **Deployment:** `packages/codemender/src/codemender/runner/commands/verify.py`,
+  registered in `packages/codemender/src/codemender/runner/__main__.py`,
+  `Finding.is_verified` and `Finding.is_dismissed` in
+  `packages/codemender/src/codemender/cm.py`, `git.reset_working_tree` in
+  `packages/codemender/src/codemender/vcs/git.py`, caller guide in
+  `packages/codemender/README.md`, and unit tests in
+  `packages/codemender/src/codemender/runner/commands/test_verify.py`.
 - **`cm` version:** relies on `cm` 0.11.0+ behaviour (`cm verify -y
   --bypass-warning <ID>` and `cm report import`), same as `SPEC-FIX`.
-- **Verification:**
-  `python3 -m unittest discover -s codemender-runner/tests -t codemender-runner -v`.
+- **Verification:** `make test`.
 - **Rollback:** revert the `verify` commit(s).
 
 ## Open Questions

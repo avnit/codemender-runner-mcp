@@ -33,7 +33,7 @@ _TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 _CLOUD_RUN_DIR = os.path.dirname(_TESTS_DIR)
 _REPO_ROOT = os.path.dirname(_CLOUD_RUN_DIR)
 _ENTRYPOINT_PY = os.path.join(_CLOUD_RUN_DIR, "entrypoint.py")
-_BIN_DIR = os.path.join(_REPO_ROOT, "codemender-runner", "bin")
+_CODEMENDER_SRC_DIR = os.path.join(_REPO_ROOT, "packages", "codemender", "src")
 
 _MOCK_CM_SCRIPT = """#!/usr/bin/env python3
 import json
@@ -137,6 +137,16 @@ class TestCloudRunEntrypoint(unittest.TestCase):
     with open(mock_cm_path, "w", encoding="utf-8") as f:
       f.write(_MOCK_CM_SCRIPT)
     os.chmod(mock_cm_path, 0o755)
+    mock_cm_runner_path = os.path.join(self.mock_bin_dir, "cm-runner")
+    with open(mock_cm_runner_path, "w", encoding="utf-8") as f:
+      f.write(
+          "#!/usr/bin/env python3\n"
+          "import sys\n"
+          f"sys.path.insert(0, {_CODEMENDER_SRC_DIR!r})\n"
+          "from codemender.runner.__main__ import main\n"
+          "sys.exit(main())\n"
+      )
+    os.chmod(mock_cm_runner_path, 0o755)
     self.workspace_dir = os.path.join(self.temp_dir, "workspace")
     self.output_dir = os.path.join(self.workspace_dir, "output")
     self.repo_dir = os.path.join(self.workspace_dir, "repo")
@@ -150,7 +160,7 @@ class TestCloudRunEntrypoint(unittest.TestCase):
   def _build_env(self, extra_env: dict | None = None) -> dict:
     env = dict(os.environ)
     env["HOME"] = self.home_dir
-    env["PATH"] = f"{_BIN_DIR}:{self.mock_bin_dir}:{env.get('PATH', '')}"
+    env["PATH"] = f"{self.mock_bin_dir}:{env.get('PATH', '')}"
     env["EPHEMERAL_SCRATCH_DIR"] = self.workspace_dir
     env["WORKSPACE_DIR"] = self.workspace_dir
     env["OUTPUT_DIR"] = self.output_dir
@@ -175,16 +185,24 @@ class TestCloudRunEntrypoint(unittest.TestCase):
   def _create_mock_repo(self) -> str:
     src_dir = os.path.join(self.temp_dir, "repo_src")
     os.makedirs(src_dir, exist_ok=True)
+    git_env = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
     subprocess.run(
         ["git", "-C", src_dir, "-c", "commit.gpgsign=false", "init", "-q"],
+        env=git_env,
         check=True,
     )
     subprocess.run(
         ["git", "-C", src_dir, "config", "user.name", "Test Runner"],
+        env=git_env,
         check=True,
     )
     subprocess.run(
         ["git", "-C", src_dir, "config", "user.email", "test@example.com"],
+        env=git_env,
         check=True,
     )
 
@@ -193,6 +211,7 @@ class TestCloudRunEntrypoint(unittest.TestCase):
       f.write("initial content\n")
     subprocess.run(
         ["git", "-C", src_dir, "-c", "commit.gpgsign=false", "add", "sample.txt"],
+        env=git_env,
         check=True,
     )
     subprocess.run(
@@ -207,6 +226,7 @@ class TestCloudRunEntrypoint(unittest.TestCase):
             "-m",
             "Initial",
         ],
+        env=git_env,
         check=True,
     )
 
@@ -214,6 +234,7 @@ class TestCloudRunEntrypoint(unittest.TestCase):
       f.write("modified diff content\n")
     subprocess.run(
         ["git", "-C", src_dir, "-c", "commit.gpgsign=false", "add", "sample.txt"],
+        env=git_env,
         check=True,
     )
     subprocess.run(
@@ -228,6 +249,7 @@ class TestCloudRunEntrypoint(unittest.TestCase):
             "-m",
             "Modified",
         ],
+        env=git_env,
         check=True,
     )
 
