@@ -9,6 +9,7 @@ description = "CodeMender repository hosting platform integrations (GitHub, GitL
 requires-python = ">=3.11"
 dependencies = [
     "codemender",
+    "codemender-artifactstore",
     "codemender-launcher",
 ]
 
@@ -26,6 +27,7 @@ cm-github = "repohost.github.__main__:main"
 
 [tool.uv.sources]
 codemender = { workspace = true }
+codemender-artifactstore = { workspace = true }
 codemender-launcher = { workspace = true }
 
 [tool.setuptools.packages.find]

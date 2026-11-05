@@ -56,6 +56,10 @@ codemender-runner/
 ├── Makefile                        # Standard build, test, and container targets
 ├── pyproject.toml                  # Root workspace configuration
 └── packages/                       # Python workspace packages (with co-located test_*.py unit tests)
+    ├── artifactstore/              # Durable artifact store
+    │   ├── pyproject.toml
+    │   └── src/
+    │       └── artifactstore/      # Base `ArtifactStore` ABC and test double
     ├── codemender/                 # Core sandbox runner & shared primitives (`import codemender`)
     │   ├── pyproject.toml
     │   └── src/
@@ -100,9 +104,10 @@ The table below mirrors the roadmap structure above:
 | `docs/`                             | Architecture Decision Records (ADRs), OpenSpecs, and user guides.                                                                                                                                                             | Documentation only.                                                                                                                |
 | `Makefile`                          | Developer and CI entrypoints for running unit tests, linters, and container builds.                                                                                                                                           | Wraps test discovery and `docker build -f docker/...` commands into ergonomic targets.                                             |
 | `pyproject.toml`                    | Root Python workspace configuration (`[tool.uv.workspace]`) and shared tool settings.                                                                                                                                         | Links `packages/*` for unified local development and testing.                                                                      |
+| `packages/artifactstore/`           | Cross-workflow durable artifact storage abstraction (`base.py`) and test doubles (`testing.py`).                                                                                                                               | Standalone package with zero dependencies on `launcher` or `repohost`. Provides the `ArtifactStore` interface for durable artifact retrieval across workflow runs. |
 | `packages/codemender/`              | Core package running inside the sandbox (`cm-runner`) plus shared `sarif/` and local `vcs/` primitives.                                                                                                                       | Minimal base dependencies. **Never imports `launcher` or `repohost`.** Executes `cm` exclusively through its internal `CmAdapter`. |
 | `packages/launcher/`                | Provides the host-side `Launcher` client (`local/`, `cloudrun/`), the inside-container `Worker` server (`cm-worker`), and the shared `ArtifactCache` (`cache/`) coordinating `find`, `verify`, and parallel `fix` workflows. | Depends on `codemender`. **Never imports `repohost`.** Isolates Cloud Run SDKs in the `cloudrun` optional extra.                   |
-| `packages/repohost/`                | Repository hosting platform integrations (`github/`, `gitlab/`), dedicated per-host CLIs (`cm-github`, `cm-gitlab`), and shared PR/MR Markdown formatting.                                                                    | Runs in the outer CI step (outside the `cm` sandbox) where repo-host tokens reside. Depends on `codemender` and `launcher`.        |
+| `packages/repohost/`                | Repository hosting platform integrations (`github/`, `gitlab/`), dedicated per-host CLIs (`cm-github`, `cm-gitlab`), and shared PR/MR Markdown formatting.                                                                    | Runs in the outer CI step (outside the `cm` sandbox) where repo-host tokens reside. Depends on `codemender`, `artifactstore`, and `launcher`. |
 
 ______________________________________________________________________
 

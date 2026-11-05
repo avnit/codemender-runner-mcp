@@ -83,10 +83,25 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Set up Python
+        if: steps.check-config.outputs.configured == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Pre-install workspace packages for dogfooding
+        if: steps.check-config.outputs.configured == 'true'
+        shell: bash
+        run: |
+          if [[ -d "${GITHUB_WORKSPACE:-}/packages/artifactstore" ]]; then
+            python -m pip install --quiet \
+              "${GITHUB_WORKSPACE}/packages/artifactstore"
+          fi
+
       # Mode 1: Cloud Run execution (default)
       # In Cloud Run mode, all GCP infrastructure details are managed internally
       # by the canonical Cloud Run client. No runner images or local gVisor required.
-      - uses: cloud-gtm/codemender-runner/.github/actions/codemender@main
+      - uses: cloud-gtm/codemender-runner/.github/actions/codemender@1474e74a76ac41a39c6550b07c6d21bc087a11bc # main
         if: steps.check-config.outputs.configured == 'true'
         with:
           gcp_project_id: ${{ vars.CODEMENDER_GCP_PROJECT_ID }}
@@ -100,7 +115,7 @@ jobs:
 
       # Mode 2: Local Docker execution (alternative)
       # Uncomment to run locally on the Actions runner VM under gVisor.
-      # - uses: cloud-gtm/codemender-runner/.github/actions/codemender-local@main
+      # - uses: cloud-gtm/codemender-runner/.github/actions/codemender-local@1474e74a76ac41a39c6550b07c6d21bc087a11bc # main
       #   if: steps.check-config.outputs.configured == 'true'
       #   with:
       #     runner_image: ${{ vars.CODEMENDER_RUNNER_IMAGE }}

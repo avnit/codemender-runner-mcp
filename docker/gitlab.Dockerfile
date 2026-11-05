@@ -32,11 +32,13 @@ RUN apt-get -o Acquire::Retries=5 update && \
 WORKDIR /opt/codemender
 RUN python3 -m venv /opt/codemender/venv
 
+COPY packages/artifactstore ./packages/artifactstore/
 COPY packages/codemender ./packages/codemender/
 COPY packages/launcher ./packages/launcher/
 COPY packages/repohost ./packages/repohost/
 
 RUN /opt/codemender/venv/bin/pip install --no-cache-dir \
+    ./packages/artifactstore \
     ./packages/codemender \
     "./packages/launcher[cloudrun]" \
     "./packages/repohost[gitlab]"

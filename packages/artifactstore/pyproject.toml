@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codemender-artifactstore"
+version = "0.1.0"
+description = "Cross-workflow artifact store abstractions and drivers"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["artifactstore*"]
+exclude = ["test_*", "*_test", "testdata*", "*test_*", "*testdata*"]
+
+[tool.setuptools.exclude-package-data]
+"*" = [
+    "**/test_*.py",
+    "**/*_test.py",
+    "**/testdata/**",
+    "test_*.py",
+    "*_test.py",
+    "testdata/**",
+]

@@ -117,6 +117,7 @@ runs:
           PKG_DIR="$(cd "${ACTION_PATH}/../../../packages" && pwd)"
         fi
         python -m pip install --quiet \
+          "${PKG_DIR}/artifactstore" \
           "${PKG_DIR}/codemender" \
           "${PKG_DIR}/launcher" \
           "${PKG_DIR}/repohost[github]"

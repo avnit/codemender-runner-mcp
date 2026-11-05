@@ -82,7 +82,7 @@ class TestCompositeActionsDualModeAndDefaultImage(unittest.TestCase):
         action_repo = tmp_path / "action_repo"
         action_path = action_repo / ".github" / "actions" / "codemender"
         action_pkgs = action_repo / "packages"
-        for pkg in ("codemender", "launcher", "repohost"):
+        for pkg in ("artifactstore", "codemender", "launcher", "repohost"):
           (action_pkgs / pkg).mkdir(parents=True, exist_ok=True)
         action_path.mkdir(parents=True, exist_ok=True)
         (action_path / "requirements.txt").write_text("", encoding="utf-8")
@@ -114,6 +114,9 @@ class TestCompositeActionsDualModeAndDefaultImage(unittest.TestCase):
         )
         self.assertEqual(res_dogfood.returncode, 0, msg=res_dogfood.stderr)
         pip_args_dogfood = pip_log.read_text(encoding="utf-8")
+        self.assertIn(
+            f"{dogfood_ws}/packages/artifactstore", pip_args_dogfood
+        )
         self.assertIn(f"{dogfood_ws}/packages/codemender", pip_args_dogfood)
         self.assertIn(
             f"{dogfood_ws}/packages/repohost[github]", pip_args_dogfood
@@ -136,6 +139,9 @@ class TestCompositeActionsDualModeAndDefaultImage(unittest.TestCase):
         )
         self.assertEqual(res_external.returncode, 0, msg=res_external.stderr)
         pip_args_external = pip_log.read_text(encoding="utf-8")
+        self.assertIn(
+            f"{action_pkgs.resolve()}/artifactstore", pip_args_external
+        )
         self.assertIn(
             f"{action_pkgs.resolve()}/codemender", pip_args_external
         )

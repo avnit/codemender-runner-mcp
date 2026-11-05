@@ -26,7 +26,9 @@ COV_FLAGS := $(foreach pkg,$(notdir $(patsubst %/__init__.py,%,$(wildcard packag
 test:
 	GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 PYTHONPATH="$(PACKAGE_SRCS)" pytest
 
-# Requires: pip install -e ./packages/codemender -e ./packages/launcher -e "./packages/repohost[github,gitlab]" pytest pytest-cov
+# Requires: pip install -e ./packages/artifactstore \
+#   -e ./packages/codemender -e ./packages/launcher \
+#   -e "./packages/repohost[github,gitlab]" pytest pytest-cov
 test-cov:
 	GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 PYTHONPATH="$(PACKAGE_SRCS)" pytest $(COV_FLAGS) --cov-report=term-missing
 

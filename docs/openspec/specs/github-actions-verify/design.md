@@ -148,22 +148,38 @@ Governed by [SPEC-GHA-VERIFY](spec.md), [SPEC-VERIFY](../verify/spec.md),
 ### Decision 4: Two-Tier SARIF Input Resolution (Artifact Primary, Comment Fallback) {#decision-4}
 
 - **Choice:**
-  1. **Primary (PR Workflow Artifact):** Download the latest non-expired
-     `codemender-report-pr-<pr_number>` artifact via the GitHub Actions REST
-     API (`GET /repos/{repo}/actions/artifacts?name=codemender-report-pr-<N>`),
-     extract `findings/*.sarif` or `report.sarif`, and select the single-result
-     SARIF document whose `finding_id == <finding_id>`.
+  1. **Primary (PR Workflow Artifact via `ArtifactStore`):** Encapsulated
+     within `ArtifactStore.get_finding_sarif(finding_id)` per ADR-0009.
+     Concrete `GitHubActionsArtifactStore` downloads the latest non-expired
+     `codemender-report-pr-<pr_number>` artifact via GitHub Actions REST API
+     (`GET /repos/{repo}/actions/artifacts?name=codemender-report-pr-<N>`),
+     extracts `findings/*.sarif` or `report.sarif`, and selects the
+     single-result SARIF document whose `finding_id == <finding_id>`.
   2. **Fallback (Reconstruct from Parent Fix Comment & Sticky Comment):** If the
-     artifact has expired (default retention is 3 days) or cannot be fetched,
-     synthesize a minimal, valid single-result SARIF 2.1.0 document from the
-     parent fix comment's `finding_id`, `path`, `line` / `original_line`, and
-     header (`rule_id`, `severity`, `title`), enriched with the finding's
-     details from the sticky summary comment if available.
+     artifact has expired (default retention is 3 days) or cannot be fetched
+     (`get_finding_sarif()` returns `None`), synthesize a minimal, valid
+     single-result SARIF 2.1.0 document from the parent fix comment's
+     `finding_id`, `path`, `line` / `original_line`, and header (`rule_id`,
+     `severity`, `title`), enriched with the finding's details from the sticky
+     summary comment if available.
+  3. **Host Runner Cache Hydration:** The host runner resolves the finding
+     SARIF using the two tiers above and writes `finding.sarif` into the
+     task directory / `ArtifactCache` before invoking the container launcher.
+     The sandbox worker reads exclusively from the provided path, preserving
+     process isolation.
 - **Why:** `cm-runner verify` imports the finding via `cm report import -f FILE`
   ([SPEC-VERIFY](../verify/spec.md)). Using the exact artifact SARIF when
   available preserves all original tool/rule/location metadata, while the
   comment reconstruction fallback ensures `@cm-runner verify` continues to work
   reliably on long-lived PRs after workflow artifacts expire.
+- **Artifact Upload Lifecycle & Future Extensions:**
+  During the initial PR scan, scan artifacts (`report.sarif`,
+  `findings/*.sarif`, `fixes/*.diff`) are emitted to `$CODEMENDER_OUT_DIR` and
+  uploaded to the GitHub Actions run by `actions/upload-artifact@v4`.
+  Therefore, the initial `ArtifactStore` implementation is read-focused
+  (`get_finding_sarif`). Future iterations will extend `ArtifactStore` with
+  upload methods (`put_finding_sarif`, `put_report`) to support headless
+  runners and non-GHA backends directly.
 
 ### Decision 5: Symmetric Backend Execution (`LocalDockerLauncher` & `CloudRunLauncher`) {#decision-5}
 

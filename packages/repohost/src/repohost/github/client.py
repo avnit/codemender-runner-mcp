@@ -93,6 +93,18 @@ class VerifyComment:
   comment_id: int = 0
 
 
+class GitHubClientError(Exception):
+  """Base exception for GitHub API client errors."""
+
+
+class GitHubAuthError(GitHubClientError):
+  """Raised when authentication with the GitHub API fails (401)."""
+
+
+class GitHubRateLimitError(GitHubClientError):
+  """Raised when GitHub API rate limits are exceeded (403/429)."""
+
+
 def is_bot_comment(comment: Optional[Mapping[str, Any]]) -> bool:
   """Returns True if `comment` was authored by a GitHub bot."""
   if not isinstance(comment, Mapping):
@@ -557,35 +569,101 @@ def get_sticky_comment_body(repo: str, pr_number: int, token: str) -> str:
   return ""
 
 
-def fetch_finding_sarif_from_artifact(
-    repo: str, pr_number: int, token: str, finding_id: str
-) -> Optional[Dict[str, Any]]:
-  """Downloads the PR's scan artifact and returns the 1-result SARIF for `finding_id`."""
-  data = _get_object(
-      f"{GITHUB_API_URL}/repos/{repo}/actions/artifacts"
-      f"?name=codemender-report-pr-{pr_number}&per_page=30",
-      token,
-      f"artifacts for PR #{pr_number}",
+def _check_client_response(resp: requests.Response, context: str) -> None:
+  if resp.status_code == 401:
+    raise GitHubAuthError(
+        f"GitHub API authentication failed for {context}: {resp.text}"
+    )
+  is_rate_limit = resp.status_code == 429 or (
+      resp.status_code == 403
+      and (
+          (resp.headers or {}).get("x-ratelimit-remaining") == "0"
+          or any(
+              m in (resp.text or "").lower()
+              for m in ("rate limit", "abuse detection")
+          )
+      )
   )
-  artifacts = (data or {}).get("artifacts") if isinstance(data, dict) else None
+  if is_rate_limit:
+    raise GitHubRateLimitError(
+        f"GitHub API rate limit exceeded for {context}: {resp.text}"
+    )
+  if resp.status_code == 404:
+    return
+  if resp.status_code >= 400:
+    raise GitHubClientError(
+        f"GitHub API error {resp.status_code} for {context}: {resp.text}"
+    )
+
+
+def _fetch_finding_sarif_with_session(
+    sess: Any,
+    repo: str,
+    pr_number: int,
+    token: str,
+    finding_id: str,
+    *,
+    api_url: str = GITHUB_API_URL,
+) -> Optional[Dict[str, Any]]:
+  base_url = api_url.rstrip("/")
+  headers = _headers(token)
+  url = (
+      f"{base_url}/repos/{repo}/actions/artifacts"
+      f"?name=codemender-report-pr-{pr_number}&per_page=30"
+  )
+  try:
+    resp = sess.get(url, headers=headers, timeout=_REQUEST_TIMEOUT_SECONDS)
+  except requests.RequestException as e:
+    raise GitHubClientError(
+        f"Failed to query GitHub Actions artifacts for PR #{pr_number}: {e}"
+    ) from e
+
+  _check_client_response(resp, f"artifacts for PR #{pr_number}")
+  if resp.status_code == 404:
+    return None
+
+  try:
+    data = resp.json()
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.warning(
+        "Invalid JSON response querying artifacts for PR #%d: %s",
+        pr_number,
+        e,
+    )
+    return None
+
+  artifacts = data.get("artifacts") if isinstance(data, dict) else None
   if not isinstance(artifacts, list):
     return None
+
   candidates = [
       a
       for a in artifacts
-      if isinstance(a, dict) and not a.get("expired") and _positive_id(a.get("id"))
+      if isinstance(a, dict)
+      and not a.get("expired")
+      and _positive_id(a.get("id"))
   ]
   candidates.sort(key=lambda a: int(a["id"]), reverse=True)
+
   for artifact in candidates:
-    archive_bytes = _get_bytes(
-        f"{GITHUB_API_URL}/repos/{repo}/actions/artifacts/{artifact['id']}/zip",
-        token,
-        f"artifact {artifact['id']} zip",
-    )
-    if not archive_bytes:
-      continue
+    art_id = artifact["id"]
+    zip_url = f"{base_url}/repos/{repo}/actions/artifacts/{art_id}/zip"
     try:
-      with zipfile.ZipFile(io.BytesIO(archive_bytes)) as zf:
+      zip_resp = sess.get(
+          zip_url, headers=headers, timeout=_REQUEST_TIMEOUT_SECONDS
+      )
+    except requests.RequestException as e:
+      logger.warning("Failed to download artifact %s: %s", art_id, e)
+      continue
+
+    _check_client_response(zip_resp, f"artifact {art_id} zip")
+    if zip_resp.status_code == 404:
+      continue
+    if not zip_resp.content:
+      continue
+
+    try:
+      with zipfile.ZipFile(io.BytesIO(zip_resp.content)) as zf:
         sarif_names = sorted(
             (n for n in zf.namelist() if n.endswith(".sarif")),
             key=lambda n: (0 if n.startswith("findings/") else 1, n),
@@ -601,8 +679,29 @@ def fetch_finding_sarif_from_artifact(
             if finding.finding_id == finding_id and finding.document:
               return finding.document
     except Exception as e:  # pylint: disable=broad-exception-caught
-      logger.warning("Could not read artifact %s: %s", artifact["id"], e)
+      logger.warning("Could not read artifact %s zip: %s", art_id, e)
   return None
+
+
+def fetch_finding_sarif_from_artifact(
+    repo: str,
+    pr_number: int,
+    token: str,
+    finding_id: str,
+    *,
+    api_url: str = GITHUB_API_URL,
+    session: Optional[requests.Session] = None,
+) -> Optional[Dict[str, Any]]:
+  """Downloads the PR's scan artifact and returns 1-result SARIF for finding.
+  """
+  if session is not None:
+    return _fetch_finding_sarif_with_session(
+        session, repo, pr_number, token, finding_id, api_url=api_url
+    )
+  with requests.Session() as s:
+    return _fetch_finding_sarif_with_session(
+        s, repo, pr_number, token, finding_id, api_url=api_url
+    )
 
 
 def format_patch_comment(
@@ -817,27 +916,44 @@ def _post(
 
 
 @retry_on_exception(max_tries=3, initial_delay=2, backoff_factor=2)
-def _get_with_retries(url: str, token: str) -> Any:
-  with requests.Session() as session:
+def _get_with_retries(
+    url: str, token: str, session: Optional[requests.Session] = None
+) -> Any:
+  if session is not None:
     resp = session.get(
         url, headers=_headers(token), timeout=_REQUEST_TIMEOUT_SECONDS
     )
+  else:
+    with requests.Session() as s:
+      resp = s.get(
+          url, headers=_headers(token), timeout=_REQUEST_TIMEOUT_SECONDS
+      )
   _raise_if_retryable(resp)
   return resp
 
 
-def _get_object(url: str, token: str, what: str) -> Optional[Any]:
+def _get_object(
+    url: str,
+    token: str,
+    what: str,
+    session: Optional[requests.Session] = None,
+) -> Optional[Any]:
   try:
-    resp = _get_with_retries(url, token)
+    resp = _get_with_retries(url, token, session=session)
     return resp.json() if 200 <= resp.status_code < 300 else None
   except Exception as e:  # pylint: disable=broad-exception-caught
     logger.warning("Failed to get %s: %s", what, e)
     return None
 
 
-def _get_bytes(url: str, token: str, what: str) -> Optional[bytes]:
+def _get_bytes(
+    url: str,
+    token: str,
+    what: str,
+    session: Optional[requests.Session] = None,
+) -> Optional[bytes]:
   try:
-    resp = _get_with_retries(url, token)
+    resp = _get_with_retries(url, token, session=session)
     return bytes(resp.content) if 200 <= resp.status_code < 300 else None
   except Exception as e:  # pylint: disable=broad-exception-caught
     logger.warning("Failed to download %s: %s", what, e)

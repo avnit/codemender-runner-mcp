@@ -27,4 +27,13 @@ from repohost.models import (
     SecurityGateState,
     SuggestedEdit,
 )
-from repohost.testing import InMemoryRepoHost
+from repohost.store import (
+    ArtifactStore,
+    ArtifactStoreAuthError,
+    ArtifactStoreError,
+    ArtifactStoreRateLimitError,
+)
+from repohost.testing import (
+    InMemoryArtifactStore,
+    InMemoryRepoHost,
+)

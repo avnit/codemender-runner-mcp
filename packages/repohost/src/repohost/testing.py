@@ -16,7 +16,7 @@
 
 """In-memory test double for RepoHost."""
 
-from typing import Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from repohost.base import RepoHost
 from repohost.models import (
@@ -25,6 +25,8 @@ from repohost.models import (
     SecurityGate,
     SuggestedEdit,
 )
+from artifactstore.base import ArtifactStore
+from artifactstore.testing import InMemoryArtifactStore
 
 
 class InMemoryRepoHost(RepoHost):
@@ -163,3 +165,4 @@ class InMemoryRepoHost(RepoHost):
 
   def emit_ci_outputs(self, outputs: Mapping[str, str]) -> None:
     self._emitted_outputs.update(outputs)
+

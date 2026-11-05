@@ -155,6 +155,7 @@ class TestGitlabDockerfile(unittest.TestCase):
     self.assertIn("PYTHONDONTWRITEBYTECODE=1", content)
     self.assertIn("PYTHONUNBUFFERED=1", content)
     self.assertIn("--no-cache-dir", content)
+    self.assertIn("./packages/artifactstore", content)
     self.assertIn("./packages/codemender", content)
     self.assertIn("./packages/launcher[cloudrun]", content)
     self.assertIn("./packages/repohost[gitlab]", content)

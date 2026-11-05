@@ -87,6 +87,20 @@ classDiagram
         }
         class GitHubRepoHost
         class GitLabRepoHost
+        class GitHubActionsArtifactStore
+        class GitLabArtifactStore
+    }
+
+    namespace artifactstore {
+        class ArtifactStore {
+            <<abstract>>
+            +get_finding_sarif()*
+        }
+    }
+
+    namespace external_sinks {
+        class GcsArtifactStore
+        class WizArtifactStore
     }
 
     namespace launcher {
@@ -134,6 +148,11 @@ classDiagram
     RepoHost <|-- GitHubRepoHost
     RepoHost <|-- GitLabRepoHost
 
+    ArtifactStore <|-- GitHubActionsArtifactStore
+    ArtifactStore <|-- GitLabArtifactStore
+    ArtifactStore <|-- GcsArtifactStore
+    ArtifactStore <|-- WizArtifactStore
+
     Launcher <|-- LocalDockerLauncher
     Launcher <|-- CloudRunLauncher
 
@@ -148,12 +167,29 @@ classDiagram
 
 1. **`RepoHost` (`repohost.base`) and Concrete Implementations
    (`GitHubRepoHost`, `GitLabRepoHost` in `packages/repohost`):**
-   - **Role:** Handles interactions with the repo hosting platfrom. Abstracts the
-     APIs for interacting with the PR, the code, comments, etc.
+   - **Role:** Handles interactions with the repo hosting platform. Abstracts
+     the APIs for interacting with the PR, the code, comments, etc.
    - **Boundary & Security Invariant:** Runs exclusively on the outer CI host
      where repository tokens (`$GITHUB_TOKEN`, `$CI_JOB_TOKEN`) reside. Consumes
      domain outcomes returned or yielded by `Launcher`, and is **never**
      installed inside the untrusted sandbox container.
+1. **`ArtifactStore` (`artifactstore.base`) and Concrete Implementations
+   (`GitHubActionsArtifactStore` in `packages/repohost`, future
+   `GcsArtifactStore`, `WizArtifactStore`):**
+   - **Role:** Handles durable, cross-workflow artifact persistence and
+     retrieval (finding SARIF slices, full scan reports, patches, and
+     verification receipts). Decouples artifact storage from PR code review
+     interactions (`RepoHost`) and short-lived container transit
+     (`ArtifactCache`).
+   - **Host-Side Hydration for `verify`:** In asynchronous on-demand `verify`
+     workflows, the outer host runner uses `ArtifactStore.get_finding_sarif()`
+     to fetch the target finding SARIF from previous scan run artifacts, writing
+     it into the short-lived `ArtifactCache` (or container input directory)
+     before launching the worker container (`cm-worker verify`). The worker
+     container only reads from `ArtifactCache`, ensuring untrusted sandbox
+     processes never touch external artifact stores or host tokens.
+   - **Boundary & Security Invariant:** Runs exclusively on the outer CI host
+     where platform or cloud storage credentials reside.
 1. **`Launcher` (`launcher.base`) and Concrete Backends (`LocalDockerLauncher`,
    `CloudRunLauncher` in `packages/launcher`):**
    - **Role:** Acts as the **host-side client** of the sandbox worker. Owns the
@@ -203,6 +239,30 @@ classDiagram
      archive/diff operations (`codemender.vcs`), and shared data models.
    - **Boundary Invariant:** Bottom of the dependency stack: **never** imports 
      `launcher` or `repohost`.
+
+### Long-Term `ArtifactStore` & Pluggable Sinks
+
+This ADR separates **short-lived run/PR artifact caching**
+(`ArtifactCache` in `packages/launcher/src/launcher/cache/`) from
+**cross-workflow artifact persistence and external security platform
+integrations** (`ArtifactStore` in `artifactstore.base`):
+
+| Dimension                      | `ArtifactCache` (`launcher.cache` — Ephemeral)                                                                                                            | `ArtifactStore` (`artifactstore` — Durable)                                                                                                                                                                                                                            |
+| :----------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Primary Purpose**            | Ephemeral client $\leftrightarrow$ worker file exchange (`shared/code.tar.gz`, `RunManifest`, `ExecutionReceipt`, `runner.log`, candidate `.diff` files). | Durable persistence of confirmed findings, SARIF reports, verified patches, cross-workflow `verify` hydration context, and audit trails across repositories and time.                                                                                                  |
+| **Lifecycle & Retention**      | Short-lived, scoped to a single PR commit or CI pipeline run (e.g., 1–3 day CI artifact expiry or GCS lifecycle rule).                                    | Long-lived (days to years), indexed across workflow runs, branches, repositories, and quarterly security campaigns.                                                                                                                                                    |
+| **Implementations & Coupling** | `LocalArtifactCache` (`file://`) and `GcsArtifactCache` (`gs://`), naturally paired with `LocalDockerLauncher` and `CloudRunLauncher`.                    | Initial CI-native implementations (`GitHubActionsArtifactStore`), with future pluggable enterprise sinks (Wiz, SCC, BigQuery, dedicated findings databases) swappable across any `Launcher`.                                                                             |
+
+**Current Upload Mechanism vs. Future `put` Extensions:**
+In GitHub Actions today, initial scan artifact bundles (`report.sarif`,
+`findings/*.sarif`, and `fixes/*.diff`) are uploaded directly by the workflow
+step via `actions/upload-artifact@v4` targeting `$CODEMENDER_OUT_DIR`. Because
+the CI action natively bundles and uploads the directory output, the initial
+`ArtifactStore` interface focuses on retrieval (`get_finding_sarif`). Future
+work will extend `ArtifactStore` with explicit write/persistence operations
+(`put_finding_sarif`, `put_report`, `put_patch`) to allow headless execution,
+container runtimes, and non-GitHub CI platforms to store artifacts directly into
+swappable enterprise sinks without relying on platform-specific CI upload steps.
 
 ### CLI Entrypoints & Runtime Environments
 
@@ -365,14 +425,14 @@ sequenceDiagram
 
 ## 3. Core Design Decisions & Rationale
 
-### Decision 1: Three Dependency Injection Seams (`ArtifactCache` $\rightarrow$ `Launcher` / `Worker`, and Decoupled `RepoHost`)
+### Decision 1: Four Dependency Injection Seams (Cache, Launcher, Host, Store)
 
-- **Design:** Structure the runtime around three explicit Abstract Base Classes
-  (ABCs)—`ArtifactCache`, `Launcher`, and `RepoHost`—plus the inside-container
-  `Worker` server class, wired together at the CLI entrypoint (composition
-  root). Concrete class and method signatures are implementation details
-  governed by the package OpenSpecs; at the architectural level, each component
-  fulfills the following responsibilities and requirements:
+- **Design:** Structure the runtime around four explicit Abstract Base Classes
+  (ABCs)—`ArtifactCache`, `Launcher`, `RepoHost`, and `ArtifactStore`—plus the
+  inside-container `Worker` server class, wired together at the CLI entrypoint
+  (composition root). Concrete class and method signatures are implementation
+  details governed by the package OpenSpecs; at the architectural level, each
+  component fulfills the following responsibilities and requirements:
   1. **`ArtifactCache` (`launcher.cache`):**
      - **What It Does:** Provides a uniform, run/PR-scoped key/file cache
        interface (supporting byte, file, and JSON reads/writes, key existence
@@ -455,6 +515,22 @@ sequenceDiagram
          translates them into GitHub or GitLab API calls, keeping `Launcher` and
          the sandbox container completely agnostic of PR/MR hosting APIs.
 
+  1. **`ArtifactStore` (`artifactstore.base`, with `GitHubActionsArtifactStore`,
+     future `GcsArtifactStore`, `WizArtifactStore`):**
+     - **What It Does:** Abstracts durable, cross-workflow artifact retrieval
+       and persistence (`get_finding_sarif`), isolating long-term scan artifacts
+       from short-lived container transit (`ArtifactCache`) and PR code review
+       APIs (`RepoHost`).
+     - **Key Requirements & How It Meets Them:**
+       - _Host-Side Hydration for `verify`:_ In asynchronous on-demand `verify`
+         runs, the outer host runner injects `ArtifactStore` to fetch finding
+         slices from prior scan artifacts and hydrates `ArtifactCache` (or
+         container input directory) before invoking `Launcher.verify()`.
+       - _Zero-Dependency Boundary:_ Lives in `packages/artifactstore` with zero
+         dependencies on `launcher` or `repohost`. Dedicated test doubles
+         (`InMemoryArtifactStore`) enable full offline testing of runners
+         without real platform credentials or network access.
+
 - **Why:**
   - **Clear Separation Between Short-Lived Container Caching (`ArtifactCache`)
     and Long-Term Persistence (`ArtifactStore`):** Naming the client-to-worker
@@ -462,7 +538,7 @@ sequenceDiagram
     short-lived, run/PR-scoped cache storage for exchanging `code.tar.gz`,
     manifests, receipts, and diffs with sandbox containers, not a long-term
     findings database or external security sink (which is modeled separately as
-    `ArtifactStore` in `packages/store`; see Section 4).
+    `ArtifactStore` in `packages/artifactstore`; see Section 4).
   - **Loose Coupling Without Over-Engineering (YAGNI):** While
     `LocalDockerLauncher` naturally pairs with `LocalArtifactCache` and
     `CloudRunLauncher` naturally pairs with `GcsArtifactCache`, injecting
@@ -940,19 +1016,19 @@ symmetric workspace file parity across `local` and `cloudrun` backends):
     `artifacts: paths: [.codemender-cache/]` in GitLab CI), relying on the
     conflict-free union layout so `Stage 3: report` merges all shard outputs into
     one local directory without file collisions.
-  - **Cross-Workflow `verify` & Bridge to Future `ArtifactStore`
-    (`packages/store`):** When on-demand `/codemender verify <finding_id>` is
-    triggered hours or days later by a PR comment (`issue_comment` webhook), it
-    runs in a separate CI workflow execution on a fresh VM. While `verify` can
-    read from a commit-scoped `gs://` cache prefix or download the prior workflow
-    run's `.codemender-cache/` CI artifact in the short term, cross-workflow and
-    long-lived artifact retrieval is a primary driver for the future
-    **`ArtifactStore` (`packages/store`)** (see *Future Work* below). Once
-    `ArtifactStore` is introduced, `find`/`fix`/`report` will persist canonical
-    finding records and candidate patches to `ArtifactStore`, allowing
-    subsequent `verify` runs (and enterprise security platforms) to hydrate
-    finding context directly from `ArtifactStore` even after ephemeral
-    `ArtifactCache` entries expire.
+  - **Cross-Workflow `verify` & Bridge to `ArtifactStore`
+    (`packages/artifactstore`):** When on-demand
+    `/codemender verify <finding_id>` is triggered hours or days later by a PR
+    comment (`issue_comment` webhook), it runs in a separate CI workflow
+    execution on a fresh VM. While `verify` can read from a commit-scoped
+    `gs://` cache prefix or download the prior workflow run's
+    `.codemender-cache/` CI artifact in the short term, cross-workflow and
+    long-lived artifact retrieval is a primary driver for the
+    **`ArtifactStore` (`packages/artifactstore`)** (see *Future Work* below).
+    `find`/`fix`/`report` persist canonical finding records and candidate
+    patches to `ArtifactStore`, allowing subsequent `verify` runs (and
+    enterprise security platforms) to hydrate finding context directly from
+    `ArtifactStore` even after ephemeral `ArtifactCache` entries expire.
 
 ### Unified Sandbox Worker Sequence (`Launcher` Client $\leftrightarrow$ `Worker` Server)
 
@@ -999,24 +1075,6 @@ sequenceDiagram
 | **Phase 2 (Multi-Job Extension) — Stage 2: `fix` (Compute Shards)**     | Conditional on `needs.find.outputs.has_findings == 'true'`. Matrix `batch: ${{ fromJson(needs.find.outputs.batches_json) }}` runs `cm-github fix --findings "${{ matrix.batch }}" --max-workers K` (no `RepoHost` writes) and uploads shard `.codemender-cache/` output (if `file://`).                | Uses `parallel: N` and runs `cm-gitlab fix --shard "${CI_NODE_INDEX}/${CI_NODE_TOTAL}" --max-workers K` (no `RepoHost` writes; exits `0` if shard is empty) and exports shard `.codemender-cache/` via `artifacts: paths:` (if `file://`).                           |
 | **Phase 2 (Multi-Job Extension) — Stage 3: `report` (Fan-In Aggregator)** | Runs once with `if: always()` after `fix` matrix completes. Merges `.codemender-cache/` via `actions/download-artifact@v4` (`merge-multiple: true`, or reads `gs://`), posts inline suggestions/fallbacks, updates the single sticky summary, and sets the final `CodeMender / Security Gate` status.  | Runs once with `when: always` (`needs: [find, fix]`). Reads merged `.codemender-cache/` (or `gs://`), posts inline MR suggestions/fallbacks, updates the single sticky summary note, and sets the final `CodeMender / Security Gate` status.                             |
 | **Separate On-Demand `verify`**                                         | Triggered in a separate job by `issue_comment` (`/codemender verify finding-001`). Hydrates finding/archive from `ArtifactCache` (or future `ArtifactStore`), runs `cm-github verify --findings finding-001`, and replies to the comment.                                                               | Triggered in a separate job by MR note webhook or `CODEMENDER_VERIFY_FINDING=finding-001`. Hydrates finding/archive from `ArtifactCache` (or future `ArtifactStore`), runs `cm-gitlab verify --findings "$CODEMENDER_VERIFY_FINDING"`, and replies to the discussion. |
-
-### Future Work: Long-Term `ArtifactStore` (`packages/store`)
-
-This ADR intentionally separates **short-lived run/PR artifact caching**
-(`ArtifactCache` in `packages/launcher/src/launcher/cache/`) from **long-term
-artifact persistence and external security platform integrations**
-(`ArtifactStore`, planned for a future 4th workspace package `packages/store`):
-
-| Dimension                      | `ArtifactCache` (`launcher.cache` — In Scope Now)                                                                                                         | `ArtifactStore` (`packages/store` — Future Work)                                                                                                                                                                                                                       |
-| :----------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Primary Purpose**            | Ephemeral client $\leftrightarrow$ worker file exchange (`shared/code.tar.gz`, `RunManifest`, `ExecutionReceipt`, `runner.log`, candidate `.diff` files). | Durable persistence of confirmed findings, SARIF reports, verified patches, cross-workflow `verify` hydration context, and audit trails across repositories and time.                                                                                                  |
-| **Lifecycle & Retention**      | Short-lived, scoped to a single PR commit or CI pipeline run (e.g., 1–3 day CI artifact expiry or GCS lifecycle rule).                                    | Long-lived (months/years), indexed across workflow runs, branches, repositories, and quarterly security campaigns.                                                                                                                                                     |
-| **Implementations & Coupling** | `LocalArtifactCache` (`file://`) and `GcsArtifactCache` (`gs://`), naturally paired with `LocalDockerLauncher` and `CloudRunLauncher`.                    | Pluggable enterprise sinks—such as **Wiz**, Google Security Command Center (SCC), long-term GCS/BigQuery compliance archives, or vulnerability management databases—completely swappable across any `Launcher`.                                                        |
-
-Deferring `packages/store` (`ArtifactStore`) until enterprise reporting sinks
-and cross-workflow persistence are implemented keeps the three core runtime
-packages (`codemender`, `launcher`, `repohost`) focused on execution and PR/MR
-remediation while reserving a clean architectural seam for durable storage.
 
 ### Confirmation & Verification Strategy (`make test`)
 

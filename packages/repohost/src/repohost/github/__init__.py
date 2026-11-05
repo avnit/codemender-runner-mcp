@@ -64,3 +64,4 @@ from repohost.github.fix_comments import (
     same_lines_note,
 )
 from repohost.github.repo_host import GitHubRepoHost
+from repohost.github.store import GitHubActionsArtifactStore

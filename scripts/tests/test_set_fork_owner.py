@@ -18,6 +18,7 @@
 
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -87,6 +88,13 @@ class TestSetForkOwner(unittest.TestCase):
         self.repo_dir / ".github" / "workflows" / "cm-merge-scan.yml"
     ).read_text(encoding="utf-8")
 
+  def _expected_ref(self) -> str:
+    content = (
+        _REPO_ROOT / ".github" / "workflows" / "cm-merge-scan.yml"
+    ).read_text(encoding="utf-8")
+    m = re.search(r"actions/codemender@([a-f0-9]+|\w+)", content)
+    return m.group(1) if m else "main"
+
   def test_help_flag_prints_usage_and_exits_zero(self):
     self.assertTrue(
         _SET_FORK_OWNER_SH.is_file() and os.access(_SET_FORK_OWNER_SH, os.X_OK),
@@ -102,12 +110,14 @@ class TestSetForkOwner(unittest.TestCase):
     res = self._run_script("acme-corp")
     self.assertEqual(res.returncode, 0, msg=res.stderr)
     wf = self._workflow_text()
+    ref = self._expected_ref()
     self.assertIn(
-        "- uses: acme-corp/codemender-runner/.github/actions/codemender@main",
+        f"- uses: acme-corp/codemender-runner/.github/actions/codemender@{ref}",
         wf,
     )
     self.assertIn(
-        "# - uses: acme-corp/codemender-runner/.github/actions/codemender-local@main",
+        "# - uses:"
+        f" acme-corp/codemender-runner/.github/actions/codemender-local@{ref}",
         wf,
     )
     self.assertNotIn("cloud-gtm/codemender-runner/.github/actions/", wf)
@@ -116,12 +126,14 @@ class TestSetForkOwner(unittest.TestCase):
     res = self._run_script("acme-corp/custom-runner")
     self.assertEqual(res.returncode, 0, msg=res.stderr)
     wf = self._workflow_text()
+    ref = self._expected_ref()
     self.assertIn(
-        "- uses: acme-corp/custom-runner/.github/actions/codemender@main",
+        f"- uses: acme-corp/custom-runner/.github/actions/codemender@{ref}",
         wf,
     )
     self.assertIn(
-        "# - uses: acme-corp/custom-runner/.github/actions/codemender-local@main",
+        "# - uses:"
+        f" acme-corp/custom-runner/.github/actions/codemender-local@{ref}",
         wf,
     )
 
@@ -136,8 +148,9 @@ class TestSetForkOwner(unittest.TestCase):
     )
     res_https = self._run_script("--auto")
     self.assertEqual(res_https.returncode, 0, msg=res_https.stderr)
+    ref = self._expected_ref()
     self.assertIn(
-        "- uses: https-org/https-runner/.github/actions/codemender@main",
+        f"- uses: https-org/https-runner/.github/actions/codemender@{ref}",
         self._workflow_text(),
     )
 
@@ -152,7 +165,7 @@ class TestSetForkOwner(unittest.TestCase):
     res_ssh = self._run_script()
     self.assertEqual(res_ssh.returncode, 0, msg=res_ssh.stderr)
     self.assertIn(
-        "- uses: ssh-org/ssh-runner/.github/actions/codemender@main",
+        f"- uses: ssh-org/ssh-runner/.github/actions/codemender@{ref}",
         self._workflow_text(),
     )
 
@@ -168,8 +181,10 @@ class TestSetForkOwner(unittest.TestCase):
 
     res3 = self._run_script("second-org")
     self.assertEqual(res3.returncode, 0, msg=res3.stderr)
+    ref = self._expected_ref()
     self.assertIn(
-        "- uses: second-org/codemender-runner/.github/actions/codemender@main",
+        "- uses:"
+        f" second-org/codemender-runner/.github/actions/codemender@{ref}",
         self._workflow_text(),
     )
 

@@ -106,7 +106,8 @@ Raw `fsspec.AbstractFileSystem` is an un-chrooted, general-purpose filesystem AP
 
 ### Non-Goals
 - Migrating existing hardcoded paths in `github-actions/`, `cloud-run-jobs/`, and `codemender-runner/storage.py` (deferred to Phase 2 until `Launcher` and `Worker` implementations land).
-- Long-term cross-run persistence (`ArtifactStore` in `packages/store`, deferred per ADR-0009 Section 4).
+- Long-term cross-run persistence (`ArtifactStore` in
+  `packages/artifactstore`, per ADR-0009 Section 4).
 - Cloud Storage FUSE mounts inside Cloud Run containers (rejected in ADR-0007 and ADR-0009 due to POSIX `stat` latency during compilation and Git operations).
 - Tar-slip inspection or repository extraction (`unpack_tar_gz_preserving_permissions` and `flatten_repo_if_nested` belong to `Worker` in `SPEC-WORKER`, while `ArtifactCache` atomically transfers the raw `shared/code.tar.gz` archive).
 

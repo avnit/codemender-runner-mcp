@@ -259,25 +259,28 @@ This specification is governed by:
 
 Because on-demand verification executes in a separate workflow run from the
 initial PR scan, the action MUST resolve the single-result SARIF 2.1.0 input
-file required by `cm-runner verify --finding` using a two-tier strategy:
+document required for verification using a two-tier strategy:
 
-1. **Tier 1 (Primary — PR Workflow Artifact):**
-   - Query `GET /repos/{repo}/actions/artifacts?name=codemender-report-pr-{pr_number}`
-     and inspect non-expired artifacts in descending `created_at` / `id` order.
-   - Download the artifact zip archive (`GET /repos/{repo}/actions/artifacts/{artifact_id}/zip`),
-     extract `findings/*.sarif` or `report.sarif` in memory (enforcing a maximum
-     decompressed size limit to guard against zip bombs), parse with
-     `SarifDocument`, and locate the finding whose `finding_id` matches the
-     parent fix comment's `<finding_id>`.
+1. **Tier 1 (Primary — Durable Artifact Storage):**
+   - The action MUST attempt to retrieve the original single-result SARIF
+     document for `<finding_id>` from durable artifact storage associated with
+     the pull request.
 2. **Tier 2 (Fallback — Reconstruct from Parent Fix Comment & Sticky Comment):**
-   - If the artifact is missing, expired, inaccessible (e.g. missing
-     `actions: read` permission), or does not contain `<finding_id>`, the action
-     MUST reconstruct a valid single-result SARIF 2.1.0 document from the parent
-     fix comment (and the PR's sticky summary comment if present):
-     - `ruleId`: extracted from the parent fix comment header (`**CodeMender fix for finding N:** <sev> · `<rule_id>` · `<title>``), defaulting to `"codemender-finding"`.
-     - `level`: mapped from the severity label in the parent fix comment header (`error`, `warning`, `note`).
-     - `message.text`: the finding title from the parent fix comment header (enriched with the finding's `Details` from the sticky summary comment's `<details>` block when available).
-     - `locations[0].physicalLocation`: `artifactLocation.uri` set to the parent review comment's normalized repo-relative `path`, and `region.startLine` / `endLine` set to the parent review comment's `line` or `original_line` (when `> 0`).
+   - If the finding SARIF document cannot be retrieved from artifact storage
+     (the artifact is missing, expired, inaccessible, or does not contain
+     `<finding_id>`), the action MUST reconstruct a valid single-result SARIF
+     2.1.0 document from the parent fix comment and the PR sticky summary
+     comment:
+     - `ruleId`: extracted from the parent fix comment header, defaulting to
+       `"codemender-finding"`.
+     - `level`: mapped from the severity label in the parent fix comment header
+       (`error`, `warning`, `note`).
+     - `message.text`: the finding title from the parent fix comment header
+       (enriched with finding details from the sticky summary comment when
+       available).
+     - `locations[0].physicalLocation`: `artifactLocation.uri` set to the
+       parent comment repo-relative `path`, and line coordinates set from the
+       parent review comment.
      - `partialFingerprints.primaryLocationLineHash`: set to `<finding_id>`.
 
 #### Scenario: Resolving SARIF from the PR artifact

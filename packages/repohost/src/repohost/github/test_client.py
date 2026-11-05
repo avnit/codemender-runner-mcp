@@ -28,6 +28,9 @@ from repohost.github import client as github
 from repohost.github.client import (
     FINDING_TAG_RE,
     GITHUB_API_URL,
+    GitHubAuthError,
+    GitHubClientError,
+    GitHubRateLimitError,
     MAX_COMMENT_BODY_CHARS,
     ReviewResult,
     STICKY_SUMMARY_MARKER,
@@ -53,12 +56,13 @@ from repohost.github.client import (
 )
 
 
-def _response(json_body, status_code=200, links=None):
+def _response(json_body, status_code=200, links=None, text=None):
   resp = MagicMock()
   resp.status_code = status_code
   resp.json.return_value = json_body
   resp.links = links or {}
   resp.raise_for_status.return_value = None
+  resp.text = text if text is not None else ""
   return resp
 
 
@@ -325,6 +329,32 @@ class TestGitHubApi(unittest.TestCase):
     found = fetch_finding_sarif_from_artifact("o/r", 7, "tok", "aabbcc112233")
     self.assertIsNotNone(found)
     self.assertEqual(found["runs"][0]["results"][0]["ruleId"], "R1")
+
+  @patch.object(github.requests, "Session")
+  def test_fetch_finding_sarif_auth_error_401(self, mock_session_cls):
+    session = mock_session_cls.return_value.__enter__.return_value
+    session.get.return_value = _response(None, 401, text="Bad credentials")
+    with self.assertRaises(GitHubAuthError):
+      fetch_finding_sarif_from_artifact("o/r", 7, "tok", "f1")
+
+  @patch.object(github.requests, "Session")
+  def test_fetch_finding_sarif_rate_limit_403(self, mock_session_cls):
+    session = mock_session_cls.return_value.__enter__.return_value
+    session.get.return_value = _response(
+        None, 403, text="API rate limit exceeded"
+    )
+    with self.assertRaises(GitHubRateLimitError):
+      fetch_finding_sarif_from_artifact("o/r", 7, "tok", "f1")
+
+  @patch.object(github.requests, "Session")
+  def test_fetch_finding_sarif_server_error_500(self, mock_session_cls):
+    session = mock_session_cls.return_value.__enter__.return_value
+    session.get.return_value = _response(
+        None, 500, text="Internal Server Error"
+    )
+    with self.assertRaises(GitHubClientError):
+      fetch_finding_sarif_from_artifact("o/r", 7, "tok", "f1")
+
 
 
 if __name__ == "__main__":
