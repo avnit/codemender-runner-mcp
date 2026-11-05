@@ -63,3 +63,4 @@ from repohost.github.fix_comments import (
     plan_fixes,
     same_lines_note,
 )
+from repohost.github.repo_host import GitHubRepoHost

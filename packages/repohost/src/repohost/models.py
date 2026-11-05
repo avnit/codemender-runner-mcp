@@ -22,9 +22,8 @@ from typing import Optional
 
 
 class SecurityGateState(StrEnum):
-  """State of the CodeMender security quality gate, aligned with AIP-216."""
+  """State of the CodeMender security quality gate."""
 
-  STATE_UNSPECIFIED = "STATE_UNSPECIFIED"
   PENDING = "PENDING"
   SUCCESS = "SUCCESS"
   FAILURE = "FAILURE"

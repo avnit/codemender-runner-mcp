@@ -34,10 +34,7 @@ from repohost.models import (
 class TestRepoHostModels(unittest.TestCase):
   """Tests asserting key invariants on domain models and exceptions."""
 
-  def test_security_gate_state_aip_216_values(self):
-    self.assertEqual(
-        SecurityGateState.STATE_UNSPECIFIED, "STATE_UNSPECIFIED"
-    )
+  def test_security_gate_state_values(self):
     self.assertEqual(SecurityGateState.PENDING, "PENDING")
     self.assertEqual(SecurityGateState.SUCCESS, "SUCCESS")
     self.assertEqual(SecurityGateState.FAILURE, "FAILURE")
