@@ -22,7 +22,10 @@ import tarfile
 import tempfile
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+from repohost.models import ChangeContext, SecurityGateState
+from repohost.testing import InMemoryRepoHost
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.abspath(
@@ -303,9 +306,18 @@ class TestEndToEndSimulation(unittest.TestCase):
           with patch.dict("sys.modules", mock_modules):
             with patch.object(
                 gha_runner,
-                "post_or_update_sticky_comment",
-                return_value="https://github.com/org/repo/pull/42#issuecomment-12345",
-            ) as mock_post_comment:
+                "create_repo_host",
+            ) as mock_create_host:
+              mock_host = MagicMock()
+              mock_host.get_change_context.return_value = ChangeContext(
+                  repo_id="org/repo",
+                  change_id="42",
+                  base_sha="base12345678",
+                  head_sha="head12345678",
+                  base_ref="main",
+                  head_ref="feature",
+              )
+              mock_create_host.return_value = mock_host
               rc = gha_runner.main(env)
 
         # 4. Assertions
@@ -329,11 +341,8 @@ class TestEndToEndSimulation(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join("output", "report.sarif")))
 
         # Verify PR sticky comment was posted with expected details
-        mock_post_comment.assert_called_once()
-        token, repo, pr_number, body = mock_post_comment.call_args.args
-        self.assertEqual(token, "ghp_test_secret_token")
-        self.assertEqual(repo, "org/repo")
-        self.assertEqual(pr_number, 42)
+        mock_host.upsert_summary.assert_called_once()
+        body = mock_host.upsert_summary.call_args.args[0]
 
         self.assertIn("✅ **No vulnerabilities found**", body)
         self.assertIn("`base12345678`", body)
@@ -375,14 +384,23 @@ class TestEndToEndSimulation(unittest.TestCase):
           with patch.dict("sys.modules", mock_modules):
             with patch.object(
                 gha_runner,
-                "post_or_update_sticky_comment",
-                return_value="https://github.com/org/repo/pull/10#issuecomment-9999",
-            ) as mock_post_comment:
+                "create_repo_host",
+            ) as mock_create_host:
+              mock_host = MagicMock()
+              mock_host.get_change_context.return_value = ChangeContext(
+                  repo_id="org/repo",
+                  change_id="10",
+                  base_sha="base12345678",
+                  head_sha="head12345678",
+                  base_ref="main",
+                  head_ref="feature",
+              )
+              mock_create_host.return_value = mock_host
               rc = gha_runner.main(env)
 
         self.assertEqual(rc, 1, "gha_runner.main() must exit 1 when client fails")
-        mock_post_comment.assert_called_once()
-        _, _, _, body = mock_post_comment.call_args.args
+        mock_host.upsert_summary.assert_called_once()
+        body = mock_host.upsert_summary.call_args.args[0]
         self.assertIn("❌ **CodeMender scan failed.**", body)
         self.assertIn("`2`", body)
         self.assertIn("Backend: `Cloudrun`", body)
@@ -649,22 +667,30 @@ sys.exit(0)
         }
 
         launcher = CloudRunLauncher(client=LiveBootstrapperCloudRunClient())
+        host = InMemoryRepoHost(
+            change_context=ChangeContext(
+                repo_id="test-org/test-repo",
+                change_id="55",
+                base_sha="base12345678",
+                head_sha="head12345678",
+                base_ref="main",
+                head_ref="feature",
+                is_fork=False,
+            )
+        )
 
         with patch.dict(os.environ, {"GITHUB_TOKEN": "ghp_mock_live_token"}):
-          with patch.object(
-              gha_runner,
-              "post_or_update_sticky_comment",
-              return_value="https://github.com/test-org/test-repo/pull/55#issuecomment-1",
-          ) as mock_post_comment:
-            rc = gha_runner.run_pr(pr_event, gha_env, launcher)
+          rc = gha_runner.run_pr(pr_event, gha_env, launcher, host=host)
 
-        self.assertEqual(rc, 0, "gha_runner.run_pr() must exit 0 with live bootstrapper")
-        mock_post_comment.assert_called_once()
-        token, repo, pr_num, comment_body = mock_post_comment.call_args.args
-        self.assertEqual(token, "ghp_mock_live_token")
-        self.assertEqual(repo, "test-org/test-repo")
-        self.assertEqual(pr_num, 55)
-        self.assertIn("✅ **No vulnerabilities found**", comment_body)
+        self.assertEqual(
+            rc, 0, "gha_runner.run_pr() must exit 0 with live bootstrapper"
+        )
+        summary = host.current_summary or ""
+        self.assertIn("✅ **No vulnerabilities found**", summary)
+        self.assertIsNotNone(host.latest_security_gate)
+        self.assertEqual(
+            host.latest_security_gate.state, SecurityGateState.SUCCESS
+        )
 
         # Validate generated receipt structure
         generated_receipt_path = os.path.join(transit_out, "receipt.json")

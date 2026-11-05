@@ -132,3 +132,15 @@ class RepoHost(abc.ABC):
     Args:
       outputs: Mapping of output names to string values.
     """
+
+  @abc.abstractmethod
+  def add_reaction(self, comment_id: str, reaction: str) -> None:
+    """Adds a reaction to an existing comment on the change.
+
+    Args:
+      comment_id: Identifier of the comment to react to.
+      reaction: Platform-independent reaction identifier (e.g. "eyes").
+
+    Raises:
+      RepoHostError: If the reaction cannot be posted.
+    """

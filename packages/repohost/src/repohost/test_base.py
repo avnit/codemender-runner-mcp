@@ -89,6 +89,9 @@ class DummyCompleteRepoHost(RepoHost):
   def emit_ci_outputs(self, outputs: Mapping[str, str]) -> None:
     pass
 
+  def add_reaction(self, comment_id: str, reaction: str) -> None:
+    pass
+
 
 class TestRepoHostBase(unittest.TestCase):
   """Tests for RepoHost ABC instantiation and interface contract."""
@@ -131,6 +134,8 @@ class TestRepoHostBase(unittest.TestCase):
     host.set_security_gate(gate)
 
     host.emit_ci_outputs({"key": "value"})
+
+    host.add_reaction("c1", "eyes")
 
 
 if __name__ == "__main__":

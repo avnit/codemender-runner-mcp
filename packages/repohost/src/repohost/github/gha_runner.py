@@ -12,9 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0008, SPEC-GHA/REQ-0004, SPEC-GHA/REQ-0005, SPEC-GHA/REQ-0006, SPEC-GHA/REQ-0008, SPEC-GHA-FIX/REQ-0001, SPEC-GHA-VERIFY
+# Governing: ADR-0008, ADR-0009#decision-1, ADR-0009#decision-4,
+# SPEC-GHA/REQ-0004, SPEC-GHA/REQ-0005, SPEC-GHA/REQ-0006, SPEC-GHA/REQ-0008,
+# SPEC-GHA-FIX/REQ-0001, SPEC-GHA-VERIFY
 
 """Entry point for the CodeMender GitHub Action (M1 scan + M2 parallel fixes).
+
+Governing: ADR-0008, ADR-0009#decision-1, ADR-0009#decision-4.
 
 Flow:
   1. Read the GitHub `pull_request` event (base SHA, head SHA, PR number).
@@ -90,27 +94,35 @@ from launcher.local import (
     LocalDockerLauncher,
     make_world_writable,
 )
-# Governing: ADR-0008, SPEC-GHA, SPEC-GHA-FIX, SPEC-GHA-VERIFY
+from repohost.base import RepoHost
 from repohost.github import (
     delete_codemender_review_comments,
     fix_comments,
-    post_or_update_sticky_comment,
 )
 from repohost.github.client import (
     FINDING_TAG_RE,
     VerifyComment,
-    fetch_finding_sarif_from_artifact,
     get_review_comment,
     get_sticky_comment_body,
     has_other_active_verify_runs,
     is_bot_comment,
     list_verify_comments,
-    react_to_review_comment,
     reply_to_comment,
     update_review_comment,
     verify_tag,
 )
 from repohost.github.fix_comments import FixCell
+from repohost.github.repo_host import GitHubRepoHost
+from repohost.github.store import GitHubActionsArtifactStore
+from repohost.models import (
+    ChangeContext,
+    Comment,
+    RepoHostError,
+    SecurityGate,
+    SecurityGateState,
+    SuggestedEdit,
+)
+from repohost.store import ArtifactStore, ArtifactStoreError
 
 logger = logging.getLogger("codemender-github-actions")
 
@@ -262,9 +274,60 @@ def create_launcher(
   raise ValueError(f"Unsupported CODEMENDER_BACKEND: {backend!r}.")
 
 
+def create_repo_host(
+    env: Mapping[str, str],
+    event: Optional[Mapping[str, Any]] = None,
+) -> GitHubRepoHost:
+  """Creates a GitHubRepoHost instance from environment and event."""
+  return GitHubRepoHost(env=env, event=event)
+
+
+def create_artifact_store(
+    env: Mapping[str, str],
+    event: Optional[Mapping[str, Any]] = None,
+    *,
+    repo: Optional[str] = None,
+    pr_number: Optional[int] = None,
+) -> ArtifactStore:
+  """Creates an ArtifactStore instance from environment and event."""
+  resolved_repo = repo or env.get("GITHUB_REPOSITORY", "")
+  if not resolved_repo and event:
+    resolved_repo = str(event.get("repository", {}).get("full_name") or "")
+
+  resolved_pr = pr_number
+  if resolved_pr is None and event:
+    pr_data = event.get("pull_request")
+    if isinstance(pr_data, dict) and pr_data.get("number"):
+      try:
+        resolved_pr = int(pr_data["number"])
+      except (ValueError, TypeError):
+        pass
+    if not resolved_pr and event.get("issue", {}).get("number"):
+      try:
+        resolved_pr = int(event["issue"]["number"])
+      except (ValueError, TypeError):
+        pass
+
+  token = env.get("GITHUB_TOKEN", "")
+  server_url = env.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+  api_url = env.get("GITHUB_API_URL") or (
+      "https://api.github.com"
+      if server_url == "https://github.com"
+      else f"{server_url}/api/v3"
+  )
+  return GitHubActionsArtifactStore(
+      repo=resolved_repo,
+      pr_number=resolved_pr,
+      token=token,
+      api_url=api_url,
+  )
+
+
 def main(
     env: Mapping[str, str] = os.environ,
     argv: Optional[Sequence[str]] = None,
+    host: Optional[RepoHost] = None,
+    store: Optional[ArtifactStore] = None,
 ) -> int:
   """CLI entry point invoked by `action.yml`."""
   logging.basicConfig(
@@ -272,7 +335,7 @@ def main(
   )
   args = sys.argv[1:] if argv is None else list(argv)
   if "--preflight" in args or env.get("CODEMENDER_PREFLIGHT") == "1":
-    return run_preflight(env)
+    return run_preflight(env, host=host)
 
   creds_path = (
       env.get("GOOGLE_GHA_CREDS_PATH")
@@ -332,10 +395,17 @@ def main(
     with open(env["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
       event = json.load(f)
 
-    staging_root, workspace_copy, cm_home_dir, out_dir = _stage_host_directories(
-        src_workspace=src_workspace,
-        temp_root=env.get("RUNNER_TEMP"),
-        out_dir_override=env.get("CODEMENDER_OUT_DIR"),
+    if host is None:
+      host = create_repo_host(env, event=event)
+    if store is None:
+      store = create_artifact_store(env, event=event)
+
+    staging_root, workspace_copy, cm_home_dir, out_dir = (
+        _stage_host_directories(
+            src_workspace=src_workspace,
+            temp_root=env.get("RUNNER_TEMP"),
+            out_dir_override=env.get("CODEMENDER_OUT_DIR"),
+        )
     )
     try:
       try:
@@ -352,8 +422,15 @@ def main(
         return 1
       print(f"::notice::cm-runner container runtime: {launcher.runtime}")
       if event_name == "pull_request_review_comment":
-        return run_verify(event, env, launcher, out_dir=out_dir)
-      return run_pr(event, env, launcher, out_dir=out_dir)
+        return run_verify(
+            event,
+            env,
+            launcher,
+            out_dir=out_dir,
+            host=host,
+            store=store,
+        )
+      return run_pr(event, env, launcher, out_dir=out_dir, host=host)
     finally:
       shutil.rmtree(staging_root, ignore_errors=True)
 
@@ -369,14 +446,28 @@ def main(
     with open(env["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
       event = json.load(f)
 
+    if host is None:
+      host = create_repo_host(env, event=event)
+    if store is None:
+      store = create_artifact_store(env, event=event)
+
     try:
       launcher = create_launcher(env)
     except (ImportError, ValueError) as e:
       print(f"::error::{e}")
       return 1
     if event_name == "pull_request_review_comment":
-      return run_verify(event, env, launcher, out_dir=env.get("CODEMENDER_OUT_DIR"))
-    return run_pr(event, env, launcher, out_dir=env.get("CODEMENDER_OUT_DIR"))
+      return run_verify(
+          event,
+          env,
+          launcher,
+          out_dir=env.get("CODEMENDER_OUT_DIR"),
+          host=host,
+          store=store,
+      )
+    return run_pr(
+        event, env, launcher, out_dir=env.get("CODEMENDER_OUT_DIR"), host=host
+    )
 
   else:
     print(f"::error::Unsupported CODEMENDER_BACKEND: {backend!r}.")
@@ -388,25 +479,40 @@ def run_pr(
     env: Mapping[str, str],
     launcher: Launcher,
     *,
+    host: RepoHost,
     out_dir: Optional[str] = None,
 ) -> int:
   """Runs `find-diff` on a `pull_request` event and orchestrates fixes."""
   pr = event.get("pull_request") or {}
   pr_number = pr.get("number")
-  if not pr_number:
-    print("::error::Event payload has no pull_request.number.")
-    return 1
-
   base_sha = (
       ((pr.get("base") or {}).get("sha") or "").strip()
       or ((pr.get("base") or {}).get("ref") or "").strip()
   )
+  head_sha = ((pr.get("head") or {}).get("sha") or "").strip()
+  fork = is_fork_pr(event)
+
+  try:
+    context = host.get_change_context()
+    if context.change_id:
+      pr_number = int(context.change_id)
+    if context.base_sha:
+      base_sha = context.base_sha
+    if context.head_sha:
+      head_sha = context.head_sha
+    if context.is_fork is not None:
+      fork = context.is_fork
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.debug("host.get_change_context fallback: %s", e)
+
+  if not pr_number:
+    print("::error::Event payload has no pull_request.number.")
+    return 1
+
   if not base_sha:
     print("::error::Event payload has no pull_request.base.sha.")
     return 1
-  head_sha = ((pr.get("head") or {}).get("sha") or "").strip()
 
-  fork = is_fork_pr(event)
   if fork:
     print("::notice::Fork PR: running with the repository's fork-PR settings.")
 
@@ -508,15 +614,63 @@ def run_pr(
           fork=fork,
           out_dir=out_dir,
           render=sticky_body,
+          host=host,
       )
     else:
       print(
-          "::warning::GITHUB_WORKSPACE is not set, so CodeMender can't fix the findings."
+          "::warning::GITHUB_WORKSPACE is not set, so CodeMender can't fix"
+          " the findings."
       )
 
-  if not _post_sticky_comment(env, int(pr_number), sticky_body(), fork):
+  if not _post_sticky_comment(
+      env, int(pr_number), sticky_body(), fork, host=host
+  ):
     return 1
+
+  try:
+    if runner_ok and not findings:
+      gate = SecurityGate(
+          state=SecurityGateState.SUCCESS,
+          description="CodeMender: No security findings detected",
+      )
+    elif runner_ok and findings:
+      gate = SecurityGate(
+          state=SecurityGateState.FAILURE,
+          description=(
+              f"CodeMender: {len(findings)} security finding(s) detected"
+          ),
+      )
+    else:
+      gate = SecurityGate(
+          state=SecurityGateState.ERROR,
+          description="CodeMender: Scan execution failed or timed out",
+      )
+    host.set_security_gate(gate)
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.warning("Could not update security gate: %s", e)
+
   return 0 if runner_ok else 1
+
+
+def _set_security_gate_failure(
+    host: RepoHost,
+    findings: Sequence[Finding],
+    *,
+    stopped: bool = False,
+) -> None:
+  """Publishes a FAILURE security gate check for detected findings."""
+  try:
+    gate = SecurityGate(
+        state=SecurityGateState.FAILURE,
+        description=(
+            f"CodeMender: {len(findings)} security finding(s) detected"
+            if not stopped
+            else "CodeMender: Remediation run interrupted"
+        ),
+    )
+    host.set_security_gate(gate)
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.warning("Could not update security gate: %s", e)
 
 
 def _run_fixes(
@@ -529,10 +683,9 @@ def _run_fixes(
     fork: bool,
     out_dir: Optional[str],
     render: Callable[[Mapping[int, FixCell], str], str],
+    host: RepoHost,
 ) -> int:
   """Runs `cm-runner fix` in parallel and posts each fix as it finishes."""
-  repo = env.get("GITHUB_REPOSITORY", "")
-  token = env.get("GITHUB_TOKEN", "")
   workspace = env["GITHUB_WORKSPACE"]
   temp_root = env.get("RUNNER_TEMP") or None
   if out_dir is None:
@@ -554,20 +707,19 @@ def _run_fixes(
   plan = fix_comments.plan_fixes(findings)
   cells: Dict[int, FixCell] = dict(plan.cells)
 
-  if not _post_sticky_comment(env, pr_number, render(cells, _fix_status(cells)), fork):
+  if not _post_sticky_comment(
+      env, pr_number, render(cells, _fix_status(cells)), fork, host=host
+  ):
     return 1
   if not plan.to_fix:
+    _set_security_gate_failure(host, findings)
     return 0
 
   poster = fix_comments.FixPoster(
-      repo=repo,
-      pr_number=pr_number,
-      token=token,
-      head_sha=head_sha,
+      host=host,
       repo_dir=workspace,
       headers={finding.index: _fix_header(finding) for finding in plan.to_fix},
       fingerprints=plan.fingerprints,
-      artifacts_url=f"{_run_url(env)}#artifacts",
       head_checked_out=head_checked_out,
   )
   max_workers = max_parallel_fixes(env)
@@ -602,7 +754,12 @@ def _run_fixes(
 
   def update_sticky(stopped: bool = False) -> bool:
     body = render(cells, _fix_status(cells, stopped))
-    return post_or_update_sticky_comment(token, repo, pr_number, body) is not None
+    try:
+      c = host.upsert_summary(body)
+      return bool(c and (c.comment_id or c.url))
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      logger.warning("host.upsert_summary update failed: %s", e)
+      return False
 
   stopped = False
   with _stop_on_signal(launcher):
@@ -640,8 +797,12 @@ def _run_fixes(
           cells[index] = FixCell(fix_comments.FAILED)
     final_ok = update_sticky(stopped)
 
+  _set_security_gate_failure(host, findings, stopped=stopped)
+
   if not final_ok:
-    print("::error::Could not update the CodeMender comment with the fix results.")
+    print(
+        "::error::Could not update the CodeMender comment with the fix results."
+    )
     return 1
   return 1 if stopped else 0
 
@@ -734,24 +895,30 @@ def _verify_pr_base_commit(env: Mapping[str, str]) -> bool:
   return False
 
 
-def run_preflight(env: Mapping[str, str]) -> int:
+def run_preflight(
+    env: Mapping[str, str],
+    host: Optional[RepoHost] = None,
+) -> int:
   """Fast pre-flight gate executed before WIF auth, gVisor, and Docker pull."""
+  if host is None:
+    host = create_repo_host(env)
+
   event_name = env.get("GITHUB_EVENT_NAME", "")
   if event_name == "pull_request":
     if not _verify_pr_base_commit(env):
-      _write_github_output(env, should_run="false")
+      _write_github_output(env, host=host, should_run="false")
       return 1
-    _write_github_output(env, should_run="true")
+    _write_github_output(env, host=host, should_run="true")
     return 0
   if event_name != "pull_request_review_comment":
-    _write_github_output(env, should_run="false")
+    _write_github_output(env, host=host, should_run="false")
     return 0
 
   event_path = env.get("GITHUB_EVENT_PATH", "")
   repo = env.get("GITHUB_REPOSITORY", "")
   token = env.get("GITHUB_TOKEN", "")
   if not (event_path and os.path.isfile(event_path) and repo and token):
-    _write_github_output(env, should_run="false")
+    _write_github_output(env, host=host, should_run="false")
     return 0
 
   with open(event_path, encoding="utf-8") as f:
@@ -771,14 +938,17 @@ def run_preflight(env: Mapping[str, str]) -> int:
         f" user_type={user_type!r}, assoc={assoc!r}, parent_id={parent_id},"
         f" has_cmd={_has_verify_command(str(comment.get('body') or ''))}."
     )
-    _write_github_output(env, should_run="false")
+    _write_github_output(env, host=host, should_run="false")
     return 0
 
   parent = get_review_comment(repo, parent_id, token)
   finding_id = _extract_parent_finding_id(parent)
   if not finding_id:
-    print(f"::notice::Pre-flight skip: parent comment {parent_id} is not a CodeMender finding comment.")
-    _write_github_output(env, should_run="false")
+    print(
+        f"::notice::Pre-flight skip: parent comment {parent_id} is not a"
+        " CodeMender finding comment."
+    )
+    _write_github_output(env, host=host, should_run="false")
     return 0
 
   latest: Dict[str, VerifyComment] = {}
@@ -789,6 +959,19 @@ def run_preflight(env: Mapping[str, str]) -> int:
     latest[vc.finding_id] = vc
 
   other_runs_active: Optional[bool] = None
+
+  def _react(cid: int, reaction: str = "eyes") -> None:
+    if not cid:
+      return
+    try:
+      host.add_reaction(str(cid), reaction)
+    except Exception as exc:  # pylint: disable=broad-except
+      logger.warning(
+          "Failed to add %r reaction to comment %s: %s",
+          reaction,
+          cid,
+          exc,
+      )
 
   def _is_active_lock(vc: VerifyComment) -> bool:
     nonlocal other_runs_active
@@ -803,13 +986,20 @@ def run_preflight(env: Mapping[str, str]) -> int:
   existing = latest.get(finding_id)
   if existing is not None:
     if _is_active_lock(existing):
-      print(f"::notice::Verification for finding {finding_id} is already in progress.")
-      _write_github_output(env, should_run="false")
+      print(
+          f"::notice::Verification for finding {finding_id} is already in"
+          " progress."
+      )
+      _write_github_output(env, host=host, should_run="false")
       return 0
     if existing.state == "done":
-      react_to_review_comment(repo, comment_id, token, "eyes")
+      _react(comment_id, "eyes")
       status_label = _inline(existing.status or "DONE", 20)
-      link = f"[this comment]({existing.url})" if existing.url else "an earlier comment"
+      link = (
+          f"[this comment]({existing.url})"
+          if existing.url
+          else "an earlier comment"
+      )
       reply_to_comment(
           repo,
           pr_number,
@@ -817,12 +1007,12 @@ def run_preflight(env: Mapping[str, str]) -> int:
           parent_id,
           f"ℹ️ This finding was already verified ({status_label}) in {link}.",
       )
-      _write_github_output(env, should_run="false")
+      _write_github_output(env, host=host, should_run="false")
       return 0
 
   active_count = sum(1 for vc in latest.values() if _is_active_lock(vc))
   if active_count >= MAX_CONCURRENT_VERIFIES:
-    react_to_review_comment(repo, comment_id, token, "eyes")
+    _react(comment_id, "eyes")
     reply_to_comment(
         repo,
         pr_number,
@@ -832,22 +1022,32 @@ def run_preflight(env: Mapping[str, str]) -> int:
         " reached on this PR. Please wait for an active verification to finish"
         " and try again.",
     )
-    _write_github_output(env, should_run="false")
+    _write_github_output(env, host=host, should_run="false")
     return 0
 
-  react_to_review_comment(repo, comment_id, token, "eyes")
+  _react(comment_id, "eyes")
   in_progress_body = _format_verify_in_progress(finding_id, _run_url(env))
-  if existing is not None and existing.state == "in-progress" and existing.comment_id > 0:
-    updated = update_review_comment(repo, existing.comment_id, token, in_progress_body)
+  if (
+      existing is not None
+      and existing.state == "in-progress"
+      and existing.comment_id > 0
+  ):
+    updated = update_review_comment(
+        repo, existing.comment_id, token, in_progress_body
+    )
     if updated.ok:
       _write_github_output(
-          env, should_run="true", verify_reply_id=str(existing.comment_id)
+          env,
+          host=host,
+          should_run="true",
+          verify_reply_id=str(existing.comment_id),
       )
       return 0
 
   reply = reply_to_comment(repo, pr_number, token, parent_id, in_progress_body)
   _write_github_output(
       env,
+      host=host,
       should_run="true",
       verify_reply_id=str(reply.comment_id or 0),
   )
@@ -859,9 +1059,13 @@ def run_verify(
     env: Mapping[str, str],
     launcher: Launcher,
     *,
+    host: RepoHost,
+    store: Optional[ArtifactStore] = None,
     out_dir: Optional[str] = None,
 ) -> int:
   """Runs `cm-runner verify` for an on-demand `@cm-runner verify` comment."""
+  if store is None:
+    store = create_artifact_store(env, event=event)
   repo = env.get("GITHUB_REPOSITORY", "")
   token = env.get("GITHUB_TOKEN", "")
   pr = event.get("pull_request") or {}
@@ -869,7 +1073,10 @@ def run_verify(
   pr_number = int(pr.get("number") or 0)
   parent_id = int(comment.get("in_reply_to_id") or 0)
   if pr_number <= 0 or parent_id <= 0:
-    print("::error::Event payload is missing pull_request.number or comment.in_reply_to_id.")
+    print(
+        "::error::Event payload is missing pull_request.number or"
+        " comment.in_reply_to_id."
+    )
     return 1
 
   parent = get_review_comment(repo, parent_id, token)
@@ -884,19 +1091,24 @@ def run_verify(
   except ValueError:
     reply_id = 0
   if reply_id <= 0:
-    posted = reply_to_comment(
-        repo,
-        pr_number,
-        token,
-        parent_id,
-        _format_verify_in_progress(finding_id, run_url),
-    )
-    reply_id = posted.comment_id
+    try:
+      posted_comment = host.reply_to_comment(
+          str(parent_id),
+          _format_verify_in_progress(finding_id, run_url),
+      )
+      reply_id = int(posted_comment.comment_id or 0)
+    except (RepoHostError, ValueError) as e:
+      logger.warning("host.reply_to_comment failed: %s", e)
+      reply_id = 0
 
   def finish_reply(body: str) -> bool:
     if reply_id > 0 and update_review_comment(repo, reply_id, token, body).ok:
       return True
-    return reply_to_comment(repo, pr_number, token, parent_id, body).ok
+    try:
+      host.reply_to_comment(str(parent_id), body)
+      return True
+    except RepoHostError:
+      return False
 
   if not out_dir:
     out_dir = tempfile.mkdtemp(
@@ -907,11 +1119,19 @@ def run_verify(
 
   launcher = launcher.with_dirs(out_dir=out_dir)
 
-  sarif_doc = fetch_finding_sarif_from_artifact(
-      repo, pr_number, token, finding_id
-  ) or _reconstruct_finding_sarif(
-      finding_id, parent, get_sticky_comment_body(repo, pr_number, token)
-  )
+  sarif_doc: Optional[Mapping[str, Any]] = None
+  try:
+    sarif_doc = store.get_finding_sarif(
+        finding_id, change_id=str(pr_number)
+    )
+  except ArtifactStoreError as e:
+    logger.warning("ArtifactStore.get_finding_sarif failed: %s", e)
+    sarif_doc = None
+
+  if not sarif_doc:
+    sarif_doc = _reconstruct_finding_sarif(
+        finding_id, parent, get_sticky_comment_body(repo, pr_number, token)
+    )
   finding_file = os.path.join(out_dir, "finding.sarif")
   with open(finding_file, "w", encoding="utf-8") as f:
     json.dump(sarif_doc, f, indent=2)
@@ -987,13 +1207,14 @@ def _is_fresh_lock(updated_at: str) -> bool:
     return True
 
 
-def _write_github_output(env: Mapping[str, str], **items: str) -> None:
-  output_path = env.get("GITHUB_OUTPUT", "")
-  if not output_path:
-    return
-  with open(output_path, "a", encoding="utf-8") as f:
-    for key, value in items.items():
-      f.write(f"{key}={value}\n")
+def _write_github_output(
+    env: Mapping[str, str],
+    *,
+    host: RepoHost,
+    **items: str,
+) -> None:
+  del env
+  host.emit_ci_outputs(items)
 
 
 def _format_verify_in_progress(finding_id: str, run_url: str) -> str:
@@ -1381,16 +1602,19 @@ def _stage_host_directories(
 
 
 def _post_sticky_comment(
-    env: Mapping[str, str], pr_number: int, body: str, fork: bool
+    env: Mapping[str, str],
+    pr_number: int,
+    body: str,
+    fork: bool,
+    *,
+    host: RepoHost,
 ) -> bool:
-  comment_url = post_or_update_sticky_comment(
-      env.get("GITHUB_TOKEN", ""),
-      env.get("GITHUB_REPOSITORY", ""),
-      pr_number,
-      body,
-  )
-  if comment_url is None:
-    print("::error::Could not post the CodeMender comment to the pull request.")
+  del env, pr_number
+  try:
+    host.upsert_summary(body)
+    return True
+  except RepoHostError as e:
+    print(f"::error::Could not post CodeMender summary comment: {e}")
     if fork:
       print(
           "::error::This is a fork PR. Ask a repository or organization admin"
@@ -1398,7 +1622,6 @@ def _post_sticky_comment(
           " (Settings > Actions > General > Fork pull request workflows)."
       )
     return False
-  return True
 
 
 def is_fork_pr(event: Dict[str, Any]) -> bool:

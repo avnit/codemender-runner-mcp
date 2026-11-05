@@ -84,6 +84,7 @@ classDiagram
             +reply_to_comment()*
             +set_commit_status()*
             +emit_ci_outputs()*
+            +add_reaction()*
         }
         class GitHubRepoHost
         class GitLabRepoHost

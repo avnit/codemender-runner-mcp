@@ -459,25 +459,32 @@ class GitHubRepoHost(RepoHost):
             resp, f"file-level patch on {suggestion.file_path}"
         )
 
-    # 3. Fallback to PR issue comment.
-    issue_url = (
-        f"{self._api_url}/repos/{self._repo}/issues/{self._pr_number}/comments"
+    # 3. Fallback to workflow run artifacts link when review comments cannot
+    # be posted (e.g. line or file is entirely outside the PR diff).
+    server_url = self._env.get(
+        "GITHUB_SERVER_URL", "https://github.com"
+    ).rstrip("/")
+    run_id = self._env.get("GITHUB_RUN_ID", "")
+    artifacts_url = (
+        f"{server_url}/{self._repo}/actions/runs/{run_id}#artifacts"
+        if run_id
+        else f"{server_url}/{self._repo}/pull/{self._pr_number}"
     )
-    issue_payload = {"body": truncate_comment_body(patch_body)}
-    resp = session.post(
-        issue_url, headers=self._headers(), json=issue_payload, timeout=20
+    logger.warning(
+        "Could not post review comment on %s:%s for finding %s; linking to"
+        " workflow artifacts instead: %s",
+        suggestion.file_path,
+        suggestion.line,
+        suggestion.finding_id,
+        artifacts_url,
     )
-    self._check_response(
-        resp, f"fallback patch for {suggestion.finding_id}"
-    )
-    data = resp.json()
     return Comment(
-        comment_id=str(data.get("id") or ""),
-        url=str(data.get("html_url") or ""),
+        comment_id="",
+        url=artifacts_url,
         finding_id=suggestion.finding_id,
         outdated=False,
         kind="patch",
-        body=str(data.get("body") or patch_body),
+        body=patch_body,
     )
 
   def reply_to_comment(self, comment_id: str, body: str) -> Comment:
@@ -622,3 +629,27 @@ class GitHubRepoHost(RepoHost):
             f.write(f"{key}={val_str}\n")
     except OSError as e:
       raise RepoHostError(f"Failed to write to GITHUB_OUTPUT: {e}") from e
+
+  def add_reaction(self, comment_id: str, reaction: str) -> None:
+    """Adds a reaction to an existing comment on the change."""
+    self._ensure_pr_context()
+    self._require_token("add_reaction")
+
+    url = (
+        f"{self._api_url}/repos/{self._repo}/pulls/comments/{comment_id}"
+        "/reactions"
+    )
+    session = self._session or requests
+    payload = {"content": reaction}
+    resp = session.post(url, headers=self._headers(), json=payload, timeout=20)
+    if resp.status_code == 404:
+      issue_url = (
+          f"{self._api_url}/repos/{self._repo}/issues/comments/{comment_id}"
+          "/reactions"
+      )
+      resp = session.post(
+          issue_url, headers=self._headers(), json=payload, timeout=20
+      )
+    self._check_response(
+        resp, f"reaction {reaction!r} on comment {comment_id}"
+    )

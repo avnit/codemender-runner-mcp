@@ -40,7 +40,20 @@ from launcher.base import LauncherError, ParallelResult, RunResult  # pylint: di
 from launcher.cloudrun import CloudRunLauncher  # pylint: disable=g-import-not-at-top
 from launcher.local import LocalDockerLauncher  # pylint: disable=g-import-not-at-top
 from repohost.github import __main__ as github_main  # pylint: disable=g-import-not-at-top
-from repohost.github import gha_runner  # pylint: disable=g-import-not-at-top
+# pylint: disable=g-import-not-at-top
+from repohost.github import client as github_client
+from repohost.github import gha_runner
+from repohost.models import (  # pylint: disable=g-import-not-at-top
+    ChangeContext,
+    Comment,
+    RepoHostError,
+    SecurityGate,
+    SecurityGateState,
+    SuggestedEdit,
+)
+# pylint: disable=g-import-not-at-top
+from repohost.store import ArtifactStoreError
+from repohost.testing import InMemoryArtifactStore, InMemoryRepoHost
 
 _VERSION_EVENT = {
     "event": "version",
@@ -154,25 +167,51 @@ def _launcher(scan_result=None, error=None):
   if error:
     launcher.run.side_effect = error
     return launcher
-  launcher.run.return_value = scan_result if scan_result is not None else _scan_result()
+  launcher.run.return_value = (
+      scan_result if scan_result is not None else _scan_result()
+  )
   return launcher
 
 
-@patch.object(gha_runner, "post_or_update_sticky_comment", return_value="https://c")
+def _in_memory_host(event=None, **kwargs):
+  event_data = event if event is not None else _pr_event()
+  pr = event_data.get("pull_request") or {}
+  ctx = ChangeContext(
+      repo_id="o/r",
+      change_id=str(pr.get("number") or 7),
+      base_sha=(
+          ((pr.get("base") or {}).get("sha") or "").strip()
+          or ((pr.get("base") or {}).get("ref") or "").strip()
+          or "1111222233334444"
+      ),
+      head_sha=(
+          ((pr.get("head") or {}).get("sha") or "").strip()
+          or "aaaabbbbccccdddd"
+      ),
+      base_ref="main",
+      head_ref="feature",
+      is_fork=gha_runner.is_fork_pr(event_data),
+  )
+  return InMemoryRepoHost(change_context=ctx, **kwargs)
+
+
 class TestRunPr(unittest.TestCase):
 
   def setUp(self):
     super().setUp()
+    self._host = _in_memory_host()
     self._delete_comments_patcher = patch.object(
         gha_runner, "delete_codemender_review_comments", return_value=0
     )
     self.mock_delete_comments = self._delete_comments_patcher.start()
     self.addCleanup(self._delete_comments_patcher.stop)
 
-  def test_clean_scan_posts_no_vulnerabilities_comment(self, mock_post):
+  def test_clean_scan_posts_no_vulnerabilities_comment(self):
     launcher = _launcher()
 
-    self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 0)
+    self.assertEqual(
+        gha_runner.run_pr(_pr_event(), _ENV, launcher, host=self._host), 0
+    )
 
     self.mock_delete_comments.assert_called_once_with("o/r", 7, "tok")
     self.assertEqual(
@@ -193,17 +232,22 @@ class TestRunPr(unittest.TestCase):
             )
         ],
     )
-    token, repo, pr, body = mock_post.call_args.args
-    self.assertEqual((token, repo, pr), ("tok", "o/r", 7))
+    body = self._host.current_summary or ""
     self.assertIn("✅ **No vulnerabilities found**", body)
     self.assertIn("`111122223333`", body)
     self.assertIn("https://github.com/o/r/actions/runs/123", body)
+    self.assertIsNotNone(self._host.latest_security_gate)
+    self.assertEqual(
+        self._host.latest_security_gate.state, SecurityGateState.SUCCESS
+    )
 
-  def test_custom_diff_workers_is_passed_to_find_diff(self, mock_post):
+  def test_custom_diff_workers_is_passed_to_find_diff(self):
     launcher = _launcher()
     env = dict(_ENV, CODEMENDER_DIFF_WORKERS="12")
 
-    self.assertEqual(gha_runner.run_pr(_pr_event(), env, launcher), 0)
+    self.assertEqual(
+        gha_runner.run_pr(_pr_event(), env, launcher, host=self._host), 0
+    )
 
     self.assertEqual(
         launcher.run.call_args_list[0],
@@ -222,22 +266,26 @@ class TestRunPr(unittest.TestCase):
         ),
     )
 
-  def test_invalid_diff_workers_in_run_pr_fails_and_posts_error(self, mock_post):
+  def test_invalid_diff_workers_in_run_pr_fails_and_posts_error(self):
     launcher = _launcher()
     env = dict(_ENV, CODEMENDER_DIFF_WORKERS="0")
 
-    self.assertEqual(gha_runner.run_pr(_pr_event(), env, launcher), 1)
+    self.assertEqual(
+        gha_runner.run_pr(_pr_event(), env, launcher, host=self._host), 1
+    )
     launcher.run.assert_not_called()
-    body = mock_post.call_args.args[3]
+    body = self._host.current_summary or ""
     self.assertIn("❌ **CodeMender scan failed.**", body)
     self.assertIn("Invalid CODEMENDER_DIFF_WORKERS", body)
 
-  def test_findings_posts_summary_table_and_details(self, mock_post):
+  def test_findings_posts_summary_table_and_details(self):
     launcher = _launcher(scan_result=_scan_result(_SARIF_WITH_FINDINGS))
 
-    self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 0)
+    self.assertEqual(
+        gha_runner.run_pr(_pr_event(), _ENV, launcher, host=self._host), 0
+    )
 
-    body = mock_post.call_args.args[3]
+    body = self._host.current_summary or ""
     self.assertIn("⚠️ **Found 2 vulnerabilities**", body)
     self.assertIn("`CWE-78`", body)
     self.assertIn("`CWE-89`", body)
@@ -253,46 +301,65 @@ class TestRunPr(unittest.TestCase):
     )
     self.assertIn("<details>", body)
     self.assertIn("Untrusted filename user_archive", body)
+    self.assertIsNotNone(self._host.latest_security_gate)
+    self.assertEqual(
+        self._host.latest_security_gate.state, SecurityGateState.FAILURE
+    )
 
-  def test_delete_review_comments_failure_warns_without_failing_run(
-      self, mock_post
-  ):
-    del mock_post
+  def test_delete_review_comments_failure_warns_without_failing_run(self):
     self.mock_delete_comments.return_value = None
     launcher = _launcher()
     with patch("builtins.print") as mock_print:
-      self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 0)
+      self.assertEqual(
+          gha_runner.run_pr(_pr_event(), _ENV, launcher, host=self._host), 0
+      )
     printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
     self.assertIn(
         "::warning::Could not delete CodeMender's earlier review comments",
         printed,
     )
 
-  def test_fork_pr_runs_and_handles_comment_failure(self, mock_post):
+  def test_fork_pr_runs_and_handles_comment_failure(self):
     launcher = _launcher()
-    self.assertEqual(gha_runner.run_pr(_pr_event(head_repo="fork/r"), _ENV, launcher), 0)
+    fork_host = _in_memory_host(event=_pr_event(head_repo="fork/r"))
+    self.assertEqual(
+        gha_runner.run_pr(
+            _pr_event(head_repo="fork/r"), _ENV, launcher, host=fork_host
+        ),
+        0,
+    )
     self.assertEqual(launcher.run.call_count, 1)
 
-    mock_post.return_value = None
+    class FailingHost(InMemoryRepoHost):
+
+      def upsert_summary(self, body: str) -> Comment:
+        del body
+        raise RepoHostError("permission denied on fork")
+
+    failing_fork_host = FailingHost(
+        change_context=fork_host.get_change_context()
+    )
     with patch("builtins.print") as mock_print:
-      rc = gha_runner.run_pr(_pr_event(head_repo="fork/r"), _ENV, launcher)
+      rc = gha_runner.run_pr(
+          _pr_event(head_repo="fork/r"), _ENV, launcher, host=failing_fork_host
+      )
     self.assertEqual(rc, 1)
     printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
     self.assertIn("Send write tokens to workflows from pull requests", printed)
 
-  def test_scan_signal_interruption_stops_launcher_and_updates_sticky(
-      self, mock_post
-  ):
+  def test_scan_signal_interruption_stops_launcher_and_updates_sticky(self):
     launcher = _launcher()
     launcher.run.side_effect = KeyboardInterrupt
 
-    self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 1)
+    self.assertEqual(
+        gha_runner.run_pr(_pr_event(), _ENV, launcher, host=self._host), 1
+    )
     launcher.stop.assert_called()
-    body = mock_post.call_args.args[3]
+    body = self._host.current_summary or ""
     self.assertIn("❌ **CodeMender scan failed.**", body)
     self.assertIn("The run was cancelled or timed out.", body)
 
-  def test_stop_on_signal_invokes_stop_and_raises(self, mock_post):
+  def test_stop_on_signal_invokes_stop_and_raises(self):
     launcher = MagicMock()
     with self.assertRaises(KeyboardInterrupt):
       with gha_runner._stop_on_signal(launcher):
@@ -300,35 +367,52 @@ class TestRunPr(unittest.TestCase):
         signal.raise_signal(signal.SIGTERM)
     launcher.stop.assert_called_once()
 
-  def test_find_diff_and_launcher_failures_post_error_and_exit_1(self, mock_post):
+  def test_find_diff_and_launcher_failures_post_error_and_exit_1(self):
+    host1 = _in_memory_host()
     launcher = _launcher(scan_result=_scan_result(exit_code=3, raw=b""))
-    self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 1)
-    self.assertIn("❌ **CodeMender scan failed.**", mock_post.call_args.args[3])
-    self.assertIn("`3`", mock_post.call_args.args[3])
+    self.assertEqual(
+        gha_runner.run_pr(_pr_event(), _ENV, launcher, host=host1), 1
+    )
+    self.assertIn("❌ **CodeMender scan failed.**", host1.current_summary or "")
+    self.assertIn("`3`", host1.current_summary or "")
 
+    host2 = _in_memory_host()
     launcher2 = _launcher(error=LauncherError("docker not found"))
-    self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher2), 1)
-    self.assertIn("docker not found", mock_post.call_args.args[3])
+    self.assertEqual(
+        gha_runner.run_pr(_pr_event(), _ENV, launcher2, host=host2), 1
+    )
+    self.assertIn("docker not found", host2.current_summary or "")
 
+    host3 = _in_memory_host()
     launcher3 = _launcher(scan_result=_scan_result(raw=b'{"event": "other"}'))
-    self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher3), 1)
+    self.assertEqual(
+        gha_runner.run_pr(_pr_event(), _ENV, launcher3, host=host3), 1
+    )
     self.assertIn(
-        "did not emit a valid SARIF 2.1.0 document", mock_post.call_args.args[3]
+        "did not emit a valid SARIF 2.1.0 document",
+        host3.current_summary or "",
     )
 
-  def test_comment_failure_exits_1(self, mock_post):
-    mock_post.return_value = None
+  def test_comment_failure_exits_1(self):
+    class FailingHost(InMemoryRepoHost):
+
+      def upsert_summary(self, body: str) -> Comment:
+        del body
+        raise RepoHostError("simulated comment failure")
+
+    failing_host = FailingHost(change_context=self._host.get_change_context())
     launcher = _launcher()
+    self.assertEqual(
+        gha_runner.run_pr(_pr_event(), _ENV, launcher, host=failing_host), 1
+    )
 
-    self.assertEqual(gha_runner.run_pr(_pr_event(), _ENV, launcher), 1)
-
-  def test_cloudrun_consolidated_find_diff(self, mock_post):
+  def test_cloudrun_consolidated_find_diff(self):
     launcher = MagicMock()
     scan_res = _scan_result()
     launcher.run.return_value = scan_res
 
     env = dict(_ENV, CODEMENDER_BACKEND="cloudrun")
-    rc = gha_runner.run_pr(_pr_event(), env, launcher)
+    rc = gha_runner.run_pr(_pr_event(), env, launcher, host=self._host)
 
     self.assertEqual(rc, 0)
     launcher.run.assert_called_once_with(
@@ -344,11 +428,10 @@ class TestRunPr(unittest.TestCase):
             "8",
         ],
     )
-    mock_post.assert_called_once()
-    body = mock_post.call_args.args[3]
+    body = self._host.current_summary or ""
     self.assertIn("✅ **No vulnerabilities found**", body)
 
-  def test_cloudrun_comment_generation_with_no_init(self, mock_post):
+  def test_cloudrun_comment_generation_with_no_init(self):
     # Success scenario: format_find_diff_comment with init_result is None
     scan_ok = _scan_result()
     comment_ok = gha_runner.format_find_diff_comment(
@@ -377,21 +460,25 @@ class TestRunPr(unittest.TestCase):
     self.assertIn("Backend: `Cloudrun`", comment_fail)
 
     # run_pr execution when scan fails with init_result is None:
+    host_fail = _in_memory_host()
     launcher_fail = MagicMock()
     launcher_fail.run.return_value = scan_fail
     env = dict(_ENV, CODEMENDER_BACKEND="cloudrun")
-    rc_fail = gha_runner.run_pr(_pr_event(), env, launcher_fail)
+    rc_fail = gha_runner.run_pr(
+        _pr_event(), env, launcher_fail, host=host_fail
+    )
     self.assertEqual(rc_fail, 1)
-    body_posted = mock_post.call_args.args[3]
+    body_posted = host_fail.current_summary or ""
     self.assertIn("❌ **CodeMender scan failed.**", body_posted)
     self.assertIn("Backend: `Cloudrun`", body_posted)
 
     # run_pr execution when scan succeeds with init_result is None:
+    host_ok = _in_memory_host()
     launcher_ok = MagicMock()
     launcher_ok.run.return_value = scan_ok
-    rc_ok = gha_runner.run_pr(_pr_event(), env, launcher_ok)
+    rc_ok = gha_runner.run_pr(_pr_event(), env, launcher_ok, host=host_ok)
     self.assertEqual(rc_ok, 0)
-    body_posted_ok = mock_post.call_args.args[3]
+    body_posted_ok = host_ok.current_summary or ""
     self.assertIn("✅ **No vulnerabilities found**", body_posted_ok)
 
   # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0001, SPEC-GHA-FIX
@@ -401,7 +488,7 @@ class TestRunPr(unittest.TestCase):
       self,
       mock_poster_cls,
       _mock_head,
-      mock_post,
+
   ):
     with tempfile.TemporaryDirectory() as temp_dir:
       workspace = os.path.join(temp_dir, "workspace")
@@ -444,8 +531,11 @@ class TestRunPr(unittest.TestCase):
           gha_runner.FixCell(gha_runner.fix_comments.NO_FIX),
       ]
 
+      host = _in_memory_host()
       with patch("builtins.print"):
-        rc = gha_runner.run_pr(_pr_event(), env, launcher, out_dir=out_dir)
+        rc = gha_runner.run_pr(
+            _pr_event(), env, launcher, out_dir=out_dir, host=host
+        )
 
       self.assertEqual(rc, 0)
       self.mock_delete_comments.assert_called_once_with("o/r", 7, "tok")
@@ -457,7 +547,7 @@ class TestRunPr(unittest.TestCase):
       self.assertTrue(
           os.path.isfile(os.path.join(out_dir, "fixes", "finding-001.diff"))
       )
-      bodies = [c.args[3] for c in mock_post.call_args_list]
+      bodies = host.summaries
       self.assertGreaterEqual(len(bodies), 2)
       self.assertIn("⏳ Generating fixes for 2 findings.", bodies[0])
       self.assertIn("| ⏳ Working |", bodies[0])
@@ -469,7 +559,7 @@ class TestRunPr(unittest.TestCase):
       self.assertIn("**Fixes:** ✅ 1 suggested · ❌ 1 no fix.", final_body)
 
   # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0001, SPEC-GHA-FIX
-  def test_cloudrun_fixes_skipped_without_workspace_warning(self, mock_post):
+  def test_cloudrun_fixes_skipped_without_workspace_warning(self):
     launcher = _launcher(scan_result=_scan_result(_SARIF_WITH_FINDINGS))
     env = dict(
         _ENV,
@@ -479,7 +569,7 @@ class TestRunPr(unittest.TestCase):
     )
 
     with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-      rc = gha_runner.run_pr(_pr_event(), env, launcher)
+      rc = gha_runner.run_pr(_pr_event(), env, launcher, host=self._host)
 
     self.assertEqual(rc, 0)
     launcher.run_parallel.assert_not_called()
@@ -584,8 +674,8 @@ class TestMain(unittest.TestCase):
       f.write('{"type": "external_account"}')
     observed = {}
 
-    def _capture(event, env, launcher, out_dir=None):
-      del event, env
+    def _capture(event, env, launcher, out_dir=None, **kwargs):
+      del event, env, kwargs
       observed["files"] = sorted(os.listdir(launcher.workspace_dir))
       observed["out_dir"] = out_dir
       return 0
@@ -793,16 +883,18 @@ class TestM2FixConfigAndOrchestration(unittest.TestCase):
           gha_runner.max_parallel_fixes({"CODEMENDER_MAX_PARALLEL_FIXES": "0"}), 4
       )
 
-  @patch.object(gha_runner, "post_or_update_sticky_comment", return_value="https://c")
   @patch.object(gha_runner, "delete_codemender_review_comments", return_value=2)
-  @patch.object(gha_runner.fix_comments, "checked_out_commit", return_value="aaaabbbbccccdddd")
+  @patch.object(
+      gha_runner.fix_comments,
+      "checked_out_commit",
+      return_value="aaaabbbbccccdddd",
+  )
   @patch.object(gha_runner.fix_comments, "FixPoster")
   def test_run_pr_with_fixes_updates_sticky_comment_in_place(
       self,
       mock_poster_cls,
       _mock_head,
       mock_delete_comments,
-      mock_post_sticky,
   ):
     with tempfile.TemporaryDirectory() as temp_dir:
       workspace = os.path.join(temp_dir, "workspace")
@@ -817,7 +909,9 @@ class TestM2FixConfigAndOrchestration(unittest.TestCase):
           RUNNER_TEMP=temp_dir,
       )
       launcher = _launcher(scan_result=_scan_result(_SARIF_WITH_FINDINGS))
-      findings = gha_runner.SarifDocument(data=_SARIF_WITH_FINDINGS).to_findings()
+      findings = (
+          gha_runner.SarifDocument(data=_SARIF_WITH_FINDINGS).to_findings()
+      )
       launcher.run_parallel.return_value = (
           r
           for r in (
@@ -838,31 +932,83 @@ class TestM2FixConfigAndOrchestration(unittest.TestCase):
       )
       mock_poster_cls.return_value.post.side_effect = [
           gha_runner.FixCell(
-              gha_runner.fix_comments.SUGGESTED, "https://github.com/o/r/pull/7#review-1"
+              gha_runner.fix_comments.SUGGESTED,
+              "https://github.com/o/r/pull/7#review-1",
           ),
           gha_runner.FixCell(gha_runner.fix_comments.NO_FIX),
       ]
 
+      host = _in_memory_host()
       with patch("builtins.print"):
-        rc = gha_runner.run_pr(_pr_event(), env, launcher, out_dir=out_dir)
+        rc = gha_runner.run_pr(
+            _pr_event(), env, launcher, out_dir=out_dir, host=host
+        )
 
       self.assertEqual(rc, 0)
       mock_delete_comments.assert_called_once_with("o/r", 7, "tok")
-      self.assertEqual(launcher.run_parallel.call_args.kwargs["max_workers"], 3)
+      self.assertEqual(
+          launcher.run_parallel.call_args.kwargs["max_workers"], 3
+      )
       self.assertTrue(
           os.path.isfile(os.path.join(out_dir, "findings", "finding-001.sarif"))
       )
       self.assertTrue(
           os.path.isfile(os.path.join(out_dir, "fixes", "finding-001.diff"))
       )
-      bodies = [c.args[3] for c in mock_post_sticky.call_args_list]
+      bodies = host.summaries
       self.assertGreaterEqual(len(bodies), 2)
       self.assertIn("⏳ Generating fixes for 2 findings.", bodies[0])
       self.assertIn("| ⏳ Working |", bodies[0])
       final_body = bodies[-1]
-      self.assertIn("[✅ Suggested](https://github.com/o/r/pull/7#review-1)", final_body)
+      self.assertIn(
+          "[✅ Suggested](https://github.com/o/r/pull/7#review-1)", final_body
+      )
       self.assertIn("| ❌ No fix |", final_body)
       self.assertIn("**Fixes:** ✅ 1 suggested · ❌ 1 no fix.", final_body)
+      self.assertIsNotNone(host.latest_security_gate)
+      self.assertEqual(
+          host.latest_security_gate.state, SecurityGateState.FAILURE
+      )
+      self.assertEqual(
+          host.latest_security_gate.description,
+          "CodeMender: 2 security finding(s) detected",
+      )
+
+  def test_run_pr_fixes_disabled_sets_security_gate_failure(self):
+    findings = (
+        gha_runner.SarifDocument(data=_SARIF_WITH_FINDINGS).to_findings()
+    )
+    host = InMemoryRepoHost(
+        change_context=ChangeContext(
+            repo_id="o/r",
+            change_id="7",
+            base_sha="1111222233334444",
+            head_sha="5555666677778888",
+            base_ref="main",
+            head_ref="feat",
+        ),
+    )
+    launcher = _launcher(scan_result=_scan_result(_SARIF_WITH_FINDINGS))
+    with tempfile.TemporaryDirectory() as temp_dir:
+      env = dict(
+          _ENV,
+          CODEMENDER_FIX="false",
+          GITHUB_WORKSPACE=temp_dir,
+          RUNNER_TEMP=temp_dir,
+      )
+      with patch("builtins.print"):
+        rc = gha_runner.run_pr(_pr_event(), env, launcher, host=host)
+
+    self.assertEqual(rc, 0)
+    launcher.run_parallel.assert_not_called()
+    self.assertIsNotNone(host.latest_security_gate)
+    self.assertEqual(
+        host.latest_security_gate.state, SecurityGateState.FAILURE
+    )
+    self.assertEqual(
+        host.latest_security_gate.description,
+        f"CodeMender: {len(findings)} security finding(s) detected",
+    )
 
 
 # Governing: docs/openspec/specs/distribute/spec.md#req-0002, SPEC-DIST, SPEC-GHA
@@ -1035,6 +1181,7 @@ class TestM3OnDemandVerify(unittest.TestCase):
 
   def setUp(self):
     super().setUp()
+    self._host = InMemoryRepoHost()
     self._temp_dir = tempfile.mkdtemp(prefix="gha-verify-test-")
     self._out_file = os.path.join(self._temp_dir, "github_output.txt")
     self._event_file = os.path.join(self._temp_dir, "event.json")
@@ -1120,11 +1267,10 @@ class TestM3OnDemandVerify(unittest.TestCase):
 
   @patch.object(gha_runner, "has_other_active_verify_runs", return_value=True)
   @patch.object(gha_runner, "reply_to_comment")
-  @patch.object(gha_runner, "react_to_review_comment", return_value=True)
   @patch.object(gha_runner, "list_verify_comments", return_value=[])
   @patch.object(gha_runner, "get_review_comment")
   def test_preflight_gates_auth_dedup_and_concurrency_cap(
-      self, mock_get_parent, mock_list_verifies, mock_react, mock_reply, _mock_active
+      self, mock_get_parent, mock_list_verifies, mock_reply, _mock_active
   ):
     parent_body = (
         "<!-- codemender-finding:aabbcc112233 -->\n"
@@ -1135,82 +1281,88 @@ class TestM3OnDemandVerify(unittest.TestCase):
         "user": {"type": "Bot"},
         "body": parent_body,
     }
-    mock_reply.return_value = gha_runner.fix_comments.github.ReviewResult(
+    mock_reply.return_value = github_client.ReviewResult(
         ok=True, comment_id=301
     )
 
     # 1. Unauthorized contributor is skipped silently.
     self._write_event(assoc="CONTRIBUTOR")
-    self.assertEqual(gha_runner.run_preflight(self._env()), 0)
-    self.assertEqual(self._read_outputs().get("should_run"), "false")
-    mock_react.assert_not_called()
+    self.assertEqual(gha_runner.run_preflight(self._env(), host=self._host), 0)
+    self.assertEqual(self._host.emitted_outputs.get("should_run"), "false")
+    self.assertEqual(self._host.reactions, ())
 
     # 1b. Non-bot parent comment with spoofed finding tag is skipped.
-    os.remove(self._out_file)
+    self._host = InMemoryRepoHost()
     self._write_event(assoc="MEMBER")
     mock_get_parent.return_value = {
         "id": 100,
         "user": {"type": "User"},
         "body": parent_body,
     }
-    self.assertEqual(gha_runner.run_preflight(self._env()), 0)
-    self.assertEqual(self._read_outputs().get("should_run"), "false")
-    mock_react.assert_not_called()
+    self.assertEqual(gha_runner.run_preflight(self._env(), host=self._host), 0)
+    self.assertEqual(self._host.emitted_outputs.get("should_run"), "false")
+    self.assertEqual(self._host.reactions, ())
 
-    # 2. Authorized member on bot parent comment starts verification and emits reply_id.
-    os.remove(self._out_file)
+    # 2. Authorized member on bot parent comment starts verification.
+    self._host = InMemoryRepoHost()
     mock_get_parent.return_value = {
         "id": 100,
         "user": {"type": "Bot"},
         "body": parent_body,
     }
-    self.assertEqual(gha_runner.run_preflight(self._env()), 0)
+    self.assertEqual(gha_runner.run_preflight(self._env(), host=self._host), 0)
     self.assertEqual(
-        self._read_outputs(), {"should_run": "true", "verify_reply_id": "301"}
+        self._host.emitted_outputs,
+        {"should_run": "true", "verify_reply_id": "301"},
     )
-    mock_react.assert_called_once_with("o/r", 200, "tok", "eyes")
+    self.assertEqual(self._host.reactions, (("200", "eyes"),))
 
     # 3. Duplicate in-progress finding is skipped without reacting or replying.
-    os.remove(self._out_file)
-    mock_react.reset_mock()
     mock_reply.reset_mock()
+    self._host = InMemoryRepoHost()
     mock_list_verifies.return_value = [
         gha_runner.VerifyComment("aabbcc112233", "in-progress", "", "", "", 301)
     ]
     with patch("builtins.print"):
-      self.assertEqual(gha_runner.run_preflight(self._env()), 0)
-    self.assertEqual(self._read_outputs().get("should_run"), "false")
+      self.assertEqual(
+          gha_runner.run_preflight(self._env(), host=self._host), 0
+      )
+    self.assertEqual(self._host.emitted_outputs.get("should_run"), "false")
     mock_reply.assert_not_called()
+    self.assertEqual(self._host.reactions, ())
 
     # 4. Already-done finding replies with link to earlier verification.
-    os.remove(self._out_file)
+    self._host = InMemoryRepoHost()
     mock_list_verifies.return_value = [
         gha_runner.VerifyComment(
             "aabbcc112233", "done", "DISMISSED", "https://c/301", "", 301
         )
     ]
-    self.assertEqual(gha_runner.run_preflight(self._env()), 0)
-    self.assertEqual(self._read_outputs().get("should_run"), "false")
+    self.assertEqual(gha_runner.run_preflight(self._env(), host=self._host), 0)
+    self.assertEqual(self._host.emitted_outputs.get("should_run"), "false")
     self.assertIn("already verified", mock_reply.call_args.args[4])
     self.assertIn("https://c/301", mock_reply.call_args.args[4])
+    self.assertEqual(self._host.reactions, (("200", "eyes"),))
 
     # 5. Concurrency cap (MAX_CONCURRENT_VERIFIES = 4) blocks 5th active verify.
-    os.remove(self._out_file)
     mock_reply.reset_mock()
+    self._host = InMemoryRepoHost()
     mock_list_verifies.return_value = [
         gha_runner.VerifyComment(f"f{i:011d}", "in-progress", "", "", "", 400 + i)
         for i in range(gha_runner.MAX_CONCURRENT_VERIFIES)
     ]
-    self.assertEqual(gha_runner.run_preflight(self._env()), 0)
-    self.assertEqual(self._read_outputs().get("should_run"), "false")
-    self.assertIn("Maximum concurrent verifications (4)", mock_reply.call_args.args[4])
+    self.assertEqual(gha_runner.run_preflight(self._env(), host=self._host), 0)
+    self.assertEqual(self._host.emitted_outputs.get("should_run"), "false")
+    self.assertIn(
+        "Maximum concurrent verifications (4)", mock_reply.call_args.args[4]
+    )
+    self.assertEqual(self._host.reactions, (("200", "eyes"),))
 
   @patch.object(gha_runner, "update_review_comment")
   @patch.object(gha_runner, "get_sticky_comment_body", return_value="")
-  @patch.object(gha_runner, "fetch_finding_sarif_from_artifact", return_value=None)
   @patch.object(gha_runner, "get_review_comment")
   def test_run_verify_reconstructs_sarif_and_updates_reply(
-      self, mock_get_parent, _mock_artifact, _mock_sticky, mock_update
+      self, mock_get_parent, _mock_sticky, mock_update
   ):
     event = self._write_event()
     mock_get_parent.return_value = {
@@ -1223,7 +1375,7 @@ class TestM3OnDemandVerify(unittest.TestCase):
             "**CodeMender fix for finding 1:** 🔴 High / Critical · `CWE-78` · `Cmd Inj`"
         ),
     }
-    mock_update.return_value = gha_runner.fix_comments.github.ReviewResult(
+    mock_update.return_value = github_client.ReviewResult(
         ok=True, comment_id=301
     )
     verified_doc = {
@@ -1250,6 +1402,7 @@ class TestM3OnDemandVerify(unittest.TestCase):
         self._env(CODEMENDER_VERIFY_REPLY_ID="301"),
         launcher,
         out_dir=out_dir,
+        host=self._host,
     )
     self.assertEqual(rc, 0)
     self.assertEqual(launcher.run.call_args.args[0], "verify")
@@ -1262,10 +1415,9 @@ class TestM3OnDemandVerify(unittest.TestCase):
 
   @patch.object(gha_runner, "update_review_comment")
   @patch.object(gha_runner, "get_sticky_comment_body", return_value="")
-  @patch.object(gha_runner, "fetch_finding_sarif_from_artifact", return_value=None)
   @patch.object(gha_runner, "get_review_comment")
   def test_run_verify_with_cloud_run_launcher(
-      self, mock_get_parent, _mock_artifact, _mock_sticky, mock_update
+      self, mock_get_parent, _mock_sticky, mock_update
   ):
     event = self._write_event()
     mock_get_parent.return_value = {
@@ -1278,7 +1430,7 @@ class TestM3OnDemandVerify(unittest.TestCase):
             "**CodeMender fix for finding 1:** 🔴 High / Critical · `CWE-78` · `Cmd Inj`"
         ),
     }
-    mock_update.return_value = gha_runner.fix_comments.github.ReviewResult(
+    mock_update.return_value = github_client.ReviewResult(
         ok=True, comment_id=301
     )
     verified_doc = {
@@ -1318,6 +1470,7 @@ class TestM3OnDemandVerify(unittest.TestCase):
         self._env(CODEMENDER_VERIFY_REPLY_ID="301"),
         launcher,
         out_dir=out_dir,
+        host=self._host,
     )
     self.assertEqual(rc, 0)
     self.assertEqual(mock_client.config.out_dir, "/stale/prepopulated/out")
@@ -1400,6 +1553,402 @@ class TestM3OnDemandVerify(unittest.TestCase):
     )
     gha_runner.main(env)
     self.assertEqual(os.stat(creds_file).st_mode & 0o777, 0o644)
+
+
+class TestGhaRunnerRepoHostWiring(unittest.TestCase):
+  """Unit tests for RepoHost dependency injection into gha_runner."""
+
+  def setUp(self):
+    super().setUp()
+    self._temp_dir = tempfile.mkdtemp(prefix="repohost-wiring-test-")
+    self._workspace = os.path.join(self._temp_dir, "workspace")
+    os.makedirs(self._workspace)
+    self._output_file = os.path.join(self._temp_dir, "outputs")
+    with open(self._output_file, "w", encoding="utf-8") as f:
+      f.write("")
+    self._event_file = os.path.join(self._temp_dir, "event.json")
+    with open(self._event_file, "w", encoding="utf-8") as f:
+      json.dump(_pr_event(), f)
+    self._env = dict(
+        _ENV,
+        GITHUB_EVENT_PATH=self._event_file,
+        GITHUB_WORKSPACE=self._workspace,
+        GITHUB_OUTPUT=self._output_file,
+        RUNNER_TEMP=self._temp_dir,
+    )
+
+  def tearDown(self):
+    shutil.rmtree(self._temp_dir, ignore_errors=True)
+    super().tearDown()
+
+  def test_run_pr_clean_scan_wires_repohost_summary_and_gate(self):
+    host = InMemoryRepoHost(
+        change_context=ChangeContext(
+            repo_id="o/r",
+            change_id="7",
+            base_sha="1111222233334444",
+            head_sha="5555666677778888",
+            base_ref="main",
+            head_ref="feat",
+        )
+    )
+    launcher = _launcher()
+    rc = gha_runner.run_pr(_pr_event(), self._env, launcher, host=host)
+    self.assertEqual(rc, 0)
+    self.assertIsNotNone(host.current_summary)
+    self.assertIn("✅ **No vulnerabilities found**", host.current_summary or "")
+    self.assertIsNotNone(host.latest_security_gate)
+    self.assertEqual(
+        host.latest_security_gate.state, SecurityGateState.SUCCESS
+    )
+
+  def test_run_pr_findings_fix_disabled_wires_security_gate_failure(self):
+    host = InMemoryRepoHost(
+        change_context=ChangeContext(
+            repo_id="o/r",
+            change_id="7",
+            base_sha="1111222233334444",
+            head_sha="5555666677778888",
+            base_ref="main",
+            head_ref="feat",
+        )
+    )
+    launcher = _launcher(scan_result=_scan_result(_SARIF_WITH_FINDINGS))
+    env = dict(self._env, CODEMENDER_FIX="false")
+    rc = gha_runner.run_pr(_pr_event(), env, launcher, host=host)
+    self.assertEqual(rc, 0)
+    self.assertIsNotNone(host.current_summary)
+    self.assertIn("Found 2 vulnerabilities", host.current_summary or "")
+    self.assertIsNotNone(host.latest_security_gate)
+    self.assertEqual(
+        host.latest_security_gate.state, SecurityGateState.FAILURE
+    )
+
+  def test_run_pr_wires_change_context_shas_to_launcher(self):
+    host = InMemoryRepoHost(
+        change_context=ChangeContext(
+            repo_id="custom/repo",
+            change_id="99",
+            base_sha="base_from_host_sha_1234",
+            head_sha="head_from_host_sha_5678",
+            base_ref="main",
+            head_ref="feature",
+        )
+    )
+    launcher = _launcher()
+    rc = gha_runner.run_pr(_pr_event(), self._env, launcher, host=host)
+    self.assertEqual(rc, 0)
+    cmd = launcher.run.call_args_list[0].args
+    self.assertIn("base_from_host_sha_1234", cmd[1])
+
+  def test_security_gate_failure_logs_warning_and_does_not_crash(self):
+    class GateFailingRepoHost(InMemoryRepoHost):
+
+      def set_security_gate(self, gate):
+        raise RuntimeError("permission denied: statuses: write required")
+
+    host = GateFailingRepoHost()
+    launcher = _launcher()
+    with self.assertLogs("codemender-github-actions", level="WARNING") as cm:
+      rc = gha_runner.run_pr(_pr_event(), self._env, launcher, host=host)
+    self.assertEqual(rc, 0)
+    self.assertTrue(
+        any("Could not update security gate" in log for log in cm.output)
+    )
+
+  @patch("subprocess.run")
+  def test_run_preflight_wires_repohost_emit_ci_outputs(self, mock_run):
+    mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+    host = InMemoryRepoHost()
+    env = dict(self._env, GITHUB_EVENT_NAME="pull_request")
+    rc = gha_runner.run_preflight(env, host=host)
+    self.assertEqual(rc, 0)
+    self.assertEqual(host.emitted_outputs.get("should_run"), "true")
+
+  def test_run_preflight_skips_non_pr_and_emits_output(self):
+    host = InMemoryRepoHost()
+    env = dict(self._env, GITHUB_EVENT_NAME="push")
+    rc = gha_runner.run_preflight(env, host=host)
+    self.assertEqual(rc, 0)
+    self.assertEqual(host.emitted_outputs.get("should_run"), "false")
+
+  @patch.object(gha_runner, "get_review_comment")
+  @patch.object(gha_runner, "reply_to_comment")
+  def test_run_preflight_wires_repohost_add_reaction(
+      self, mock_reply, mock_get_parent
+  ):
+    mock_reply.return_value = github_client.ReviewResult(
+        ok=True, comment_id=301
+    )
+    mock_get_parent.return_value = {
+        "id": 100,
+        "user": {"type": "Bot"},
+        "body": "<!-- codemender-finding:aabbcc112233 -->\nFix",
+    }
+    temp_dir = tempfile.mkdtemp(prefix="preflight-react-")
+    event_file = os.path.join(temp_dir, "event.json")
+    event = {
+        "action": "created",
+        "pull_request": {"number": 7},
+        "comment": {
+            "id": 555,
+            "in_reply_to_id": 100,
+            "body": "@cm-runner verify",
+            "author_association": "MEMBER",
+            "user": {"type": "User"},
+        },
+    }
+    with open(event_file, "w", encoding="utf-8") as f:
+      json.dump(event, f)
+    host = InMemoryRepoHost()
+    env = dict(
+        self._env,
+        GITHUB_EVENT_NAME="pull_request_review_comment",
+        GITHUB_EVENT_PATH=event_file,
+    )
+    try:
+      rc = gha_runner.run_preflight(env, host=host)
+      self.assertEqual(rc, 0)
+      self.assertIn(("555", "eyes"), host.reactions)
+    finally:
+      shutil.rmtree(temp_dir, ignore_errors=True)
+
+  @patch.object(gha_runner, "run_pr", return_value=0)
+  def test_main_cli_passes_injected_host_to_run_pr(self, mock_run_pr):
+    host = InMemoryRepoHost()
+    rc = gha_runner.main(self._env, host=host)
+    self.assertEqual(rc, 0)
+    mock_run_pr.assert_called_once()
+    self.assertIs(mock_run_pr.call_args.kwargs.get("host"), host)
+
+  @patch.object(gha_runner, "main", return_value=0)
+  def test_github_main_forwards_host_to_gha_runner(self, mock_main):
+    host = InMemoryRepoHost()
+    rc = github_main.main(self._env, host=host)
+    self.assertEqual(rc, 0)
+    mock_main.assert_called_once_with(self._env, host=host)
+
+  @patch.object(gha_runner, "get_sticky_comment_body", return_value="")
+  @patch.object(gha_runner, "get_review_comment")
+  def test_run_verify_wires_repohost_reply_to_comment(
+      self, mock_get_parent, _mock_sticky
+  ):
+    host = InMemoryRepoHost()
+    event = {
+        "action": "created",
+        "pull_request": {"number": 7},
+        "comment": {
+            "id": 200,
+            "in_reply_to_id": 100,
+            "body": "@cm-runner verify",
+        },
+    }
+    mock_get_parent.return_value = {
+        "id": 100,
+        "user": {"type": "Bot"},
+        "path": "src/archive/unpack.py",
+        "line": 18,
+        "body": (
+            "<!-- codemender-finding:aabbcc112233 -->\n"
+            "**CodeMender fix for finding 1:** 🔴 High · `CWE-78`"
+        ),
+    }
+    verified_doc = {
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "cm-runner"}},
+            "results": [{
+                "ruleId": "CWE-78",
+                "level": "error",
+                "message": {"text": "Cmd Inj"},
+                "properties": {
+                    "status": "VERIFIED",
+                    "dismiss_reason": "",
+                },
+            }],
+        }],
+    }
+    launcher = _launcher(scan_result=_scan_result(verified_doc))
+    out_dir = os.path.join(self._temp_dir, "verify_out")
+    os.makedirs(out_dir, exist_ok=True)
+    rc = gha_runner.run_verify(
+        event, self._env, launcher, out_dir=out_dir, host=host
+    )
+    self.assertEqual(rc, 0)
+    self.assertGreaterEqual(len(host.replies), 1)
+    self.assertEqual(host.replies[0][0], "100")
+    self.assertIn("Verifying finding `aabbcc112233`", host.replies[0][1])
+
+  @patch.object(gha_runner, "get_sticky_comment_body", return_value="")
+  @patch.object(gha_runner, "get_review_comment")
+  def test_run_verify_uses_artifact_store_when_available(
+      self, mock_get_parent, _mock_sticky
+  ):
+    host = InMemoryRepoHost()
+    store = InMemoryArtifactStore()
+    canonical_sarif = {
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "CodeMenderCanonical"}},
+            "results": [{
+                "ruleId": "CWE-78",
+                "level": "error",
+                "message": {"text": "Canonical SARIF finding"},
+                "partialFingerprints": {
+                    "primaryLocationLineHash": "aabbcc112233"
+                },
+            }],
+        }],
+    }
+    store.seed_finding_sarif("aabbcc112233", canonical_sarif, change_id="7")
+
+    event = {
+        "action": "created",
+        "pull_request": {"number": 7},
+        "comment": {
+            "id": 200,
+            "in_reply_to_id": 100,
+            "body": "@cm-runner verify",
+        },
+    }
+    mock_get_parent.return_value = {
+        "id": 100,
+        "user": {"type": "Bot"},
+        "path": "src/archive/unpack.py",
+        "line": 18,
+        "body": (
+            "<!-- codemender-finding:aabbcc112233 -->\n"
+            "**CodeMender fix for finding 1:** 🔴 High · `CWE-78`"
+        ),
+    }
+    verified_doc = {
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "cm-runner"}},
+            "results": [{
+                "ruleId": "CWE-78",
+                "level": "error",
+                "message": {"text": "Cmd Inj"},
+                "properties": {"status": "VERIFIED"},
+            }],
+        }],
+    }
+    launcher = _launcher(scan_result=_scan_result(verified_doc))
+    out_dir = os.path.join(self._temp_dir, "verify_store_out")
+    os.makedirs(out_dir, exist_ok=True)
+    rc = gha_runner.run_verify(
+        event,
+        self._env,
+        launcher,
+        out_dir=out_dir,
+        host=host,
+        store=store,
+    )
+    self.assertEqual(rc, 0)
+    finding_path = os.path.join(out_dir, "finding.sarif")
+    with open(finding_path, "r", encoding="utf-8") as f:
+      written_finding = json.load(f)
+    self.assertEqual(
+        written_finding["runs"][0]["tool"]["driver"]["name"],
+        "CodeMenderCanonical",
+    )
+
+  @patch.object(gha_runner, "get_sticky_comment_body", return_value="")
+  @patch.object(gha_runner, "get_review_comment")
+  def test_run_verify_falls_back_when_artifact_store_fails(
+      self, mock_get_parent, _mock_sticky
+  ):
+    host = InMemoryRepoHost()
+    mock_store = MagicMock()
+    mock_store.get_finding_sarif.side_effect = ArtifactStoreError(
+        "Simulated download failure"
+    )
+
+    event = {
+        "action": "created",
+        "pull_request": {"number": 7},
+        "comment": {
+            "id": 200,
+            "in_reply_to_id": 100,
+            "body": "@cm-runner verify",
+        },
+    }
+    mock_get_parent.return_value = {
+        "id": 100,
+        "user": {"type": "Bot"},
+        "path": "src/archive/unpack.py",
+        "line": 18,
+        "body": (
+            "<!-- codemender-finding:aabbcc112233 -->\n"
+            "**CodeMender fix for finding 1:** 🔴 High · `CWE-78`"
+        ),
+    }
+    verified_doc = {
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "cm-runner"}},
+            "results": [{
+                "ruleId": "CWE-78",
+                "level": "error",
+                "message": {"text": "Cmd Inj"},
+                "properties": {"status": "VERIFIED"},
+            }],
+        }],
+    }
+    launcher = _launcher(scan_result=_scan_result(verified_doc))
+    out_dir = os.path.join(self._temp_dir, "verify_store_fallback_out")
+    os.makedirs(out_dir, exist_ok=True)
+    rc = gha_runner.run_verify(
+        event,
+        self._env,
+        launcher,
+        out_dir=out_dir,
+        host=host,
+        store=mock_store,
+    )
+    self.assertEqual(rc, 0)
+    finding_path = os.path.join(out_dir, "finding.sarif")
+    with open(finding_path, "r", encoding="utf-8") as f:
+      written_finding = json.load(f)
+    self.assertEqual(
+        written_finding["runs"][0]["tool"]["driver"]["name"],
+        "CodeMender",
+    )
+
+  def test_create_artifact_store_returns_github_actions_store(self):
+    store = gha_runner.create_artifact_store(
+        {"GITHUB_REPOSITORY": "o/r", "GITHUB_TOKEN": "tok"}
+    )
+    self.assertIsInstance(store, gha_runner.GitHubActionsArtifactStore)
+    self.assertEqual(store._repo, "o/r")
+    self.assertEqual(store._token, "tok")
+
+  def test_create_artifact_store_extracts_context_from_event(self):
+    event = {
+        "repository": {"full_name": "event-owner/event-repo"},
+        "pull_request": {"number": 99},
+    }
+    store = gha_runner.create_artifact_store(
+        {"GITHUB_TOKEN": "tok"}, event=event
+    )
+    self.assertIsInstance(store, gha_runner.GitHubActionsArtifactStore)
+    self.assertEqual(store._repo, "event-owner/event-repo")
+    self.assertEqual(store._pr_number, 99)
+
+  def test_create_artifact_store_respects_explicit_overrides(self):
+    event = {
+        "repository": {"full_name": "event-owner/event-repo"},
+        "pull_request": {"number": 99},
+    }
+    store = gha_runner.create_artifact_store(
+        {"GITHUB_REPOSITORY": "env-owner/env-repo", "GITHUB_TOKEN": "tok"},
+        event=event,
+        repo="custom-owner/custom-repo",
+        pr_number=123,
+    )
+    self.assertIsInstance(store, gha_runner.GitHubActionsArtifactStore)
+    self.assertEqual(store._repo, "custom-owner/custom-repo")
+    self.assertEqual(store._pr_number, 123)
 
 
 if __name__ == "__main__":

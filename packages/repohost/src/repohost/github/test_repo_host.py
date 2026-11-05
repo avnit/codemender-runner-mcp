@@ -500,7 +500,7 @@ class TestGitHubRepoHost(unittest.TestCase):
     self.assertNotIn("```suggestion", payload["body"])
     self.assertIn("```diff", payload["body"])
 
-  def test_post_suggestion_inline_422_falls_back_to_issue_comment(self):
+  def test_post_suggestion_inline_422_falls_back_to_artifacts_url(self):
     self.mock_session.post.side_effect = [
         _mock_response(
             None,
@@ -512,21 +512,15 @@ class TestGitHubRepoHost(unittest.TestCase):
             status_code=422,
             text="File is not part of the diff",
         ),
-        _mock_response(
-            {
-                "id": 5002,
-                "html_url": (
-                    "https://github.com/owner/repo/issues/42#issuecomment-5002"
-                ),
-                "body": "Fallback patch body",
-            },
-            status_code=201,
-        ),
     ]
     host = GitHubRepoHost(
         event=self.default_event,
         token="test-token",
         session=self.mock_session,
+        env={
+            "GITHUB_RUN_ID": "5002",
+            "GITHUB_SERVER_URL": "https://github.com",
+        },
     )
     suggestion = SuggestedEdit(
         file_path="src/other.py",
@@ -535,7 +529,11 @@ class TestGitHubRepoHost(unittest.TestCase):
         finding_id="vuln2",
     )
     result = host.post_suggestion(suggestion)
-    self.assertEqual(result.comment_id, "5002")
+    self.assertEqual(result.comment_id, "")
+    self.assertEqual(
+        result.url,
+        "https://github.com/owner/repo/actions/runs/5002#artifacts",
+    )
     self.assertEqual(result.kind, "patch")
 
   def test_post_suggestion_server_error_raises_repo_host_error(self):
@@ -627,21 +625,15 @@ class TestGitHubRepoHost(unittest.TestCase):
     self.assertEqual(result.kind, "patch")
     self.assertEqual(result.finding_id, "vuln3")
 
-  def test_post_suggestion_without_file_path_posts_issue_comment(self):
-    self.mock_session.post.return_value = _mock_response(
-        {
-            "id": 7001,
-            "html_url": (
-                "https://github.com/owner/repo/issues/42#issuecomment-7001"
-            ),
-            "body": "Whole file patch",
-        },
-        status_code=201,
-    )
+  def test_post_suggestion_without_file_path_falls_back_to_artifacts_url(self):
     host = GitHubRepoHost(
         event=self.default_event,
         token="test-token",
         session=self.mock_session,
+        env={
+            "GITHUB_RUN_ID": "7001",
+            "GITHUB_SERVER_URL": "https://github.com",
+        },
     )
     patch = SuggestedEdit(
         finding_id="vuln4",
@@ -649,10 +641,13 @@ class TestGitHubRepoHost(unittest.TestCase):
         file_path=None,
     )
     result = host.post_suggestion(patch)
-    self.assertEqual(result.comment_id, "7001")
+    self.assertEqual(result.comment_id, "")
+    self.assertEqual(
+        result.url,
+        "https://github.com/owner/repo/actions/runs/7001#artifacts",
+    )
     self.assertEqual(result.kind, "patch")
-    called_args, _ = self.mock_session.post.call_args
-    self.assertIn("owner/repo/issues/42/comments", called_args[0])
+    self.mock_session.post.assert_not_called()
 
   def test_reply_to_comment_success(self):
     self.mock_session.post.return_value = _mock_response(
@@ -865,6 +860,67 @@ class TestGitHubRepoHost(unittest.TestCase):
       with self.subTest(key=bad_key):
         with self.assertRaises((RepoHostError, ValueError)):
           host.emit_ci_outputs({bad_key: "value"})
+
+  def test_add_reaction_success_on_review_comment(self):
+    self.mock_session.post.return_value = _mock_response({"id": 1}, 201)
+    host = GitHubRepoHost(
+        event=self.default_event,
+        token="dummy-token",
+        session=self.mock_session,
+    )
+    host.add_reaction("123", "eyes")
+    self.mock_session.post.assert_called_once()
+    call_args = self.mock_session.post.call_args
+    self.assertIn("/pulls/comments/123/reactions", call_args.args[0])
+    self.assertEqual(call_args.kwargs["json"], {"content": "eyes"})
+
+  def test_add_reaction_fallback_to_issue_comment_on_404(self):
+    self.mock_session.post.side_effect = [
+        _mock_response({}, 404),
+        _mock_response({"id": 1}, 201),
+    ]
+    host = GitHubRepoHost(
+        event=self.default_event,
+        token="dummy-token",
+        session=self.mock_session,
+    )
+    host.add_reaction("123", "eyes")
+    self.assertEqual(self.mock_session.post.call_count, 2)
+    first_url = self.mock_session.post.call_args_list[0].args[0]
+    second_url = self.mock_session.post.call_args_list[1].args[0]
+    self.assertIn("/pulls/comments/123/reactions", first_url)
+    self.assertIn("/issues/comments/123/reactions", second_url)
+
+  def test_add_reaction_auth_error_raises_repo_host_auth_error(self):
+    self.mock_session.post.return_value = _mock_response(
+        {"message": "Bad credentials"}, 401
+    )
+    host = GitHubRepoHost(
+        event=self.default_event,
+        token="dummy-token",
+        session=self.mock_session,
+    )
+    with self.assertRaises(RepoHostAuthError):
+      host.add_reaction("123", "eyes")
+
+  def test_add_reaction_rate_limit_error_raises_repo_host_rate_limit(self):
+    self.mock_session.post.return_value = _mock_response(
+        {"message": "API rate limit exceeded"},
+        403,
+        headers={"x-ratelimit-remaining": "0"},
+    )
+    host = GitHubRepoHost(
+        event=self.default_event,
+        token="dummy-token",
+        session=self.mock_session,
+    )
+    with self.assertRaises(RepoHostRateLimitError):
+      host.add_reaction("123", "eyes")
+
+  def test_add_reaction_missing_token_raises_repo_host_auth_error(self):
+    host = GitHubRepoHost(event=self.default_event, token="")
+    with self.assertRaises(RepoHostAuthError):
+      host.add_reaction("123", "eyes")
 
 
 if __name__ == "__main__":

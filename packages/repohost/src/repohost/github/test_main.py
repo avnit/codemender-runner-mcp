@@ -19,7 +19,7 @@
 from pathlib import Path
 import tomllib
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from repohost.github import __main__ as github_main
 from repohost.github import gha_runner
@@ -62,6 +62,14 @@ class TestCmGithubEntrypoint(unittest.TestCase):
     ):
       rc = github_main.main()
     self.assertEqual(rc, 0)
+
+  def test_main_passes_host_and_store_to_gha_runner(self):
+    mock_host = MagicMock()
+    mock_store = MagicMock()
+    with patch.object(gha_runner, "main", return_value=0) as mock_main:
+      rc = github_main.main(host=mock_host, store=mock_store)
+    self.assertEqual(rc, 0)
+    mock_main.assert_called_once_with(host=mock_host, store=mock_store)
 
 
 if __name__ == "__main__":

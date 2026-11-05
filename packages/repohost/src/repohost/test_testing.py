@@ -75,6 +75,7 @@ class TestInMemoryRepoHost(unittest.TestCase):
         file_path="src/app.py",
         line=15,
         summary="Use safe helper",
+        replacement="safe_helper()",
     )
     created = self.host.post_suggestion(suggestion)
     self.assertEqual(created.finding_id, "finding-101")
@@ -82,6 +83,19 @@ class TestInMemoryRepoHost(unittest.TestCase):
     self.assertEqual(len(self.host.posted_suggestions), 1)
     self.assertEqual(self.host.posted_suggestions[0], suggestion)
     self.assertIn(created, self.host.list_existing_comments())
+
+  def test_post_suggestion_fallback_patch_with_line_returns_patch_kind(self):
+    suggestion = SuggestedEdit(
+        finding_id="finding-102",
+        patch="diff --git a/b b/b",
+        file_path="src/app.py",
+        line=15,
+        summary="Fallback patch with line",
+    )
+    created = self.host.post_suggestion(suggestion)
+    self.assertEqual(created.finding_id, "finding-102")
+    self.assertEqual(created.kind, "patch")
+    self.assertEqual(len(self.host.posted_suggestions), 1)
 
   def test_post_suggestion_fallback_patch(self):
     suggestion = SuggestedEdit(
@@ -155,6 +169,11 @@ class TestInMemoryRepoHost(unittest.TestCase):
         self.host.emitted_outputs,
         {"has_findings": "true", "count": "3", "batches_json": '["1", "2"]'},
     )
+
+  def test_add_reaction(self):
+    self.host.add_reaction("comment-123", "eyes")
+    self.assertEqual(len(self.host.reactions), 1)
+    self.assertEqual(self.host.reactions[0], ("comment-123", "eyes"))
 
 
 if __name__ == "__main__":

@@ -17,23 +17,30 @@
 """CLI entrypoint for the `cm-github` console script."""
 
 import sys
-from typing import Mapping, Optional, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence
 
+from repohost.base import RepoHost
 from repohost.github import gha_runner
+from repohost.store import ArtifactStore
 
 
 def main(
     env: Optional[Mapping[str, str]] = None,
     argv: Optional[Sequence[str]] = None,
+    host: Optional[RepoHost] = None,
+    store: Optional[ArtifactStore] = None,
 ) -> int:
   """Dispatches the `cm-github` CLI entrypoint to `gha_runner.main`."""
-  if env is None and argv is None:
-    return gha_runner.main()
-  if argv is None:
-    return gha_runner.main(env)  # type: ignore[arg-type]
-  if env is None:
-    return gha_runner.main(argv=argv)
-  return gha_runner.main(env, argv=argv)
+  kwargs: Dict[str, Any] = {}
+  if host is not None:
+    kwargs["host"] = host
+  if store is not None:
+    kwargs["store"] = store
+  if argv is not None:
+    kwargs["argv"] = argv
+  if env is not None:
+    return gha_runner.main(env, **kwargs)
+  return gha_runner.main(**kwargs)
 
 
 if __name__ == "__main__":

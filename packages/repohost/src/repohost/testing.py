@@ -51,6 +51,7 @@ class InMemoryRepoHost(RepoHost):
     self._summaries: list[str] = []
     self._security_gates: list[SecurityGate] = []
     self._emitted_outputs: dict[str, str] = {}
+    self._reactions: list[tuple[str, str]] = []
     self._comment_counter = len(self._comments)
 
     # Detect pre-existing summary comment from seeded comments
@@ -97,6 +98,10 @@ class InMemoryRepoHost(RepoHost):
   def emitted_outputs(self) -> Mapping[str, str]:
     return dict(self._emitted_outputs)
 
+  @property
+  def reactions(self) -> Sequence[tuple[str, str]]:
+    return tuple(self._reactions)
+
   def get_change_context(self) -> ChangeContext:
     return self._context
 
@@ -108,7 +113,11 @@ class InMemoryRepoHost(RepoHost):
     self._comment_counter += 1
     kind = (
         "suggestion"
-        if (suggestion.file_path and suggestion.line)
+        if (
+            suggestion.file_path
+            and suggestion.line
+            and suggestion.replacement is not None
+        )
         else "patch"
     )
     comment = Comment(
@@ -165,4 +174,7 @@ class InMemoryRepoHost(RepoHost):
 
   def emit_ci_outputs(self, outputs: Mapping[str, str]) -> None:
     self._emitted_outputs.update(outputs)
+
+  def add_reaction(self, comment_id: str, reaction: str) -> None:
+    self._reactions.append((comment_id, reaction))
 

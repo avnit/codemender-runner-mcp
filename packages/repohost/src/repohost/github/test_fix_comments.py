@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0008, SPEC-GHA-FIX REQ-0006, REQ-0007, REQ-0008, REQ-0009, REQ-0010
+# Governing: ADR-0008, SPEC-GHA-FIX REQ-0006, REQ-0007, REQ-0008,
+# REQ-0009, REQ-0010
 
 """Unit tests for repohost.github.fix_comments."""
 
@@ -20,14 +21,16 @@ import os
 import shutil
 import subprocess
 import tempfile
+from typing import Optional
 import unittest
 from unittest import mock
 
 from codemender.cm import Finding
 from codemender.vcs.git import SuggestionHunk
 import repohost.github as github_pkg
-from repohost.github import client as github
 from repohost.github import fix_comments
+from repohost.models import SuggestedEdit
+from repohost.testing import InMemoryRepoHost
 
 _APP = b"line1\nline2\nline3\nline4\nline5\n"
 _ARTIFACTS = "https://github.com/o/r/actions/runs/123#artifacts"
@@ -48,7 +51,12 @@ def _finding(index, path="src/app.py", start=3, end=3, rule="CWE-78", fp=None):
   )
 
 
-def _patch(path="src/app.py", old_start=2, old=("line2", "line3", "line4"), new=None):
+def _patch(
+    path="src/app.py",
+    old_start=2,
+    old=("line2", "line3", "line4"),
+    new=None,
+):
   new = new if new is not None else (old[0], "fixed3", old[2])
   lines = [
       f"diff --git a/{path} b/{path}",
@@ -75,7 +83,19 @@ def _make_repo(files):
       f.write(content)
   subprocess.run(["git", "-C", repo, "add", "-A"], check=True, env=env)
   subprocess.run(
-      ["git", "-C", repo, "-c", "user.name=T", "-c", "user.email=t@e", "commit", "-q", "-m", "t"],
+      [
+          "git",
+          "-C",
+          repo,
+          "-c",
+          "user.name=T",
+          "-c",
+          "user.email=t@e",
+          "commit",
+          "-q",
+          "-m",
+          "t",
+      ],
       check=True,
       env=env,
   )
@@ -119,13 +139,20 @@ class TestPlanFixes(unittest.TestCase):
     self.assertEqual([f.index for f in plan.to_fix], [1, 2])
     self.assertEqual(
         plan.cells,
-        {1: fix_comments.FixCell("working"), 2: fix_comments.FixCell("working")},
+        {
+            1: fix_comments.FixCell("working"),
+            2: fix_comments.FixCell("working"),
+        },
     )
     self.assertEqual(plan.shared, {1: [1], 2: [2]})
     self.assertEqual(plan.fingerprints[2], findings[1].finding_id)
 
   def test_same_fingerprint_is_fixed_once_and_shared(self):
-    findings = [_finding(1, fp="dup"), _finding(2, fp="dup"), _finding(3, fp="other")]
+    findings = [
+        _finding(1, fp="dup"),
+        _finding(2, fp="dup"),
+        _finding(3, fp="other"),
+    ]
     plan = fix_comments.plan_fixes(findings)
     self.assertEqual([f.index for f in plan.to_fix], [1, 3])
     self.assertEqual(plan.shared, {1: [1, 2], 3: [3]})
@@ -158,35 +185,35 @@ class TestHelpers(unittest.TestCase):
     self.assertNotIn("#", note.replace("https://c/2", ""))
 
 
-@mock.patch.object(github, "reply_to_comment")
-@mock.patch.object(github, "post_patch_comment")
-@mock.patch.object(github, "create_review_with_suggestions")
-@mock.patch.object(github, "get_pr_diff_line_ranges")
 class TestFixPoster(unittest.TestCase):
 
   def setUp(self):
     super().setUp()
-    self._repo, self._head = _make_repo({"src/app.py": _APP, "src/other.py": _APP})
+    self._repo, self._head = _make_repo(
+        {"src/app.py": _APP, "src/other.py": _APP}
+    )
 
   def tearDown(self):
     shutil.rmtree(self._repo, ignore_errors=True)
     super().tearDown()
 
-  def _poster(self, head_checked_out=True, indexes=(1, 2, 3)):
+  def _poster(
+      self,
+      host: Optional[InMemoryRepoHost] = None,
+      head_checked_out: bool = True,
+      indexes=(1, 2, 3),
+  ):
     return fix_comments.FixPoster(
-        repo="o/r",
-        pr_number=7,
-        token="tok",
-        head_sha=self._head,
+        host=host or InMemoryRepoHost(),
         repo_dir=self._repo,
         headers={i: f"**Fix {i}**" for i in indexes},
         fingerprints={i: f"{i:012x}" for i in indexes},
-        artifacts_url=_ARTIFACTS,
         head_checked_out=head_checked_out,
     )
 
-  def test_no_fix_and_failed_post_nothing(self, ranges, review, comment, reply):
-    poster = self._poster()
+  def test_no_fix_and_failed_post_nothing(self):
+    host = InMemoryRepoHost()
+    poster = self._poster(host=host)
     self.assertEqual(
         poster.post(_finding(1), fix_comments.NO_FIX),
         fix_comments.FixCell("no_fix"),
@@ -195,92 +222,124 @@ class TestFixPoster(unittest.TestCase):
         poster.post(_finding(2), fix_comments.FAILED),
         fix_comments.FixCell("failed"),
     )
-    for api in (ranges, review, comment, reply):
-      api.assert_not_called()
+    self.assertEqual(len(host.posted_suggestions), 0)
+    self.assertEqual(len(host.replies), 0)
 
-  def test_fix_inside_pr_changes_becomes_suggestions(self, ranges, review, comment, reply):
-    ranges.return_value = {"src/app.py": {1, 2, 3, 4, 5}}
-    review.return_value = github.ReviewResult(True, "https://r/1", 200, 11)
-
-    cell = self._poster().post(_finding(1), fix_comments.FIXED, _patch())
-
-    self.assertEqual(cell, fix_comments.FixCell("suggested", "https://r/1"))
-    review.assert_called_once_with(
-        "o/r",
-        7,
-        "tok",
-        self._head,
-        [SuggestionHunk("src/app.py", 3, 3, ["fixed3"])],
-        "**Fix 1**",
-        "<!-- codemender-finding:000000000001 -->",
-        notes=[fix_comments.UNTESTED_NOTE],
-    )
-    comment.assert_not_called()
-    reply.assert_not_called()
-
-  def test_fix_outside_pr_changes_becomes_patch_comment(self, ranges, review, comment, reply):
-    del reply
-    ranges.return_value = {"src/app.py": {5}}
-    comment.return_value = github.ReviewResult(True, "https://c/1", 201, 21)
-
-    cell = self._poster().post(_finding(1), fix_comments.FIXED, _patch())
-
-    self.assertEqual(cell, fix_comments.FixCell("patch", "https://c/1"))
-    review.assert_not_called()
-    repo, pr, token, head, path, line, body = comment.call_args.args
-    self.assertEqual(
-        (repo, pr, token, head, path, line),
-        ("o/r", 7, "tok", self._head, "src/app.py", 3),
-    )
-    self.assertIn("<!-- codemender-finding:000000000001 -->", body)
-    self.assertIn("outside the pull request's diff", body)
-    self.assertIn("+fixed3", body)
-
-  def test_github_workflow_modification_is_blocked_from_suggestions(
-      self, ranges, review, comment, reply
-  ):
-    del reply
-    ranges.return_value = {".github/workflows/ci.yml": {1, 2, 3, 4, 5}}
-    comment.return_value = github.ReviewResult(True, "https://c/1", 201, 21)
-
-    cell = self._poster().post(
-        _finding(1, path=".github/workflows/ci.yml"),
-        fix_comments.FIXED,
-        _patch(path=".github/workflows/ci.yml"),
-    )
-
-    self.assertEqual(cell, fix_comments.FixCell("patch", "https://c/1"))
-    review.assert_not_called()
-    self.assertIn(".github/workflows/ci.yml", comment.call_args.args[6])
-
-  def test_rejected_review_and_missing_checkout_fallbacks(
-      self, ranges, review, comment, reply
-  ):
-    del reply
-    ranges.return_value = {"src/app.py": {1, 2, 3, 4, 5}}
-    review.return_value = github.ReviewResult(False, "", 422)
-    comment.return_value = github.ReviewResult(True, "https://c/1", 201, 21)
-
-    cell = self._poster().post(_finding(1), fix_comments.FIXED, _patch())
-    self.assertEqual(cell, fix_comments.FixCell("patch", "https://c/1"))
-    self.assertIn("accept this fix as a suggestion", comment.call_args.args[6])
-
-    # When GitHub rejects the patch comment too, fall back to artifacts link.
-    comment.return_value = github.ReviewResult(False, "", 422)
-    cell2 = self._poster(head_checked_out=False).post(
+  def test_fix_posts_suggestion_via_host(self):
+    host = InMemoryRepoHost()
+    cell = self._poster(host=host).post(
         _finding(1), fix_comments.FIXED, _patch()
     )
-    self.assertEqual(cell2, fix_comments.FixCell("patch", _ARTIFACTS))
+    self.assertEqual(cell.status, "suggested")
+    self.assertTrue(cell.url.startswith("https://inmemory.repo/"))
+    self.assertEqual(len(host.posted_suggestions), 1)
+    s = host.posted_suggestions[0]
+    self.assertEqual(s.finding_id, "000000000001")
+    self.assertEqual(s.file_path, "src/app.py")
+    self.assertEqual(s.line, 3)
+    self.assertIn("**Fix 1**", s.summary or "")
+    self.assertIsNone(s.start_line)
 
-  def test_overlapping_fixes_both_get_the_note(self, ranges, review, comment, reply):
-    ranges.return_value = {"src/app.py": {5}}
-    comment.side_effect = [
-        github.ReviewResult(True, "https://c/1", 201, 21),
-        github.ReviewResult(True, "https://c/2", 201, 22),
-        github.ReviewResult(True, "https://c/3", 201, 23),
-    ]
-    reply.return_value = github.ReviewResult(True, "https://c/r", 201, 31)
-    poster = self._poster()
+  def test_multiline_fix_sets_start_line_and_end_line(self):
+    host = InMemoryRepoHost()
+    multiline_patch = _patch(
+        old_start=2,
+        old=("line2", "line3", "line4", "line5"),
+        new=("line2", "fixed3", "fixed4", "line5"),
+    )
+    cell = self._poster(host=host).post(
+        _finding(1), fix_comments.FIXED, multiline_patch
+    )
+    self.assertEqual(cell.status, "suggested")
+    self.assertEqual(len(host.posted_suggestions), 1)
+    s = host.posted_suggestions[0]
+    self.assertEqual(s.start_line, 3)
+    self.assertEqual(s.line, 4)
+    self.assertEqual(s.replacement, "fixed3\nfixed4\n")
+
+  def test_multi_hunk_fix_falls_back_to_patch(self):
+    host = InMemoryRepoHost()
+    multi_hunk_patch = (
+        b"diff --git a/src/app.py b/src/app.py\n"
+        b"--- a/src/app.py\n"
+        b"+++ b/src/app.py\n"
+        b"@@ -1,3 +1,3 @@\n"
+        b" line1\n"
+        b"-line2\n"
+        b"+fixed2\n"
+        b" line3\n"
+        b"@@ -4,2 +4,2 @@\n"
+        b" line4\n"
+        b"-line5\n"
+        b"+fixed5\n"
+    )
+    cell = self._poster(host=host).post(
+        _finding(1), fix_comments.FIXED, multi_hunk_patch
+    )
+    self.assertEqual(cell.status, "patch")
+    self.assertEqual(len(host.posted_suggestions), 1)
+    s = host.posted_suggestions[0]
+    self.assertIsNone(s.replacement)
+    self.assertIsNone(s.start_line)
+    self.assertEqual(s.line, 3)
+    self.assertIn("multiple diff hunks", s.summary)
+
+  def test_github_workflow_modification_is_blocked_from_suggestions(self):
+    host = InMemoryRepoHost()
+    patch = _patch(path=".github/workflows/ci.yml")
+    cell = self._poster(host=host).post(
+        _finding(1, path=".github/workflows/ci.yml"),
+        fix_comments.FIXED,
+        patch,
+    )
+    self.assertEqual(cell.status, "patch")
+    self.assertEqual(len(host.posted_suggestions), 1)
+    s = host.posted_suggestions[0]
+    self.assertIsNone(s.replacement)
+    self.assertIsNone(s.start_line)
+    self.assertEqual(s.line, 3)
+    self.assertIn("modifies workflow or GitHub configuration", s.summary)
+
+  def test_head_not_checked_out_falls_back_to_patch(self):
+    host = InMemoryRepoHost()
+    cell = self._poster(host=host, head_checked_out=False).post(
+        _finding(1), fix_comments.FIXED, _patch()
+    )
+    self.assertEqual(cell.status, "patch")
+    self.assertEqual(len(host.posted_suggestions), 1)
+    s = host.posted_suggestions[0]
+    self.assertIsNone(s.replacement)
+    self.assertIsNone(s.start_line)
+    self.assertIsNone(s.line)
+    self.assertIn("didn't check out the PR's head commit", s.summary)
+
+  def test_fix_with_code_fences_in_replacement_omits_inline_suggestion(self):
+    host = InMemoryRepoHost()
+    patch_with_backticks = _patch(new=("line2", "```python", "print(1)", "```"))
+    cell = self._poster(host=host).post(
+        _finding(1), fix_comments.FIXED, patch_with_backticks
+    )
+    self.assertEqual(cell.status, "patch")
+    self.assertEqual(len(host.posted_suggestions), 1)
+    s = host.posted_suggestions[0]
+    self.assertIsNone(s.replacement)
+    self.assertIsNone(s.start_line)
+    self.assertEqual(s.line, 3)
+    self.assertIn("code fence", s.summary)
+
+  def test_host_failure_returns_failed_cell(self):
+    class FailingRepoHost(InMemoryRepoHost):
+
+      def post_suggestion(self, suggestion):
+        raise RuntimeError("boom")
+
+    poster = self._poster(host=FailingRepoHost())
+    cell = poster.post(_finding(1), fix_comments.FIXED, _patch())
+    self.assertEqual(cell, fix_comments.FixCell("failed"))
+
+  def test_overlapping_fixes_both_get_the_note(self):
+    host = InMemoryRepoHost()
+    poster = self._poster(host=host)
 
     poster.post(_finding(1), fix_comments.FIXED, _patch())
     poster.post(
@@ -294,12 +353,14 @@ class TestFixPoster(unittest.TestCase):
         _patch(path="src/other.py"),
     )
 
-    review.assert_not_called()
-    self.assertNotIn("changes the same lines", comment.call_args_list[0].args[6])
-    self.assertIn("the fix for [finding 1](https://c/1)", comment.call_args_list[1].args[6])
-    self.assertNotIn("changes the same lines", comment.call_args_list[2].args[6])
-    reply.assert_called_once_with(
-        "o/r", 7, "tok", 21, fix_comments.same_lines_note([(2, "https://c/2")])
+    self.assertEqual(len(host.posted_suggestions), 3)
+    self.assertEqual(len(host.replies), 1)
+    reply_id, reply_body = host.replies[0]
+    self.assertEqual(reply_id, "inmem-sugg-1")
+    self.assertIn("the fix for [finding 2]", reply_body)
+    self.assertIn(
+        "the fix for [finding 1]",
+        host.posted_suggestions[1].summary,
     )
 
 
