@@ -5,5 +5,6 @@ This directory contains specifications defining the high-level technical systems
 
 ## Active Systems
 
-- None yet. Add a new system specification directory containing `spec.md` and
-  `design.md` following the [Technical Templates](../../process/templates/tech/spec_template.md).
+| System | Specification | Design | Primary Focus |
+| :--- | :--- | :--- | :--- |
+| **CodeMender Runner** | [codemender-runner/spec.md](codemender-runner/spec.md) | [codemender-runner/design.md](codemender-runner/design.md) | Top-level multi-package architecture, scenario- and host-agnostic workflow seams, ephemeral-versus-durable storage separation, progressive completion-order streaming, and split-stream CLI contracts across every customer deployment scenario. |

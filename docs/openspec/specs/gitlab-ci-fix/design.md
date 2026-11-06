@@ -20,7 +20,7 @@ This design extends [SPEC-GHA-FIX](../github-actions-fix/design.md) and [SPEC-GI
 ### Reused vs. New Components
 
 - **Reused Unchanged:**
-  - `Launcher.fix()`, `Launcher.verify()`, and `Launcher.run_parallel()` generator streaming in `packages/launcher` ([ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)), running over [SPEC-GITLAB-CI Decision 3](../gitlab-ci/design.md#decision-3)'s hardened `CloudRunLauncher`.
+  - `Launcher.fix()`, `Launcher.verify()`, and `Launcher.run_parallel()` generator streaming in `packages/launcher` ([CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)), running over [SPEC-GITLAB-CI Decision 3](../gitlab-ci/design.md#decision-3)'s hardened `CloudRunLauncher`.
   - `SarifDocument.to_findings()`, `parse_patch_to_suggestions`, overlap detection, and sticky `Fix` column state transitions from `packages/codemender` and [SPEC-GHA-FIX](../github-actions-fix/design.md).
 - **Brand New:**
   - GitLab MR Discussions publisher in `packages/repohost/src/repohost/gitlab/` (`suggestion:-N+0` formatter, dual old/new context-line positioning, per-hunk rollback, top-level patch fallback, and discussion overlap/verify replies).
@@ -30,10 +30,10 @@ This design extends [SPEC-GHA-FIX](../github-actions-fix/design.md) and [SPEC-GI
 
 ### Decision 1: Single-Job Cloud Run Fan-Out With Deadline Reserve {#decision-1}
 
-- **Extends:** [SPEC-GHA-FIX Decision 1 & 6](../github-actions-fix/design.md#decision-1) ([ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md) Phase 1) over Cloud Run Jobs (`REQ-0004`, `REQ-0006`).
+- **Extends:** [SPEC-GHA-FIX Decision 1 & 6](../github-actions-fix/design.md#decision-1) ([CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) Phase 1) over Cloud Run Jobs (`REQ-0004`, `REQ-0006`).
 - **Choice:** `cm-gitlab find` dispatches up to `CODEMENDER_MAX_WORKERS` concurrent Cloud Run fix tasks from `codemender-scan` and enforces the `- 5 min` compute and `- 3 min` publishing cutoffs before the 60-minute job and OIDC token timeout.
 - **Alternatives Considered:**
-  - *Separate `parallel: N` fix jobs plus a fan-in report job (ADR-0009 Phase 2):* Only needed when fixes contend for runner VM CPU/RAM; with Cloud Run, extra CI jobs add queueing and shard coordination without speeding up fixes.
+  - *Separate `parallel: N` fix jobs plus a fan-in report job ([CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) Phase 2):* Only needed when fixes contend for runner VM CPU/RAM; with Cloud Run, extra CI jobs add queueing and shard coordination without speeding up fixes.
 
 ### Decision 2: Per-Hunk Discussion Rollback {#decision-2}
 

@@ -41,7 +41,7 @@ This specification is governed by:
 - [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
 - [ADR-0006: PR Remediation Routing and Security Gate](../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md)
 - [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
-- [ADR-0009: Abstraction Layers, Dependency Injection, and Asynchronous Workflows](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
+- [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) ([Specification](../tech/systems/codemender-runner/spec.md))
 - [ADR-0010: Permission Isolation, Credential Boundaries, and Authn/Authz](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md)
 - Buganizer Epic [b/579991472](http://b/579991472) / Task [b/580028358](http://b/580028358)
 

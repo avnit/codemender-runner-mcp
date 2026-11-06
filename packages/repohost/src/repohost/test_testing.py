@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0008, ADR-0009#decision-1, ADR-0009#decision-4, ADR-0006
+# Governing: ADR-0008, ADR-0006
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0001
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
 
 """Unit and contract tests for InMemoryRepoHost test double."""
 

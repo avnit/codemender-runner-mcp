@@ -12,12 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0008, ADR-0009#decision-1, ADR-0009#decision-4,
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0001
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
+# Governing: ADR-0008,
 # SPEC-GHA-FIX REQ-0006, REQ-0007, REQ-0008, REQ-0009, REQ-0010
 
 """Plans and posts Pull Request fix comments (SPEC-GHA-FIX REQ-0006-0010).
 
-Governing: ADR-0008, ADR-0009#decision-1, ADR-0009#decision-4.
+Governing: ADR-0008, docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0001, docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003.
 
 Public entry points:
   - `plan_fixes`: Plans which findings to fix, deduplicating findings that share

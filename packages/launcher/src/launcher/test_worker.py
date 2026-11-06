@@ -12,7 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0002, ADR-0009
+# Governing: ADR-0002
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0001
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0005
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0006
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0007
 # Governing: SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002
 # Governing: SPEC-ARTIFACT-CACHE/REQ-0004, SPEC-ARTIFACT-CACHE/REQ-0006
 # Governing: SPEC-WORKER/REQ-0001, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003

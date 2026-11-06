@@ -1,26 +1,46 @@
-# ADR-0009: Abstraction Layers, Dependency Injection, and Asynchronous Workflows
+<!--
+sdd_spec_id: docs/openspec/specs/tech/systems/codemender-runner/spec.md
+sdd_level: SYSTEM
+sdd_implements:
+  - docs/openspec/specs/journeys/pr-automated-remediation/spec.md
+  - docs/openspec/specs/journeys/pr-on-demand-verify/spec.md
+sdd_extends: NONE
+-->
 
-- **Status:** proposed
-- **Date:** 2026-10-09
-- **Builds on:** [ADR-0008](ADR-0008-repository-layout-and-package-structure.md)
-  (Repository Layout, Three-Package Workspace, and Runtime Architecture),
-  [ADR-0002](ADR-0002.md),
-  [ADR-0003](ADR-0003-environment-scrubbing.md),
-  [ADR-0006](ADR-0006-pr-remediation-routing-and-security-gate.md),
-  [ADR-0007](ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)
-- **Refines:**
-  [ADR-0005](ADR-0005-multi-platform-transit-storage-and-isolation.md)
-  (Multi-Platform Transit Storage & Sandboxed Isolation Model),
-  [ADR-0008](ADR-0008-repository-layout-and-package-structure.md) Decision 2 &
-  Decision 5 (`docker/runner.Dockerfile` Two-Way Door unified sandbox container
-  packaging and dedicated `cm-github`, `cm-gitlab`, and `cm-worker` CLI
-  entrypoints, synchronized across both `ADR-0008` and `ADR-0009`)
+# Design: CodeMender Runner System Architecture
 
-## 1. Context and Goals
+## Context
 
-Building upon `ADR-0008`'s package definition, we define the abstraction layers
-and interactions between those layers in our overall system. These layers and
-relationships are guided by the following core goals:
+Building upon [ADR-0008](../../../../../adr/ADR-0008-repository-layout-and-package-structure.md)'s
+repository and package decomposition, we define the abstraction layers and
+interactions between those layers in our overall system. Automated PR/MR CI
+workflows alongside our initial GitHub/GitLab (`cm-github`, `cm-gitlab`) and
+Local Docker gVisor / Cloud Run (`LocalDockerLauncher`, `CloudRunLauncher`,
+`LocalArtifactCache`, `GcsArtifactCache`) adapters in the diagrams and
+reference tables below serve as our **initial concrete starting point**, built
+on extensible seams targeting **every customer deployment scenario** (scheduled
+full-repository audits, fleet-wide batch remediation campaigns, delayed
+verification, platform services, and standalone CLI runs across dogfooding,
+org-wide, and single-repo adoption). Adding **any repository hosting site**
+(such as Gerrit, Bitbucket, Azure DevOps, or internal Git hosts—or running with
+zero host integration), sandbox compute backend (such as GKE/Kubernetes Jobs or
+batch clusters), transit store (such as S3 or Blob storage), or durable
+security sink requires implementing only the corresponding adapter seam.
+
+**Design References**: Accompanies the [CodeMender Runner System Specification](spec.md)
+and synthesizes the system architecture governed by
+[ADR-0001](../../../../../adr/ADR-0001.md),
+[ADR-0002](../../../../../adr/ADR-0002.md),
+[ADR-0003](../../../../../adr/ADR-0003-environment-scrubbing.md),
+[ADR-0005](../../../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md),
+[ADR-0006](../../../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md),
+[ADR-0007](../../../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md),
+[ADR-0008](../../../../../adr/ADR-0008-repository-layout-and-package-structure.md),
+and [ADR-0010](../../../../../adr/ADR-0010-permission-isolation-and-authn-authz.md).
+
+## Goals / Non-Goals
+
+### Goals
 
 1. **Portable container-based CodeMender execution:** The core CodeMender
    execution should be portable to multiple container-based runtime
@@ -31,7 +51,7 @@ relationships are guided by the following core goals:
    (`find`, `fix`, `verify`, and future workflows) that can execute
    synchronously in a single CI job, fan out across parallel CI matrix jobs, or
    run hours later in response to an on-demand trigger (such as a
-   `/codemender verify <finding_id>` PR comment) without reinventing an
+   `@codemender verify` PR review comment) without reinventing an
    in-memory DAG or workgraph engine.
 1. **100% Decoupling of Core Workflows from `RepoHost`:** Keep core CodeMender
    operations (`Launcher.find()`, `Launcher.fix()`, `Launcher.verify()`)
@@ -44,21 +64,28 @@ relationships are guided by the following core goals:
    high-throughput parallel remediation across CI platforms with different
    fan-out primitives—specifically GitHub Actions' dynamic `fromJSON()` job
    matrices versus GitLab CI's static `parallel: N` node sharding
-   (`$CI_NODE_INDEX / $CI_NODE_TOTAL`)—with conflict-free artifact cache
-   directory merging.
+   (`$CI_NODE_INDEX / $CI_NODE_TOTAL`) and extensible CI/batch schedulers—with
+   conflict-free artifact cache directory merging.
+
+### Non-Goals
+
+- Coupling core `codemender` or `launcher` execution to any repository hosting
+  API, CI vendor workflow runtime, or durable external findings database.
+- Replacing CI/batch schedulers with an in-memory multi-machine DAG orchestrator.
+- Mutating caller repository checkouts in place outside isolated container scratch.
 
 ---
 
-## 2. Architecture Overview ("How the Pieces Fit Together")
+## Architecture
 
 ### Package & Abstraction Layer Map
 
 We illustrate our abstraction layers and domain objects below using a class
-diagram. Each domain object is represeted as an Abstract class with the concrete
-instantiations show with inheritance relationships (hollow arrown). Dependencies
+diagram. Each domain object is represented as an Abstract class with the concrete
+instantiations shown with inheritance relationships (hollow arrow). Dependencies
 between domain objects are shown using association relationships (standard
 arrow). The namespace containing each class represents the
-[ADR-0008](ADR-0008-repository-layout-and-package-structure.md) package the
+[ADR-0008](../../../../../adr/ADR-0008-repository-layout-and-package-structure.md) package the
 object is a part of.
 
 > [!NOTE] 
@@ -186,7 +213,7 @@ classDiagram
      workflows, the outer host runner uses `ArtifactStore.get_finding_sarif()`
      to fetch the target finding SARIF from previous scan run artifacts, writing
      it into the short-lived `ArtifactCache` (or container input directory)
-     before launching the worker container (`cm-worker verify`). The worker
+     before launching the worker container (`cm-worker` executing a `verify` task). The worker
      container only reads from `ArtifactCache`, ensuring untrusted sandbox
      processes never touch external artifact stores or host tokens.
    - **Boundary & Security Invariant:** Runs exclusively on the outer CI host
@@ -217,8 +244,8 @@ classDiagram
      container-private ephemeral scratch disk (`/tmp/work/repo`), invokes the
      `codemender.runner.commands` handlers (`init.run`, `find_diff.run`,
      `fix.run`, `verify.run`) in-process using `CmAdapter`, and writes
-     `receipt.json`, `runner.log`, and output artifacts (`report.sarif` or
-     `<finding>.diff`) back to `ArtifactCache`.
+     `receipt.json`, `runner.log`, and output artifacts (`report.sarif`,
+     `<finding>.diff`, or updated `<finding>.sarif`) back to `ArtifactCache`.
 1. **`ArtifactCache` (`launcher.cache` in `packages/launcher`) and Concrete
    Backends (`LocalArtifactCache`, `GcsArtifactCache`):**
    - **Role:** Provides the short-lived, PR/run-scoped key/file cache shared
@@ -235,7 +262,7 @@ classDiagram
      handlers (`init`, `find_diff`, `fix`, `verify`), the standalone `cm-runner`
      CLI wrapper, and `CmAdapter` (which invokes the underlying native `cm`
      binary and emits
-     [ADR-0002](ADR-0002.md) NDJSON events),
+     [ADR-0002](../../../../../adr/ADR-0002.md) NDJSON events),
      deterministic SARIF 2.1.0 parsing/splitting (`codemender.sarif`), local Git
      archive/diff operations (`codemender.vcs`), and shared data models.
    - **Boundary Invariant:** Bottom of the dependency stack: **never** imports 
@@ -243,7 +270,7 @@ classDiagram
 
 ### Long-Term `ArtifactStore` & Pluggable Sinks
 
-This ADR separates **short-lived run/PR artifact caching**
+This design separates **short-lived run/PR artifact caching**
 (`ArtifactCache` in `packages/launcher/src/launcher/cache/`) from
 **cross-workflow artifact persistence and external security platform
 integrations** (`ArtifactStore` in `artifactstore.base`):
@@ -283,7 +310,7 @@ Together, these two classes provide a generic way to run CodeMender across many
 different runtimes.  The worker is a general process that can be run in any
 container environment as long as it can access the artifact cache. To add a new
 runtime environment, we only need to add the terraform configs to install worker
-and add a new Launcher class for kickign off the new container environment.
+and add a new Launcher class for kicking off the new container environment.
 
 
 ```mermaid
@@ -327,8 +354,10 @@ classDiagram
    in `docker/gitlab.Dockerfile` (`gitlab.Dockerfile`):**
    - **Runtime Environment:** Executes inside the outer GitLab CI job container
      built from `docker/gitlab.Dockerfile` (which installs
-     `packages/codemender`, `packages/launcher`, and `packages/repohost[gitlab]`
-     in the outer CI job where `$CI_JOB_TOKEN` / GitLab API tokens reside).
+     `packages/artifactstore`, `packages/codemender`,
+     `packages/launcher[cloudrun]`, and `packages/repohost[gitlab]` in the outer
+     CI job where `$CI_JOB_TOKEN` / GitLab API tokens reside; dispatches via
+     `CloudRunLauncher` without Docker-in-Docker).
    - **First-Level Components Invoked:** Instantiates **`GitLabRepoHost`** (for
      MR diff context discovery, inline diff discussion suggestions, fallback MR
      notes, commit statuses, and CI output artifacts) and **`Launcher`**
@@ -358,7 +387,7 @@ classDiagram
      calls the `codemender.runner.commands` Python modules directly in-process).
    - **First-Level Components Invoked:** Invokes **`CmAdapter`**, which wraps
      the underlying `cm` Go binary and emits structured
-     [ADR-0002](ADR-0002.md) NDJSON events.
+     [ADR-0002](../../../../../adr/ADR-0002.md) NDJSON events.
 
 ### Example CUJ: GitHub Actions + Cloud Run (`cm-github find`)
 
@@ -424,9 +453,11 @@ sequenceDiagram
 
 ---
 
-## 3. Core Design Decisions & Rationale
+## Decisions
 
 ### Decision 1: Four Dependency Injection Seams (Cache, Launcher, Host, Store)
+
+**Implements:** [REQ-0001](spec.md#req-0001), [REQ-0002](spec.md#req-0002), [REQ-0003](spec.md#req-0003)
 
 - **Design:** Structure the runtime around four explicit Abstract Base Classes
   (ABCs)—`ArtifactCache`, `Launcher`, `RepoHost`, and `ArtifactStore`—plus the
@@ -453,19 +484,19 @@ sequenceDiagram
          `GcsArtifactCache` only for `gs://` URIs, ensuring `file://` runs never
          import `google.cloud`.
      - **Naming Rationale & Alternatives Considered (Why `ArtifactCache` Instead
-       of `StagingArea`):** Earlier drafts of this ADR used the name
+       of `StagingArea`):** Earlier drafts of this design used the name
        `StagingArea`. During review, we identified that "Staging" is overloaded
        in infrastructure and CI/CD contexts and is easily confused with a
        deployment _Staging Environment_ (as opposed to a _Production
        Environment_). We evaluated four candidate names before adopting
        `ArtifactCache`:
-       - **`ArtifactCache`** _(Adopted in this ADR)_: Clearly conveys a
+       - **`ArtifactCache`** _(Adopted in this design)_: Clearly conveys a
          short-lived cache of input and output build/scan artifacts
          (`code.tar.gz`, `manifest.json`, split `.sarif` files, `.diff` patches,
          `receipt.json`) scoped to a workflow run or PR, while remaining
          distinct from long-term findings persistence (`ArtifactStore`).
        - **`TransitCache` / `TransitStore`**: Aligns with
-         [ADR-0005](ADR-0005-multi-platform-transit-storage-and-isolation.md)'s
+         [ADR-0005](../../../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)'s
          "Transit Storage" terminology, emphasizing cross-boundary data transit
          between host and container, though less descriptive of what is stored.
        - **`RunWorkspace` / `SharedWorkspace`**: Emphasizes a run-scoped shared
@@ -539,7 +570,7 @@ sequenceDiagram
     short-lived, run/PR-scoped cache storage for exchanging `code.tar.gz`,
     manifests, receipts, and diffs with sandbox containers, not a long-term
     findings database or external security sink (which is modeled separately as
-    `ArtifactStore` in `packages/artifactstore`; see Section 4).
+    `ArtifactStore` in `packages/artifactstore`; see Architecture above).
   - **Loose Coupling Without Over-Engineering (YAGNI):** While
     `LocalDockerLauncher` naturally pairs with `LocalArtifactCache` and
     `CloudRunLauncher` naturally pairs with `GcsArtifactCache`, injecting
@@ -556,10 +587,12 @@ sequenceDiagram
     storage under a single `ArtifactStore` class:_ Blurs short-lived container
     IPC (`code.tar.gz`, `manifest.json`, `receipt.json`) with long-term
     enterprise reporting integrations (such as Wiz or compliance archives).
-  - _Passing `RepoHost` into `Launcher`:_ Violates `ADR-0008` package boundaries
+  - _Passing `RepoHost` into `Launcher`:_ Violates [ADR-0008](../../../../../adr/ADR-0008-repository-layout-and-package-structure.md) package boundaries
     and couples sandbox execution to PR/MR hosting APIs.
 
 ### Decision 2: Portable Container-Based Execution via `Worker` (`cm-worker`) & Unified Two-Way Door Container Packaging
+
+**Implements:** [REQ-0001](spec.md#req-0001), [REQ-0002](spec.md#req-0002), [REQ-0005](spec.md#req-0005), [REQ-0006](spec.md#req-0006)
 
 - **Design:** To achieve **Goal 1 (Portable container-based CodeMender
   execution)**—reusing the existing sandbox container across local gVisor, Cloud
@@ -593,14 +626,13 @@ sequenceDiagram
         GKE).
      1. **Materialize Inputs on Container-Private Ephemeral Scratch Disk:** Read
         `tasks/<task_id>/input/manifest.json` (`RunManifest`, defined in
-        [ADR-0007](ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)
-        and
-        [Proposal: `cloudrun-job-bootstrapper`](../openspec/proposals/cloudrun-job-bootstrapper/proposal.md))
+        [ADR-0007](../../../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)
+        and [SPEC-WORKER](../../../worker/spec.md))
         and stream/extract `shared/code.tar.gz` into container-private ephemeral
         scratch disk (`/tmp/work/repo`), following the bounded-history archive
         transit and container-local extraction model established in
-        [ADR-0005](ADR-0005-multi-platform-transit-storage-and-isolation.md) and
-        [Proposal: `vcs-cloudrun-comms`](../openspec/proposals/vcs-cloudrun-comms/proposal.md).
+        [ADR-0005](../../../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md) and
+        [SPEC-ARTIFACT-CACHE](../../../artifact-cache/spec.md).
      1. **Execute `codemender` In-Process:** Invoke the
         `codemender.runner.commands` handler (`init.run`, `find_diff.run`,
         `fix.run`, `verify.run`) in-process against `/tmp/work/repo` with
@@ -608,12 +640,12 @@ sequenceDiagram
         records into `/tmp/work/out/runner.log` via a `logging.FileHandler`
         and isolating duplicate `stdout` payloads via a discard `EventEmitter`
         (per
-        [Proposal: `cloudrun-job-bootstrapper`](../openspec/proposals/cloudrun-job-bootstrapper/proposal.md)).
+        [SPEC-WORKER](../../../worker/spec.md)).
      1. **Publish Receipt & Outputs to `ArtifactCache`:** Write `receipt.json`
         (`ExecutionReceipt`, defined in
-        [ADR-0007](ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)),
-        `runner.log`, and output artifacts (`report.sarif` or
-        `finding-NNN.diff`) back to `tasks/<task_id>/output/` via
+        [ADR-0007](../../../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)),
+        `runner.log`, and output artifacts (`report.sarif`, `finding-NNN.diff`,
+        or updated `finding-NNN.sarif`) back to `tasks/<task_id>/output/` via
         `ArtifactCache`.
   1. **Single Unified Sandbox Container Image (`docker/runner.Dockerfile`) as a
      Two-Way Door (Synchronized with `ADR-0008`):** We build and publish a
@@ -628,8 +660,8 @@ sequenceDiagram
      `LocalDockerLauncher` to pass `args=["--cache-uri", "<URI>", "--task-id",
      "<ID>"]` directly without entrypoint overrides, while standalone local
      callers can still invoke `cm-runner` via
-     `docker run --entrypoint cm-runner`. `ADR-0008` has been updated alongside
-     this ADR so both documents reflect this unified container packaging and the
+     `docker run --entrypoint cm-runner`. Together with
+     [ADR-0008](../../../../../adr/ADR-0008-repository-layout-and-package-structure.md), this design enforces unified container packaging and the
      security invariant that **`packages/repohost` is never installed in the
      sandbox image**.
   1. **Three Two-Way Door Invariants for Zero-Code-Change Image Splitting:** To
@@ -637,9 +669,10 @@ sequenceDiagram
      and cloud (`docker/cloudrun.Dockerfile`) images later remains a
      zero-code-change **two-way door**, the design enforces three invariants:
      - _Invariant 1 — Package & Optional-Extra Isolation (`pyproject.toml`):_
-       `packages/codemender` maintains `dependencies = []`, and
-       `packages/launcher` isolates `google-cloud-storage` and
-       `google-cloud-run` inside `[project.optional-dependencies] cloudrun`.
+       `packages/codemender` carries only minimal `PyYAML` (zero cloud, network,
+       or repo-host SDKs; `packages/artifactstore` has `dependencies = []`), and
+       `packages/launcher` (base: `codemender`, `attrs`, `fsspec`) isolates
+       `gcsfs`, `google-cloud-storage`, and `google-cloud-run` inside `[cloudrun]`.
      - _Invariant 2 — Lazy `gs://` Cache Imports (`open_artifact_cache`):_
        `launcher.cache.open_artifact_cache(uri)` lazily imports
        `GcsArtifactCache` only when `uri.startswith("gs://")`. Running with
@@ -674,13 +707,15 @@ sequenceDiagram
     `shutil.copytree` operations for parallel `fix` tasks.
   - _Cloud Storage FUSE volume mounts for Cloud Run:_ Introduces severe POSIX
     file-stat latency during compilation and differential Git analysis (see
-    [ADR-0007](ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)).
+    [ADR-0007](../../../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)).
   - _Immediately maintaining separate `runner.Dockerfile` and
     `cloudrun.Dockerfile` builds:_ Doubles CI container build times and image
     management overhead today to save ~40 MB of compressed layers, when the
     Two-Way Door invariants let us split later at zero code cost if needed.
 
 ### Decision 3: Asynchronous, Generator-Streaming Workflow Operations on `Launcher` Decoupled from `RepoHost`
+
+**Implements:** [REQ-0003](spec.md#req-0003), [REQ-0004](spec.md#req-0004)
 
 - **Design:** Implement the high-level domain workflows (`find`, `fix`, and
   `verify`) directly as concrete methods on `Launcher` in
@@ -712,9 +747,10 @@ sequenceDiagram
        and `verify` calls—whether invoked immediately in the same Python process
        (Phase 1 single-job "find-then-fix"), fanned out across parallel CI
        compute shards followed by a fan-in `report` job (Phase 2 multi-job
-       extension), or triggered later by a `/codemender verify` comment—read
+       extension), or triggered later by a `@codemender verify` review comment—read
        `shared/scan-meta.json` and `findings/finding-NNN.sarif` from
-       `ArtifactCache` (or future `ArtifactStore`) and write their outputs to
+       `ArtifactCache` (hydrated via `ArtifactStore.get_finding_sarif()` or
+       review-comment reconstruction per [SPEC-GHA-VERIFY](../../../github-actions-verify/spec.md)) and write their outputs to
        disjoint `tasks/<task_id>/output/` subdirectories.
   1. **Real-Time Progressive Result Streaming via Python Generators:**
      - **Requirement:** When a single CI job owns `RepoHost` and runs multiple
@@ -749,10 +785,11 @@ sequenceDiagram
     aggregation stage.
 
 - **Alternatives Rejected:**
-  - _Separate `Workflow` (`FindWorkflow`, `FixWorkflow`, `VerifyWorkflow`) class
-    hierarchy wrapping `Launcher`:_ Because `find`, `fix`, and `verify` have
-    zero polymorphism per operation (unlike `ArtifactCache`, `Launcher`, and
-    `RepoHost`), a separate `Workflow` layer only adds pass-through boilerplate
+  - _Per-operation wrapper classes (`FindWorkflow`, `FixWorkflow`,
+    `VerifyWorkflow`) inside `packages/launcher`:_ Because `find`, `fix`, and
+    `verify` have zero polymorphism per operation inside `packages/launcher`
+    (distinct from the outer host's `repohost.workflow.Workflow` engine in
+    [SPEC-WORKFLOW](../../../workflow/spec.md)), per-operation wrapper classes only add boilerplate
     over `Launcher`, which is already the cohesive host-side client of `Worker`.
   - _Passing `RepoHost` directly into `Launcher`:_ Couples core scan/fix/verify
     logic to PR/MR comment APIs, breaks headless/quarterly scan composition, and
@@ -764,6 +801,8 @@ sequenceDiagram
 
 ### Decision 4: Phased CI Execution Model (Single-Job "Find-Then-Fix" $\rightarrow$ 3-Stage Multi-Job Fan-Out/Fan-In), Dual Selection Modes, and Dedicated Per-Host CLI Entrypoints (`cm-github`, `cm-gitlab`)
 
+**Implements:** [REQ-0002](spec.md#req-0002), [REQ-0004](spec.md#req-0004)
+
 - **Design:** To support both simple initial adoption and high-throughput
   multi-job scaling across CI platforms (**Goal 4**) without cross-job race
   conditions on PR/MR state, we structure CI execution around a **two-phase
@@ -771,7 +810,7 @@ sequenceDiagram
   selection modes on `Launcher`, and dedicated per-host CLI binaries in
   `packages/repohost` (note: concrete default values for batch size $M$, worker
   concurrency $K$, and timeouts are defined in implementation code rather than
-  hardcoded in this ADR):
+  hardcoded in this design):
   1. **Phased CI Execution Topology (Single-Job "Find-Then-Fix" First, Extending
      Cleanly to 3-Stage Multi-Job Fan-Out / Fan-In):**
      - **Phase 1 (Initial Default) — Single-Job "Find-Then-Fix" + Separate
@@ -782,7 +821,7 @@ sequenceDiagram
          `Launcher.run_parallel()`, streams inline PR/MR suggestions as workers
          finish, and updates the single sticky summary comment and final
          `CodeMender / Security Gate` commit status
-         ([ADR-0006](ADR-0006-pr-remediation-routing-and-security-gate.md))
+         ([ADR-0006](../../../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md))
          before exiting.
        - With `CloudRunLauncher`, heavy sandbox execution already runs remotely
          across parallel Cloud Run Job containers, so a single lightweight CI
@@ -793,10 +832,10 @@ sequenceDiagram
          $\rightarrow$ `fix` $\rightarrow$ reporting flow, and because one
          process owns `RepoHost`, there are zero cross-job race conditions on
          the sticky summary comment or commit status gate.
-       - On-demand **`verify`** (`/codemender verify <finding_id>`) always runs
-         asynchronously in a **separate CI job on a fresh VM** (triggered by a
-         PR comment or MR webhook), hydrating prior scan/fix context via cross-VM
-         artifact persistence (see Section 4).
+       - On-demand **`verify`** (`@codemender verify` in a PR review thread or
+         host chatops/manual trigger) always runs asynchronously in a **separate
+         CI job on a fresh VM**, hydrating prior scan/fix context via cross-VM
+         `ArtifactStore` persistence or comment fallback (see Runtime Contracts below).
      - **Phase 2 (Multi-Job Scaling Extension) — 3-Stage Fan-Out / Fan-In
        (`Stage 1: find` $\rightarrow$ `Stage 2: fix` Shards $\rightarrow$
        `Stage 3: report` Aggregator):**
@@ -826,7 +865,7 @@ sequenceDiagram
          - **Stage 3 (`report` — Single Fan-In Aggregator):** A single job runs
            after all `Stage 2` shards finish (`if: always()` in GitHub Actions /
            `when: always` in GitLab CI), reads the merged `ArtifactCache` across
-           all shards, wipes earlier bot-authored CodeMender review comments,
+           all shards, deduplicates against existing bot-authored CodeMender review comments,
            posts inline suggestions and fallback patches, updates the single
            sticky summary comment once, and sets the final
            `CodeMender / Security Gate` commit status.
@@ -846,7 +885,7 @@ sequenceDiagram
      - **Mode A — Explicit ID Selection (`--findings finding-001,finding-002` or
        `--all`):** Used by Phase 1 single-job runs (`--all`), GitHub Actions
        dynamic `fromJSON()` job matrices, and on-demand single-finding triggers
-       (`/codemender verify finding-001`).
+       (`@codemender verify` on `finding-001`).
      - **Mode B — Deterministic Shard Slicing (`--shard K/N`, 1-indexed):** Used
        by GitLab CI static `parallel: N` jobs
        (`--shard "${CI_NODE_INDEX}/${CI_NODE_TOTAL}"`). Reads the
@@ -864,17 +903,11 @@ sequenceDiagram
        `repohost.github.__main__:main` and `cm-gitlab` pointing to
        `repohost.gitlab.__main__:main`). Each entrypoint wires its specific
        `RepoHost` implementation (`GitHubRepoHost` or `GitLabRepoHost`) and the
-       selected `Launcher` / `ArtifactCache` to shared CLI orchestration helpers
-       in `repohost.cli`.
-
-     > **Scope Note on Concrete CLI Subcommand & Option Grammar:** This ADR
-     > establishes the architectural decision to expose dedicated per-host CLI
-     > binaries (`cm-github`, `cm-gitlab`) as the DI composition roots over the
-     > `find`, `fix`, `verify`, and fan-in `report` operations. The **exact CLI
-     > subcommand and flag grammar** (for example, how subcommands or flags
-     > configure single-job `find --autofix` vs. multi-job `find` / `fix` /
-     > `report`) is intentionally deferred to a dedicated CLI specification /
-     > future ADR.
+       selected `Launcher` / `ArtifactCache` (plus optional `ArtifactStore`) to
+       the shared host-agnostic `repohost.workflow.Workflow` orchestration
+       engine ([SPEC-WORKFLOW](../../../workflow/spec.md); reusable GitHub
+       composite actions live in `.github/actions/codemender/action.yml` and
+       `.github/actions/codemender-local/action.yml`).
 
 - **Why:**
   - **Pragmatic Rollout with Zero Architectural Throwaway:** Shipping Phase 1
@@ -897,7 +930,7 @@ sequenceDiagram
   - **1-to-1 Alignment with Optional Extras & Future Package Split:** Dedicated
     `cm-github` and `cm-gitlab` entrypoints match the `[github]` and `[gitlab]`
     optional extras in `packages/repohost`, eliminate repetitive `--host` flags
-    in `.github/` and `templates/`, and preserve `ADR-0008` Decision 3's
+    in `.github/` and `templates/`, and preserve [ADR-0008](../../../../../adr/ADR-0008-repository-layout-and-package-structure.md)'s
     zero-refactor escape hatch if `repohost.github` or `repohost.gitlab` is ever
     extracted into a standalone package.
 
@@ -919,20 +952,48 @@ sequenceDiagram
     platform-specific `.github/` and `templates/` configurations and couples all
     host entrypoints to a single root `__main__.py`.
 
+### Decision 5: Repository Boundary Layout, Package Extensibility Conventions & Split-Stream CLI Contract
+
+**Implements:** [REQ-0001](spec.md#req-0001), [REQ-0002](spec.md#req-0002), [REQ-0005](spec.md#req-0005), [REQ-0007](spec.md#req-0007)
+
+- **Design:** Consolidate CI workflows/templates (`.github/`, `templates/`),
+  container and GCP WIF/Cloud Run IaC definitions (`docker/`, `terraform/`
+  [[SPEC-WIF](../../../wif/spec.md)], `scripts/`, `docs/`, `Makefile`), and four
+  independently installable `src/`-layout Python packages
+  (`packages/{artifactstore,codemender,launcher,repohost}`, separating local VCS
+  inspection in `codemender.vcs` from remote host APIs in `repohost`) into one
+  `uv` workspace
+  ([ADR-0008](../../../../../adr/ADR-0008-repository-layout-and-package-structure.md),
+  [ADR-0001](../../../../../adr/ADR-0001.md)) supporting self-dogfooding,
+  org-wide shared execution, and single-repository adoption
+  ([SPEC-DIST](../../../distribute/spec.md)):
+  - _Package Extensibility & No Grab-Bags:_ Omit `common/`/`utils/` modules; map
+    optional vendor SDKs 1-to-1 onto subpackages and extras (`repohost[github]`,
+    `launcher[cloudrun]`) behind lazy root `__init__.py` modules with a PEP 420
+    standalone-package split escape hatch; run automatic `.cm_project` `init`
+    solely inside container-private `/tmp/work/repo` scratch.
+  - _Split-Stream CLI Contract ([ADR-0002](../../../../../adr/ADR-0002.md)):_
+    Entrypoints reserve `stdout` strictly for structured NDJSON events (routing
+    library calls inside `cm-worker` via `redirect_stdout(sys.stderr)` and logs
+    to `stderr` / `runner.log`), exchange SARIF 2.1.0 and unified `.diff` files
+    via `--out` / `ArtifactCache`, and map termination onto exit codes `0`
+    (completed, including findings reported), `2` (configuration/usage error),
+    and `3` (execution/infrastructure error; plus `130`/`143` signal interrupts).
+
 ---
 
-## 4. Runtime Contracts, Execution Flows & Verification
+## Runtime Contracts & Execution Flows
 
 ### `ArtifactCache` Conflict-Free Union Directory Layout
 
 Both `LocalArtifactCache` (`file://`) and `GcsArtifactCache` (`gs://`) enforce
 the same relative path hierarchy, unifying the artifact and transit contracts
 established across our governing ADRs, OpenSpecs, and proposals
-([SPEC-GHA REQ-0008](../openspec/specs/github-actions/spec.md#req-0008)
+([SPEC-GHA REQ-0008](../../../github-actions/spec.md#req-0008)
 symmetric workspace file parity across `local` and `cloudrun` backends):
 
 ```text
-<cache_root>/
+<cache_root>/                                  # e.g. .codemender-cache/ or gs://<bucket>/.../prs/<pr>/<sha> | .../branches/<branch>/<sha>
 ├── shared/
 │   ├── code.tar.gz                        # Bounded-history git archive (cached once per run/commit)
 │   └── scan-meta.json                     # ScanMetadata: base/head SHAs, deterministic finding list & fingerprints
@@ -957,41 +1018,44 @@ symmetric workspace file parity across `local` and `cloudrun` backends):
         └── output/
             ├── receipt.json
             ├── runner.log
-            └── finding-001.diff           # Verified patch (if produced)
+            └── finding-001.sarif          # Updated 1-finding SARIF 2.1.0 report (DISMISSED / VERIFIED / OPEN)
 ```
 
 - **Traceability to Governing ADRs, Specs & Proposals:**
   - **`shared/code.tar.gz` & Security Exclusions:** Governed by
-    [ADR-0005](ADR-0005-multi-platform-transit-storage-and-isolation.md),
-    [ADR-0003](ADR-0003-environment-scrubbing.md),
-    [SPEC-GHA-FIX REQ-0005](../openspec/specs/github-actions-fix/spec.md#req-0005),
-    and
-    [Proposal: `vcs-cloudrun-comms`](../openspec/proposals/vcs-cloudrun-comms/proposal.md).
+    [ADR-0005](../../../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md),
+    [ADR-0003](../../../../../adr/ADR-0003-environment-scrubbing.md),
+    [ADR-0010](../../../../../adr/ADR-0010-permission-isolation-and-authn-authz.md),
+    [SPEC-GHA-FIX REQ-0005](../../../github-actions-fix/spec.md#req-0005),
+    and [SPEC-LAUNCHER REQ-0002](../../../launcher/spec.md#req-0002).
     When `Launcher.ensure_repo_snapshot()` packages the target repository into
-    `shared/code.tar.gz`, it strips embedded `.git/config` credentials
-    (`http.extraheader`, credential helpers, and userinfo URLs) and
-    `.git/hooks`, and explicitly excludes `.cm_project`, `.exploit`,
-    `gha-creds-*.json`, and `.codemender-cache/` so transient tool artifacts or
-    host credentials are never bundled into the archive.
+    `shared/code.tar.gz`, it replaces `.git/config` from a minimal structural
+    key allowlist (eliminating `http.extraheader`, credential helpers, userinfo
+    URLs, `core.fsmonitor`, `core.sshCommand`, `diff.*.textconv`, and
+    `include`/`includeIf`), removes `.git/hooks`, pins `.codemender.yaml` to
+    `base_ref` while excluding `.codemender/command_policy.yaml`, contains
+    symlinks while failing closed on unmaterialized submodules or partial
+    clones, and excludes `.cm_project`, `.exploit`, `gha-creds-*.json`, and
+    `.codemender-cache/`.
   - **`shared/scan-meta.json` & `findings/finding-NNN.sarif`:** Governed by
-    [SPEC-GHA-FIX REQ-0004](../openspec/specs/github-actions-fix/spec.md#req-0004)
+    [SPEC-GHA-FIX REQ-0004](../../../github-actions-fix/spec.md#req-0004)
     (splitting `report.sarif` into deterministically sorted 1-finding SARIF
     2.1.0 files) and
-    [SPEC-GHA-FIX REQ-0009](../openspec/specs/github-actions-fix/spec.md#req-0009)
+    [SPEC-GHA-FIX REQ-0009](../../../github-actions-fix/spec.md#req-0009)
     (recording deterministic finding fingerprints and scan metadata in
     `scan-meta.json` for intra-run deduplication and on-demand verification correlation).
   - **`tasks/<task_id>/input/manifest.json` (`RunManifest`) &
     `tasks/<task_id>/output/{receipt.json, runner.log}` (`ExecutionReceipt`):**
     Governed by
-    [ADR-0005](ADR-0005-multi-platform-transit-storage-and-isolation.md),
-    [ADR-0007](ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md),
-    and
-    [Proposal: `cloudrun-job-bootstrapper`](../openspec/proposals/cloudrun-job-bootstrapper/proposal.md),
+    [ADR-0005](../../../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md),
+    [ADR-0007](../../../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md),
+    [SPEC-ARTIFACT-CACHE](../../../artifact-cache/spec.md), and
+    [SPEC-WORKER](../../../worker/spec.md),
     extended here via `ArtifactCache` to run identically across both local
     gVisor (`LocalArtifactCache`) and Cloud Run Jobs (`GcsArtifactCache`).
-  - **`report.sarif` & `<finding>.diff` Output Artifacts:** Governed by
-    [ADR-0002](ADR-0002.md) (cross-boundary
-    `--out` file artifacts produced by `cm-runner`).
+  - **`report.sarif`, `<finding>.diff` & Updated `<finding>.sarif` Output Artifacts:** Governed by
+    [ADR-0002](../../../../../adr/ADR-0002.md) and [SPEC-VERIFY](../../../verify/spec.md)
+    (cross-boundary `--out` file artifacts produced by `cm-runner`).
 - **Conflict-Free Parallel Union & Cross-VM Storage Semantics (`file://` vs.
   `gs://` and Bridge to `ArtifactStore`):** Because every parallel `fix` and
   `verify` task writes strictly to its own disjoint `tasks/<task_id>/output/`
@@ -1002,7 +1066,7 @@ symmetric workspace file parity across `local` and `cloudrun` backends):
   - **`GcsArtifactCache` (`gs://`):** Natively shared across VMs over the
     network. Single-job runs, multi-job stages (`find` $\rightarrow$ `fix`
     shards $\rightarrow$ `report`), and separate `verify` jobs read and write
-    directly to the same commit/run-scoped `gs://` prefix without extra CI
+    directly to the same PR/branch commit-scoped `gs://` prefix without extra CI
     artifact transfer steps.
   - **`LocalArtifactCache` (`file://`):** Backed by a local directory
     (`.codemender-cache/`) on a CI runner VM's disk. In **Phase 1 (Single-Job
@@ -1019,17 +1083,14 @@ symmetric workspace file parity across `local` and `cloudrun` backends):
     one local directory without file collisions.
   - **Cross-Workflow `verify` & Bridge to `ArtifactStore`
     (`packages/artifactstore`):** When on-demand
-    `/codemender verify <finding_id>` is triggered hours or days later by a PR
-    comment (`issue_comment` webhook), it runs in a separate CI workflow
-    execution on a fresh VM. While `verify` can read from a commit-scoped
-    `gs://` cache prefix or download the prior workflow run's
-    `.codemender-cache/` CI artifact in the short term, cross-workflow and
-    long-lived artifact retrieval is a primary driver for the
-    **`ArtifactStore` (`packages/artifactstore`)** (see *Future Work* below).
-    `find`/`fix`/`report` persist canonical finding records and candidate
-    patches to `ArtifactStore`, allowing subsequent `verify` runs (and
-    enterprise security platforms) to hydrate finding context directly from
-    `ArtifactStore` even after ephemeral `ArtifactCache` entries expire.
+    `@codemender verify` is triggered hours or days later in a PR review thread
+    (`pull_request_review_comment`, [SPEC-GHA-VERIFY](../../../github-actions-verify/spec.md))
+    or host chatops/manual trigger, it runs in a separate CI workflow execution
+    on a fresh VM. The outer host resolves the target single-finding SARIF via
+    `ArtifactStore.get_finding_sarif()` first—falling back to deterministic
+    review-comment SARIF reconstruction when durable scan artifacts have
+    expired—and stages it alongside `shared/code.tar.gz` into `ArtifactCache`
+    before spawning `cm-worker`.
 
 ### Unified Sandbox Worker Sequence (`Launcher` Client $\leftrightarrow$ `Worker` Server)
 
@@ -1057,17 +1118,17 @@ sequenceDiagram
     L-->>C: Return FindOutcome or yield FixOutcome / VerifyOutcome
 ```
 
-### `RepoHost` Platform Adaptation Matrix (`GitHubRepoHost` vs. `GitLabRepoHost`)
+### `RepoHost` Platform Adaptation Matrix (`GitHubRepoHost` vs. `GitLabRepoHost` — Initial Reference Adapters)
 
 | Capability                      | `GitHubRepoHost` (`cm-github` / `repohost.github`)                                                                     | `GitLabRepoHost` (`cm-gitlab` / `repohost.gitlab`)                                                                                                          |
 | :------------------------------ | :--------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Change Context Discovery**    | Reads `$GITHUB_EVENT_PATH`, `$GITHUB_REPOSITORY`, `$GITHUB_SHA`, and PR base/head refs.                                | Reads `$CI_MERGE_REQUEST_IID`, `$CI_PROJECT_ID`, `$CI_COMMIT_SHA`, and `$CI_MERGE_REQUEST_DIFF_BASE_SHA`.                                                   |
 | **Inline Code Suggestion**      | Pull Request Review comment with `line`, optional `start_line`, `side: "RIGHT"`, and ` ```suggestion ` block.          | Merge Request Diff Discussion with `position` (`base_sha`, `start_sha`, `head_sha`, `new_path`, `new_line`) and ` ```suggestion:-N+0 ` range offset syntax. |
-| **Out-of-Hunk / Fork Fallback** | Tier 2 Child PR or Tier 3 Markdown patch comment per [ADR-0006](ADR-0006-pr-remediation-routing-and-security-gate.md). | Collapsible Markdown `<details>` patch note on the Merge Request with `git apply` instructions.                                                             |
+| **Out-of-Hunk / Fork Fallback** | Tier 2 Child PR or Tier 3 Markdown patch comment per [ADR-0006](../../../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md). | Collapsible Markdown `<details>` patch note on the Merge Request with `git apply` instructions.                                                             |
 | **Security Quality Gate**       | `POST /repos/{owner}/{repo}/statuses/{sha}` (`CodeMender / Security Gate`).                                            | `POST /projects/{id}/statuses/{sha}` (`name="CodeMender / Security Gate"`).                                                                                 |
 | **CI Output Plumbing**          | Appends key-values to `$GITHUB_OUTPUT`.                                                                                | Writes `.codemender-cache/ci-outputs.json` (and optional dotenv artifact) for downstream jobs.                                                              |
 
-### End-to-End CI & CLI Execution Flows (Illustrative Building-Block Invocations)
+### End-to-End CI & CLI Execution Flows (Illustrative Building-Block Invocations — Initial Reference Adapters)
 
 | Pipeline Mode / Stage                                                   | GitHub Actions (`.github/workflows/`)                                                                                                                                                                                                                                                                  | GitLab CI (`templates/codemender.yml`)                                                                                                                                                                                                                               |
 | :---------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1075,61 +1136,21 @@ sequenceDiagram
 | **Phase 2 (Multi-Job Extension) — Stage 1: `find`**                     | `cm-github find --backend <local\|cloudrun> --cache-uri <URI> --batch-size M`<br/>Writes `shared/code.tar.gz`, `shared/scan-meta.json`, and `findings/*.sarif` to `ArtifactCache` (uploading `.codemender-cache/` artifact if `file://`), and emits `has_findings` + `batches_json` to `$GITHUB_OUTPUT`. | `cm-gitlab find --backend <local\|cloudrun> --cache-uri <URI>`<br/>Writes `shared/code.tar.gz`, `shared/scan-meta.json`, and `findings/*.sarif`, and exports `.codemender-cache/` via `artifacts: paths:` (or `gs://`).                                               |
 | **Phase 2 (Multi-Job Extension) — Stage 2: `fix` (Compute Shards)**     | Conditional on `needs.find.outputs.has_findings == 'true'`. Matrix `batch: ${{ fromJson(needs.find.outputs.batches_json) }}` runs `cm-github fix --findings "${{ matrix.batch }}" --max-workers K` (no `RepoHost` writes) and uploads shard `.codemender-cache/` output (if `file://`).                | Uses `parallel: N` and runs `cm-gitlab fix --shard "${CI_NODE_INDEX}/${CI_NODE_TOTAL}" --max-workers K` (no `RepoHost` writes; exits `0` if shard is empty) and exports shard `.codemender-cache/` via `artifacts: paths:` (if `file://`).                           |
 | **Phase 2 (Multi-Job Extension) — Stage 3: `report` (Fan-In Aggregator)** | Runs once with `if: always()` after `fix` matrix completes. Merges `.codemender-cache/` via `actions/download-artifact@v4` (`merge-multiple: true`, or reads `gs://`), posts inline suggestions/fallbacks, updates the single sticky summary, and sets the final `CodeMender / Security Gate` status.  | Runs once with `when: always` (`needs: [find, fix]`). Reads merged `.codemender-cache/` (or `gs://`), posts inline MR suggestions/fallbacks, updates the single sticky summary note, and sets the final `CodeMender / Security Gate` status.                             |
-| **Separate On-Demand `verify`**                                         | Triggered in a separate job by `issue_comment` (`/codemender verify finding-001`). Hydrates finding/archive from `ArtifactCache` (or future `ArtifactStore`), runs `cm-github verify --findings finding-001`, and replies to the comment.                                                               | Triggered in a separate job by MR note webhook or `CODEMENDER_VERIFY_FINDING=finding-001`. Hydrates finding/archive from `ArtifactCache` (or future `ArtifactStore`), runs `cm-gitlab verify --findings "$CODEMENDER_VERIFY_FINDING"`, and replies to the discussion. |
+| **Separate On-Demand `verify`**                                         | Triggered in a separate job by `@codemender verify` on `pull_request_review_comment` ([SPEC-GHA-VERIFY](../../../github-actions-verify/spec.md)). Resolves finding via `ArtifactStore.get_finding_sarif()` (with review-comment fallback), stages `ArtifactCache`, runs `cm-github verify`, and replies in-thread. | Triggered in a separate job by MR discussion webhook or `CODEMENDER_VERIFY_FINDING=finding-001`. Hydrates finding/archive via `ArtifactStore` into `ArtifactCache`, runs `cm-gitlab verify --findings "$CODEMENDER_VERIFY_FINDING"`, and replies to the discussion. |
 
-### Confirmation & Verification Strategy (`make test`)
+## Risks / Trade-offs
 
-Compliance with this ADR is verified through hermetic unit tests co-located
-across `packages/{codemender,launcher,repohost}`:
-
-1. **Package Boundary & Lazy-Import Enforcement Tests:**
-   - Verify via AST/import inspection that `packages/codemender` contains zero
-     imports of `launcher` or `repohost`, and `packages/launcher` contains zero
-     imports of `repohost`.
-   - Verify that `open_artifact_cache("file:///tmp/test-cache")` in
-     `launcher.cache` succeeds when `google.cloud` is blocked in `sys.modules`
-     (`sys.modules["google.cloud"] = None`), confirming the Two-Way Door
-     lazy-import constraint.
-1. **`ArtifactCache` Contract & Conflict-Free Union Tests
-   (`packages/launcher/src/launcher/cache/test_cache.py`):**
-   - Run shared contract tests against both `LocalArtifactCache(tmp_path)` and a
-     mocked `GcsArtifactCache`.
-   - Verify that `ensure_repo_snapshot()` creates `shared/code.tar.gz` while
-     stripping embedded `.git/config` credentials and `.git/hooks`, and
-     excluding `.cm_project`, `.exploit`, `gha-creds-*.json`, and
-     `.codemender-cache/`.
-   - Verify that concurrent workers writing to `tasks/fix-finding-001/output/`
-     and `tasks/fix-finding-002/output/` produce disjoint directory trees that
-     merge without file collisions.
-1. **Unified `Worker` Server Protocol Tests
-   (`packages/launcher/src/launcher/test_worker.py`):**
-   - Verify that
-     `Worker(LocalArtifactCache(tmp_path)).run_task("fix-finding-001")` (and
-     `cm-worker --cache-uri file://<tmp> --task-id fix-finding-001`) reads
-     `tasks/fix-finding-001/input/manifest.json`, extracts `shared/code.tar.gz`
-     into an isolated temporary directory, invokes `codemender.runner.commands`
-     in-process, and writes `receipt.json`, `runner.log`, and `finding-001.diff`
-     to `tasks/fix-finding-001/output/`.
-1. **`Launcher` Client Domain Operations, Parallel Streaming, Shard-Slicing &
-   Signal-Safety Tests (`packages/launcher/src/launcher/test_launcher.py`):**
-   - Verify `launcher.find()`, `launcher.fix()`, and `launcher.verify()` using
-     `LocalArtifactCache(tmp_path)` and a fake `Launcher` (`run_worker` stub).
-   - Verify both selection modes on `launcher.fix()` and `launcher.verify()`:
-     explicit ID list (`finding_ids=["finding-001", "finding-003"]`) and
-     deterministic 1-indexed shard slicing (`shard=(K, N)`), including asserting
-     that `shard=(3, 4)` against a 2-finding scan yields zero items and exits
-     `0` cleanly.
-   - Verify that `Launcher.run_parallel(tasks, max_workers=K)` yields
-     `ParallelResult` items in completion order (`as_completed`), so a fast task
-     finishing before a slow task is yielded immediately.
-   - Verify that calling `launcher.stop()` from a signal handler or concurrent
-     thread terminates active Docker containers (`LocalDockerLauncher`) or
-     cancels active Cloud Run executions (`CloudRunLauncher`) without
-     deadlocking.
-1. **`RepoHost` Adapter & Per-Host CLI Tests
-   (`packages/repohost/src/repohost/test_repohost.py`):**
-   - Verify `GitHubRepoHost` (`cm-github`) and `GitLabRepoHost` (`cm-gitlab`)
-     against mocked HTTP transports (`requests`), asserting platform-specific
-     inline suggestion formatting (GitHub `line`/`start_line` vs. GitLab
-     `position` object and `suggestion:-N+0` syntax) and
-     `CodeMender / Security Gate` commit status updates.
+- **Archive Packaging & Scratch Extraction Overhead vs. Direct Bind Mounts** ->
+  Creating `shared/code.tar.gz` once per run and unpacking into container-private
+  `/tmp/work/repo` adds modest archive I/O compared to raw host bind mounts,
+  accepted so caller checkouts stay clean, host UID/GID collisions disappear, and
+  local gVisor and Cloud Run Jobs share one worker protocol.
+- **Extra `ArtifactCache` Indirection vs. Direct Subprocess Calls** -> Routing
+  manifests, receipts, logs, SARIF slices, and diffs through `ArtifactCache` adds
+  a thin serialization seam over direct subprocess invocation, mitigated by shared
+  helpers on `Launcher`/`Worker` and in-memory/local-directory test execution.
+- **Unified Sandbox Image Size vs. Two Separate Dockerfiles** -> Installing
+  `packages/launcher[cloudrun]` alongside `packages/codemender` in
+  `docker/runner.Dockerfile` adds Google Cloud client wheels locally, mitigated
+  by the three Two-Way Door invariants enabling a zero-code-change Dockerfile
+  split whenever image size outweighs single-build simplicity.

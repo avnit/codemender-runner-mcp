@@ -12,13 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0008, ADR-0009#decision-1, ADR-0009#decision-4,
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0004
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0007
+# Governing: ADR-0008,
 # SPEC-GHA/REQ-0004, SPEC-GHA/REQ-0005, SPEC-GHA/REQ-0006, SPEC-GHA/REQ-0008,
 # SPEC-GHA-FIX/REQ-0001, SPEC-GHA-VERIFY
 
 """Entry point for the CodeMender GitHub Action (M1 scan + M2 parallel fixes).
 
-Governing: ADR-0008, ADR-0009#decision-1, ADR-0009#decision-4.
+Governing: ADR-0008, docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003, docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0004, docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0007.
 
 Flow:
   1. Read the GitHub `pull_request` event (base SHA, head SHA, PR number).

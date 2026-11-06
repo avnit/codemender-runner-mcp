@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0007, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001
+# Governing: ADR-0007, SPEC-ARTIFACT-CACHE/REQ-0001
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0006
 # Governing: SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0006
 """Abstract base class, protocol methods, and URI helpers for ArtifactCache."""
 
@@ -148,7 +150,8 @@ def sanitize_branch_name(branch: str) -> str:
   return f"{prefix}-{digest}"
 
 
-# Governing: SPEC-ARTIFACT-CACHE/REQ-0002, ADR-0009
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0002
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
 def build_gcs_cache_uri(
     bucket: str,
     owner: str,
@@ -213,7 +216,9 @@ def build_gcs_cache_uri(
   )
 
 
-# Governing: ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0001
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0006
 # Governing: SPEC-ARTIFACT-CACHE/REQ-0006
 class ArtifactCache(ABC):
   """Root-scoped transit cache and client-worker protocol over fsspec.

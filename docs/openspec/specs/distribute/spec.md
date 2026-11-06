@@ -47,7 +47,7 @@ This specification is governed by and references:
 - [ADR-0002: Machine-Readable Output Contract](../../../adr/ADR-0002.md)
 - [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../../adr/ADR-0003-environment-scrubbing.md)
 - [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
-- [ADR-0009: Abstraction Layers, Orchestration Ownership, and Dependency Injection](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
+- [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
 
 ---
 

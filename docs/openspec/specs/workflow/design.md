@@ -21,15 +21,15 @@ Prior to this specification, host-side CI orchestration was implemented in a mon
 2. Rendering GitHub-flavored Markdown strings with collapsible `<details><summary>` blocks and GitHub Action run links.
 3. Orchestrating the core CodeMender lifecycle: change context resolution, differential scanning via `Launcher.find()`, fix deduplication, bounded parallel remediation via `Launcher.fix()`, in-flight comment updates, on-demand verification via `Launcher.verify()`, and security gate evaluation.
 
-[ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md) established the foundational three-tier abstraction:
+The [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) establishes the foundational three-tier abstraction:
 - `ArtifactCache` for data transit between host and sandbox container.
 - `Launcher` as the host-side client managing container execution.
 - `RepoHost` as the host-side client managing PR/MR interactions and commit statuses.
 
-### Architectural Alignment with ADR-0009 Decision 3 & Decision 4
-In ADR-0009 Decision 3, the design rejected an in-memory DAG / workgraph engine that wraps `Launcher`, noting that `Launcher` is the client of the container worker. In practice, `Launcher` in `packages/launcher` (governed by [SPEC-LAUNCHER / PR #93](https://github.com/cloud-gtm/codemender-runner/pull/93)) serves as the focused domain execution client (`find`, `fix`, `verify`, `stop`), keeping container lifecycle, archive caching, and process management hermetic. Meanwhile, PR review deduplication, in-flight table updates, and commit status checks require an orchestrator that coordinates between `RepoHost` and `Launcher`.
+### Architectural Alignment with CodeMender Runner System Design (Decisions 3 & 4)
+In [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) Decision 3, the architecture rejects per-operation wrapper classes or an in-memory DAG / workgraph engine inside `packages/launcher`, keeping `Launcher` as the focused domain execution client (`find`, `fix`, `verify`, `stop`) per [SPEC-LAUNCHER / PR #93](https://github.com/cloud-gtm/codemender-runner/pull/93). Meanwhile, PR review deduplication, in-flight table updates, and commit status checks require an outer-host orchestrator coordinating between `RepoHost` and `Launcher`.
 
-ADR-0009 Decision 4 explicitly anticipated this need, stating that dedicated per-host CLI binaries (`cm-github`, `cm-gitlab`) wire `RepoHost` and `Launcher` to:
+[CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) Decision 4 reflects this separation, specifying that dedicated per-host CLI binaries (`cm-github`, `cm-gitlab`) wire `RepoHost` and `Launcher` to:
 > *"shared CLI orchestration helpers in `repohost.cli` [now `repohost.workflow`]"*.
 
 Under Buganizer epic [b/579991472](http://b/579991472), this design extracts that coordination state machine out of `gha_runner.py` and into `packages/repohost/src/repohost/workflow.py`. `Workflow` serves as the host-side orchestrator that wires `RepoHost` and `Launcher` together via composition, without wrapping `Launcher`'s execution methods or creating a DAG engine.
@@ -47,7 +47,7 @@ Under Buganizer epic [b/579991472](http://b/579991472), this design extracts tha
 - **Process-Level Signal Safety:** Trap signals at the CLI process boundary (`main()`) and provide safe cancellation in `Workflow.cancel()`.
 
 ### Non-Goals
-- **In-Memory DAG / Workgraph Engine:** Explicitly rejected in ADR-0009 Decision 3; CI workflows execute in separate OS processes and CI stages rather than complex in-memory DAGs.
+- **In-Memory DAG / Workgraph Engine:** Explicitly rejected in [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) Decision 3; CI workflows execute in separate OS processes and CI stages rather than complex in-memory DAGs.
 - **Modifying Core ABCs:** `RepoHost` and `Launcher` ABCs are already established; this design builds on top of them without modifying their core contracts.
 - **Maintaining `gha_runner.py` Shim:** As decided during exploration, `gha_runner.py` will not be preserved as a legacy wrapper. Callers (`action.yml` and `cm-github`) will point directly to `repohost.github.gha_workflow`.
 

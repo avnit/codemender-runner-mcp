@@ -5,8 +5,7 @@
 - **Builds on:**
   [ADR-0008](ADR-0008-repository-layout-and-package-structure.md) (Repository
   Layout, Three-Package Workspace, and Runtime Architecture),
-  [ADR-0009](ADR-0009-abstraction-layers-and-dependency-injection.md)
-  (Abstraction Layers, Dependency Injection, and Asynchronous Workflows),
+  [CodeMender Runner System Design](../openspec/specs/tech/systems/codemender-runner/design.md),
   [ADR-0003](ADR-0003-environment-scrubbing.md),
   [ADR-0005](ADR-0005-multi-platform-transit-storage-and-isolation.md),
   [ADR-0006](ADR-0006-pr-remediation-routing-and-security-gate.md),
@@ -20,8 +19,8 @@
 
 This ADR defines the permission isolation model and runtime AuthN/AuthZ split
 across the packages and classes defined in
-[ADR-0008](ADR-0008-repository-layout-and-package-structure.md) and
-[ADR-0009](ADR-0009-abstraction-layers-and-dependency-injection.md), guided by
+[ADR-0008](ADR-0008-repository-layout-and-package-structure.md) and the
+[CodeMender Runner System Design](../openspec/specs/tech/systems/codemender-runner/design.md), guided by
 four core goals:
 
 1. **Zero Repository Host Credentials in the Sandbox Container:** The sandbox
@@ -317,7 +316,7 @@ sequenceDiagram
   installs only `packages/codemender` and `packages/launcher[cloudrun]`,
   omitting `packages/repohost`
   ([ADR-0008](ADR-0008-repository-layout-and-package-structure.md),
-  [ADR-0009](ADR-0009-abstraction-layers-and-dependency-injection.md)).
+  [CodeMender Runner System Design](../openspec/specs/tech/systems/codemender-runner/design.md)).
 - **Why:**
   - **Zero VCS Blast Radius Inside the Sandbox:** `Worker` and `Runner` only
     transform a staged repository archive (`shared/code.tar.gz`) into output

@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0008, ADR-0009#decision-1
+# Governing: ADR-0008
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0001
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0002
 
 """CodeMender repository hosting platform integrations (GitHub, GitLab)."""
 

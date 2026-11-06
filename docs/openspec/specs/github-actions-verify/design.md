@@ -149,7 +149,7 @@ Governed by [SPEC-GHA-VERIFY](spec.md), [SPEC-VERIFY](../verify/spec.md),
 
 - **Choice:**
   1. **Primary (PR Workflow Artifact via `ArtifactStore`):** Encapsulated
-     within `ArtifactStore.get_finding_sarif(finding_id)` per ADR-0009.
+     within `ArtifactStore.get_finding_sarif(finding_id)` per the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md).
      Concrete `GitHubActionsArtifactStore` downloads the latest non-expired
      `codemender-report-pr-<pr_number>` artifact via GitHub Actions REST API
      (`GET /repos/{repo}/actions/artifacts?name=codemender-report-pr-<N>`),

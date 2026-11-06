@@ -39,7 +39,7 @@ To preserve simplicity while supporting diverse repository configurations, `.git
 - Ensure 100% hermetic in-memory unit testing with co-located `test_*.py` suites in `packages/launcher` and `packages/repohost`.
 
 ### Non-Goals
-- Decomposing `cm-github` into the `RepoHost` ABC, `ArtifactCache`, and `cm-worker` container entrypoint (governed by ADR-0009 and tracked separately).
+- Decomposing `cm-github` into the `RepoHost` ABC, `ArtifactCache`, and `cm-worker` container entrypoint (governed by the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) and tracked separately).
 - GKE or Bitbucket launcher implementations (deferred to future milestones).
 
 ---

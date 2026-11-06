@@ -26,7 +26,7 @@ freshness: { owner: 'codemender-maintainers', reviewed: '2026-11-03' }
   corrupting repository files or leaking sensitive credentials.
 - **Security & Compliance Lead (`persona-security-auditor`)**: As a security lead
   governing untrusted code execution in [SPEC-0003](../runner-container-packaging/spec.md),
-  [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md),
+  the [CodeMender Runner System Specification](../tech/systems/codemender-runner/spec.md),
   and [ADR-0010](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md),
   I need the `Launcher` orchestrator to remain 100% decoupled from repository
   hosting APIs (`packages/repohost`), strictly prevent repository host tokens from
@@ -45,7 +45,7 @@ dual selection modes, context management, and concrete backend contracts for
 and `CloudRunLauncher`) in `packages/launcher`.
 
 As established in
-[ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
+the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
 (Decisions 1, 2, 3, and 4),
 [ADR-0010](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md)
 (Decisions 2 and 4), and
@@ -75,7 +75,7 @@ Detailed component architecture, class diagrams, sequence flows, data models,
 and fallback receipt synthesis are specified in [design.md](design.md).
 
 This specification is governed by and references:
-- [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md):
+- [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) ([Specification](../tech/systems/codemender-runner/spec.md)):
   Abstraction layers, dependency injection seams, asynchronous workflows, and
   phased CI execution model.
 - [ADR-0010](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md):
@@ -526,13 +526,13 @@ class Launcher(abc.ABC):
 
 | Requirement | Description | Governing ADR / Spec | Realized Component |
 | :--- | :--- | :--- | :--- |
-| **REQ-0001** | ABC & Dependency Injection Seam (`ArtifactCache`) | ADR-0009 Dec 1, ADR-0008 | `launcher.base.Launcher` |
-| **REQ-0002** | Repository Snapshot Archiving & Sanitization (`ensure_repo_snapshot`) | ADR-0010 Dec 4, ADR-0009 Sec 4, ADR-0005 | `launcher.base.Launcher.ensure_repo_snapshot` |
-| **REQ-0003** | Differential Scan Orchestration (`find`) | ADR-0009 Dec 3, SPEC-FIND-DIFF | `launcher.base.Launcher.find` |
-| **REQ-0004** | Patch Generation Generator (`fix`) | ADR-0009 Dec 3, Dec 4, SPEC-FIX | `launcher.base.Launcher.fix` |
-| **REQ-0005** | Patch Verification Generator (`verify`) | ADR-0009 Dec 3, SPEC-VERIFY | `launcher.base.Launcher.verify` |
-| **REQ-0006** | Bounded Concurrency Engine (`run_parallel`) | ADR-0009 Dec 3, Dec 4 | `launcher.base.Launcher.run_parallel` |
-| **REQ-0007** | Template Dispatch & Guaranteed `ExecutionReceipt` (`run_worker`) | ADR-0009 Dec 2, ADR-0007, ADR-0002 | `Launcher.run_worker` & `_synthesize_fallback_receipt` |
-| **REQ-0008** | Concrete Local Backend (`LocalDockerLauncher`) | ADR-0010 Dec 3, ADR-0009 Dec 2, ADR-0003, SPEC-WORKER | `launcher.local.LocalDockerLauncher` |
-| **REQ-0009** | Concrete Cloud Backend (`CloudRunLauncher`) | ADR-0010 Dec 3, ADR-0009 Dec 2, SPEC-ARTIFACT-CACHE | `launcher.cloudrun.CloudRunLauncher` |
-| **REQ-0010** | Context Management & Lifecycle (`stop`) | ADR-0009 Sec 4, ADR-0002 | `Launcher.__enter__`, `__exit__`, `stop` |
+| **REQ-0001** | ABC & Dependency Injection Seam (`ArtifactCache`) | [CodeMender Runner REQ-0001](../tech/systems/codemender-runner/spec.md#req-0001), [REQ-0003](../tech/systems/codemender-runner/spec.md#req-0003), ADR-0008 | `launcher.base.Launcher` |
+| **REQ-0002** | Repository Snapshot Archiving & Sanitization (`ensure_repo_snapshot`) | ADR-0010 Dec 4, [CodeMender Runner REQ-0005](../tech/systems/codemender-runner/spec.md#req-0005), ADR-0005 | `launcher.base.Launcher.ensure_repo_snapshot` |
+| **REQ-0003** | Differential Scan Orchestration (`find`) | [CodeMender Runner REQ-0003](../tech/systems/codemender-runner/spec.md#req-0003), SPEC-FIND-DIFF | `launcher.base.Launcher.find` |
+| **REQ-0004** | Patch Generation Generator (`fix`) | [CodeMender Runner REQ-0003](../tech/systems/codemender-runner/spec.md#req-0003), [REQ-0004](../tech/systems/codemender-runner/spec.md#req-0004), SPEC-FIX | `launcher.base.Launcher.fix` |
+| **REQ-0005** | Patch Verification Generator (`verify`) | [CodeMender Runner REQ-0003](../tech/systems/codemender-runner/spec.md#req-0003), [REQ-0004](../tech/systems/codemender-runner/spec.md#req-0004), SPEC-VERIFY | `launcher.base.Launcher.verify` |
+| **REQ-0006** | Bounded Concurrency Engine (`run_parallel`) | [CodeMender Runner REQ-0004](../tech/systems/codemender-runner/spec.md#req-0004) | `launcher.base.Launcher.run_parallel` |
+| **REQ-0007** | Template Dispatch & Guaranteed `ExecutionReceipt` (`run_worker`) | [CodeMender Runner REQ-0006](../tech/systems/codemender-runner/spec.md#req-0006), ADR-0007, ADR-0002 | `Launcher.run_worker` & `_synthesize_fallback_receipt` |
+| **REQ-0008** | Concrete Local Backend (`LocalDockerLauncher`) | ADR-0010 Dec 3, [CodeMender Runner REQ-0006](../tech/systems/codemender-runner/spec.md#req-0006), ADR-0003, SPEC-WORKER | `launcher.local.LocalDockerLauncher` |
+| **REQ-0009** | Concrete Cloud Backend (`CloudRunLauncher`) | ADR-0010 Dec 3, [CodeMender Runner REQ-0002](../tech/systems/codemender-runner/spec.md#req-0002), [REQ-0006](../tech/systems/codemender-runner/spec.md#req-0006), SPEC-ARTIFACT-CACHE | `launcher.cloudrun.CloudRunLauncher` |
+| **REQ-0010** | Context Management & Lifecycle (`stop`) | [CodeMender Runner Design](../tech/systems/codemender-runner/design.md), ADR-0002 | `Launcher.__enter__`, `__exit__`, `stop` |

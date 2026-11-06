@@ -17,7 +17,8 @@ data "google_project" "project" {
   depends_on = [google_project_service.enabled_services["cloudresourcemanager.googleapis.com"]]
 }
 
-# Governing: SPEC-ARTIFACT-CACHE/REQ-0005, ADR-0005, ADR-0009
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0002
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0005, ADR-0005
 # GCS Bucket for HTML & Partition Scan Reports and ArtifactCache Transit
 resource "google_storage_bucket" "reports" {
   name                        = var.reports_bucket_name != "" ? var.reports_bucket_name : "${var.resource_prefix}-reports-${var.project_id}"

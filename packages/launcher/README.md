@@ -4,7 +4,7 @@
 
 `packages/launcher` provides the sandbox execution backends and artifact transit
 storage abstractions that decouple CI orchestration from container execution
-([ADR-0009](../../docs/adr/ADR-0009-abstraction-layers-and-dependency-injection.md)):
+([CodeMender Runner System Design](../../docs/openspec/specs/tech/systems/codemender-runner/design.md)):
 
 - **`launcher.base` (`Launcher`):** Abstract interface for executing `find-diff`,
   `fix`, and `verify` stages against an isolated sandbox backend.
@@ -45,6 +45,6 @@ pytest packages/launcher
 - [ADR-0005: Multi-Platform Transit
   Storage](../../docs/adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
   — Multi-platform transit storage and isolation.
-- [ADR-0009: Abstraction Layers &
-  DI](../../docs/adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
-  — Abstraction layers, orchestration ownership, and dependency injection.
+- [CodeMender Runner System
+  Design](../../docs/openspec/specs/tech/systems/codemender-runner/design.md)
+  — Abstraction layers, dependency injection seams, and asynchronous workflows.

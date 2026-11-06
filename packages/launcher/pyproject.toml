@@ -1,4 +1,6 @@
-# Governing: ADR-0008, ADR-0009, SPEC-GHA/REQ-0004, SPEC-ARTIFACT-CACHE/REQ-0003
+# Governing: ADR-0008, SPEC-GHA/REQ-0004, SPEC-ARTIFACT-CACHE/REQ-0003
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0001
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0002
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"

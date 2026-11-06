@@ -13,8 +13,8 @@ control-plane entrypoints that connect pull/merge requests to sandboxed
   ([ADR-0006](../../docs/adr/ADR-0006-pr-remediation-routing-and-security-gate.md)),
   and on-demand `@cm-runner verify` review comment workflows.
 - **`repohost.base`, `repohost.models`, `repohost.testing` (`RepoHost`, `InMemoryRepoHost`):**
-  Defines the [ADR-0009](../../docs/adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
-  abstraction boundary, domain models (`ChangeContext`, `SuggestedEdit`,
+  Defines the [CodeMender Runner System Design](../../docs/openspec/specs/tech/systems/codemender-runner/design.md)
+  `RepoHost` abstraction boundary, domain models (`ChangeContext`, `SuggestedEdit`,
   `SecurityGate`), and hermetic test fake, keeping VCS credentials (`GITHUB_TOKEN`,
   PR comments, and workflow artifacts) out of `packages/launcher` containers.
 - **`repohost.gitlab` *(In Development)*:** Package namespace for GitLab CI merge
@@ -49,6 +49,6 @@ pytest packages/repohost
 - [ADR-0006: PR Remediation
   Routing](../../docs/adr/ADR-0006-pr-remediation-routing-and-security-gate.md)
   — Pull request remediation routing and security gate.
-- [ADR-0009: Abstraction Layers &
-  DI](../../docs/adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
-  — Abstraction layers, orchestration ownership, and dependency injection.
+- [CodeMender Runner System
+  Design](../../docs/openspec/specs/tech/systems/codemender-runner/design.md)
+  — Abstraction layers, dependency injection seams, and per-host CLI wiring.

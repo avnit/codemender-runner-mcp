@@ -15,7 +15,7 @@ sdd_cujspec_product: codemender-runner
 
 ## Context
 
-`cm-gitlab` (`packages/repohost/src/repohost/gitlab/`, packaged in `docker/gitlab.Dockerfile` and invoked by `templates/codemender.yml`) is the GitLab composition root from [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md). This design extends [SPEC-GHA](../github-actions/design.md) and [SPEC-GHA-FIX](../github-actions-fix/design.md) and records only the GitLab-specific decisions driven by two platform constraints:
+`cm-gitlab` (`packages/repohost/src/repohost/gitlab/`, packaged in `docker/gitlab.Dockerfile` and invoked by `templates/codemender.yml`) is the GitLab composition root from the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md). This design extends [SPEC-GHA](../github-actions/design.md) and [SPEC-GHA-FIX](../github-actions-fix/design.md) and records only the GitLab-specific decisions driven by two platform constraints:
 
 1. GitLab's `script:` runs inside the job container without a Docker daemon, so an on-runner sandbox requires a privileged runner.
 1. GitLab Runner injects `CI_JOB_TOKEN`, CI/CD variables, and `id_tokens:` into the job environment and embeds `CI_JOB_TOKEN` in `.git/config`.
@@ -26,11 +26,11 @@ sdd_cujspec_product: codemender-runner
 
 - **Reused Unchanged:**
   - `packages/codemender` (`cm-runner`, SARIF splitting/fingerprinting) and `docker/runner.Dockerfile` (`cm-worker` Cloud Run Job container).
-  - `GcsArtifactCache` and `Launcher.find()` in `packages/launcher` ([ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md), [SPEC-GHA](../github-actions/design.md)).
+  - `GcsArtifactCache` and `Launcher.find()` in `packages/launcher` ([CodeMender Runner System Design](../tech/systems/codemender-runner/design.md), [SPEC-GHA](../github-actions/design.md)).
   - `terraform/modules/gcp` provisioning the shared Cloud Run Job, runtime service account, and GCS transit bucket ([SPEC-WIF](../wif/design.md)).
 - **Overridden in `packages/launcher`:**
   - `CloudRunLauncher`: argument-only `ContainerOverride` (`--cache-uri`, `--task-id`, task-bounded timeout) with zero host environment variables and deadline/`SIGTERM` execution cancellation ([Decision 3](#decision-3)).
-  - `Launcher.ensure_repo_snapshot()`: allowlist format-only `.git/config` (replacing `ADR-0009`'s denylist credential stripping), base-commit-only reduced `.codemender.yaml`, symlink filtering, and minimal allowlisted `git` environment ([Decision 3](#decision-3)).
+  - `Launcher.ensure_repo_snapshot()`: allowlist format-only `.git/config` (replacing legacy denylist credential stripping), base-commit-only reduced `.codemender.yaml`, symlink filtering, and minimal allowlisted `git` environment ([Decision 3](#decision-3)).
 - **Brand New:**
   - `packages/repohost/src/repohost/gitlab/`: `cm-gitlab` CLI entrypoint, `GitLabRepoHost` REST adapter (MR notes, bot authorship verification, `/` and `@` neutralization), in-process WIF `external_account` ADC builder, merged-results checkout/fetch helper, and `latest-scan.json` pointer writer.
   - `docker/gitlab.Dockerfile` (slim Python + `git` job image, no `cm`) and `templates/codemender.yml` (`codemender-scan` job).
@@ -52,14 +52,14 @@ sdd_cujspec_product: codemender-runner
 
 ### Decision 3: Merged-Results Checkout & Allowlist Snapshot/Override Hygiene {#decision-3}
 
-- **Overrides:** [SPEC-GHA-FIX Decision 4](../github-actions-fix/design.md#decision-4) and [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md) Decision 2 & §4's denylist `.git/config` stripping (`REQ-0003`, `REQ-0006`).
+- **Overrides:** [SPEC-GHA-FIX Decision 4](../github-actions-fix/design.md#decision-4)'s denylist `.git/config` stripping (`REQ-0003`, `REQ-0006`), aligned with [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) Decision 2 & Runtime Contracts.
 - **Choice:** `cm-gitlab find` checks out `CI_MERGE_REQUEST_SOURCE_BRANCH_SHA` when GitLab Runner checked out a merged-results commit (fetching missing commits with `CI_JOB_TOKEN` as a transient header and trusting `CI_SERVER_TLS_CA_FILE`), delegates `shared/code.tar.gz` packaging to shared `Launcher.ensure_repo_snapshot()` (with a freshly written format-only `.git/config`, filtered symlinks, and only the **base** commit's reduced `.codemender.yaml`, omitting `.codemender/`), runs `git` with a minimal allowlisted environment, and dispatches Cloud Run tasks with `--cache-uri`, `--task-id`, and a task-bounded timeout only (zero environment variables).
 - **Alternatives Considered:**
   - *Strip known-dangerous `.git/config` and `.codemender.yaml` keys:* Misses unlisted git execution hooks (such as `diff.<driver>.textconv` on `cm`'s `git diff`) or `.codemender/command_policy.yaml` overrides, and reading `.codemender.yaml` from the MR head would let an MR weaken its own scan or build settings.
 
 ### Decision 4: Reporter Bot Token & MR Approval Policies {#decision-4}
 
-- **Overrides:** [SPEC-GHA](../github-actions/design.md)'s `GITHUB_TOKEN`, [ADR-0006](../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md), and [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md) §4's `GitLabRepoHost` commit status gate (`REQ-0007`).
+- **Overrides:** [SPEC-GHA](../github-actions/design.md)'s `GITHUB_TOKEN`, [ADR-0006](../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md), and the default `GitLabRepoHost` commit status gate in the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) (`REQ-0007`).
 - **Choice:** `cm-gitlab` posts MR notes with an optional non-Protected, Masked-and-hidden Reporter token (`CODEMENDER_GITLAB_TOKEN`), verifies note authorship on updates, and neutralizes `/` quick actions and `@` mentions.
 - **Rationale:** `CI_JOB_TOKEN` cannot write MR notes and Protected variables do not reach feature-branch MR pipelines; Reporter limits any leak within the project to reading and commenting. Because Reporter cannot set commit statuses and GitLab ingests `reports: sarif:` only from passing jobs, `codemender-scan` exits `0` whenever `find` stages valid SARIF and relies on GitLab MR approval policies to gate merges.
 

@@ -30,14 +30,14 @@ sdd_cujspec_product: codemender-runner
 
 - **Reused Unchanged:**
   - Differential scanning contract and SARIF 2.1.0 output ([SPEC-FIND-DIFF](../find-diff/spec.md)).
-  - Cloud Run `cm-worker` task/manifest/receipt contract and transit cache layout ([SPEC-GHA REQ-0003, REQ-0008](../github-actions/spec.md#req-0003), [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md), [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)).
+  - Cloud Run `cm-worker` task/manifest/receipt contract and transit cache layout ([SPEC-GHA REQ-0003, REQ-0008](../github-actions/spec.md#req-0003), [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md), [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)).
   - Host-token isolation boundary ([SPEC-GHA REQ-0006](../github-actions/spec.md#req-0006), [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md), [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md)).
   - SARIF splitting, `finding_id` fingerprinting, and sticky summary table structure/fencing ([SPEC-GHA-FIX REQ-0004, REQ-0008.2, REQ-0009.1](../github-actions-fix/spec.md#req-0004)).
   - Shared Cloud Run Job, GCS transit bucket, and Cloud Run caller IAM roles ([SPEC-WIF REQ-0004](../wif/spec.md#req-0004)).
-- **Overridden from `SPEC-GHA` / `SPEC-GHA-FIX` / `ADR-0009`:**
+- **Overridden from `SPEC-GHA` / `SPEC-GHA-FIX` / [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md):**
   - Cloud Run-only execution (`local` backend removed) and hardened task overrides: `--cache-uri` and `--task-id` arguments plus a task-bounded timeout only, zero host env vars, no `CODEMENDER_SANDBOX_*` override, and deadline/`SIGTERM` cancellation (`exit_code=124`) (`REQ-0001`–`REQ-0004`).
-  - Allowlist snapshot and runner `git` hygiene: fresh format-only `.git/config` (replacing `ADR-0009`'s denylist credential stripping), base-commit-only reduced `.codemender.yaml`, symlink filtering, and minimal allowlisted `git` environment (`REQ-0006.2`).
-  - Passing-job SARIF ingestion exit code (`0` iff `find` stages valid `report.sarif`, gated by GitLab MR approval policies rather than [ADR-0006](../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md) / [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)'s commit status) (`REQ-0007.1`).
+  - Allowlist snapshot and runner `git` hygiene: fresh format-only `.git/config` (replacing legacy denylist credential stripping), base-commit-only reduced `.codemender.yaml`, symlink filtering, and minimal allowlisted `git` environment (`REQ-0006.2`).
+  - Passing-job SARIF ingestion exit code (`0` iff `find` stages valid `report.sarif`, gated by GitLab MR approval policies rather than [ADR-0006](../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md) / [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)'s default commit status) (`REQ-0007.1`).
 - **Brand New for GitLab CI:**
   - `cm-gitlab` CLI (`find`, `verify`), `docker/gitlab.Dockerfile`, and `templates/codemender.yml` (`REQ-0001`, `REQ-0004`, `REQ-0008.3`).
   - In-process WIF exchange of `GCP_OIDC_TOKEN` (`id_tokens:`) to impersonate `GCP_SERVICE_ACCOUNT` (`REQ-0005`).
@@ -69,7 +69,7 @@ sdd_cujspec_product: codemender-runner
 
 - **CUJ UUID:** `cuj-gitlab-cloudrun-launcher`
 
-**Overrides [SPEC-GHA REQ-0003](../github-actions/spec.md#req-0003) and [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md) Decision 2:** `cm-gitlab` MUST dispatch every task as a Cloud Run Job execution whose override passes only `--cache-uri` and `--task-id` arguments and a task-bounded timeout, with zero environment variables from the GitLab job (`log_level` travels in `manifest.json`, `CODEMENDER_SANDBOX_*` MUST NOT be set or overridden, and GitLab/OIDC/WIF credentials MUST NOT be sent to Cloud Run). All task I/O MUST stay under the scan's GCS prefix (REQ-0008.1), and `cm-gitlab` MUST cancel running executions at the compute deadline (REQ-0008.2) or on `SIGTERM`/`SIGINT`, recording them as timed out (`exit_code=124`).
+**Overrides [SPEC-GHA REQ-0003](../github-actions/spec.md#req-0003) and [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) Decision 2:** `cm-gitlab` MUST dispatch every task as a Cloud Run Job execution whose override passes only `--cache-uri` and `--task-id` arguments and a task-bounded timeout, with zero environment variables from the GitLab job (`log_level` travels in `manifest.json`, `CODEMENDER_SANDBOX_*` MUST NOT be set or overridden, and GitLab/OIDC/WIF credentials MUST NOT be sent to Cloud Run). All task I/O MUST stay under the scan's GCS prefix (REQ-0008.1), and `cm-gitlab` MUST cancel running executions at the compute deadline (REQ-0008.2) or on `SIGTERM`/`SIGINT`, recording them as timed out (`exit_code=124`).
 
 #### Scenario: Dispatching tasks with argument-only overrides
 
@@ -99,7 +99,7 @@ sdd_cujspec_product: codemender-runner
 
 - **CUJ UUID:** `cuj-gitlab-security-boundary`
 
-**Overrides [SPEC-GHA REQ-0006](../github-actions/spec.md#req-0006), [SPEC-GHA-FIX REQ-0002](../github-actions-fix/spec.md#req-0002), and [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md) §4 (`shared/code.tar.gz`):**
+**Overrides [SPEC-GHA REQ-0006](../github-actions/spec.md#req-0006) and [SPEC-GHA-FIX REQ-0002](../github-actions-fix/spec.md#req-0002) (aligned with [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) `shared/code.tar.gz`):**
 
 1. **Merged-results checkout, diff range & custom CA:** The source head MUST be `CI_MERGE_REQUEST_SOURCE_BRANCH_SHA` when set (else `CI_COMMIT_SHA`), and the base MUST be `CI_MERGE_REQUEST_DIFF_BASE_SHA` (exiting `1` if unset, never `HEAD~1`). When GitLab Runner checks out a merged-results commit (`CI_COMMIT_SHA != head`), `cm-gitlab find` MUST check out `head` before building `shared/code.tar.gz`. With a shallow clone (`GIT_DEPTH`), it MUST fetch missing head/base commits using `CI_JOB_TOKEN` as a transient HTTP header (exiting `1` saying to raise `GIT_DEPTH` if still unresolved), and MUST honor `HTTPS_PROXY`/`NO_PROXY` and `CI_SERVER_TLS_CA_FILE` (`GIT_SSL_CAINFO`) on `git fetch` and GitLab/Google API calls.
 1. **Allowlist snapshot & `git` hygiene:** `shared/code.tar.gz` MUST replace `.git/config` with a freshly written format-only config (omitting `.git/config.worktree`, `.git/FETCH_HEAD`, `.git/hooks`, `.cm_project`, `.exploit`, and `.codemender/`), keep in-repo relative symlinks as links while omitting out-of-repo symlinks (never following symlinks), and include at most the **base** commit's root `.codemender.yaml` (`codemender.yaml`, `.codemender.yml`, `codemender.yml`) reduced to `scan`, `build`, and in-repo `project_paths` (exiting `1` before uploading on multiple, symlinked, or unparseable configs, submodules, or partial clones). Host-side `git` MUST run with only `PATH`, `HOME`, `LANG=C.UTF-8`, `GIT_TERMINAL_PROMPT=0`, `GIT_CONFIG_NOSYSTEM=1`, and `GIT_CONFIG_GLOBAL=/dev/null` (plus the transient `git fetch` settings above), never passing GitLab or OIDC tokens in any subprocess environment.
@@ -114,7 +114,7 @@ sdd_cujspec_product: codemender-runner
 
 - **CUJ UUID:** `cuj-gitlab-reporting`
 
-**Overrides [SPEC-GHA REQ-0005](../github-actions/spec.md#req-0005), [SPEC-GHA-FIX REQ-0008.3, REQ-0011](../github-actions-fix/spec.md#req-0008), [ADR-0006](../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md), and [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md) §4 (`GitLabRepoHost` status gate):**
+**Overrides [SPEC-GHA REQ-0005](../github-actions/spec.md#req-0005), [SPEC-GHA-FIX REQ-0008.3, REQ-0011](../github-actions-fix/spec.md#req-0008), [ADR-0006](../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md), and [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) (`GitLabRepoHost` status gate):**
 
 1. **Exit code & merge gating:** Because GitLab ingests `reports: sarif:` only from passing jobs, `codemender-scan` MUST stage `report.sarif`, `report.md`, and `cm-logs/` (at most 100 regular files and 50 MiB) in `$CI_PROJECT_DIR` and exit `0` iff `find` succeeds and stages a valid `report.sarif` (non-empty `runs`), and `1` otherwise. Unlike GitHub Actions, a failed `find` MUST NOT post or update the MR note, fixes/publishing MUST NOT change the exit code, and `cm-gitlab` MUST NOT set a commit status (merges are gated via GitLab MR approval policies).
 1. **Sticky MR note:** When `CODEMENDER_GITLAB_TOKEN` is set, `cm-gitlab find` MUST post or update `<!-- codemender-summary -->`, updating only a note authored by the token's own user, neutralizing `/` quick actions and `@` mentions outside code fences, and truncating at GitLab's 1,000,000-character limit on a line boundary with open fences or `<details>` closed. Note post failures MUST be logged without changing the exit code.

@@ -42,8 +42,8 @@ for `launcher.worker.Worker` and the `cm-worker` console script entrypoint in
 `packages/launcher`.
 
 As established in
-[ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
-(Decision 2 and Section 4), `Launcher` (on the trusted outer CI host) and
+the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
+(Decision 2 and Runtime Contracts), `Launcher` (on the trusted outer CI host) and
 `Worker` (inside the untrusted sandbox container) form the client and server
 halves of a unified container execution protocol. Whether a container is started
 locally under Docker/gVisor (`runsc`) or remotely on Google Cloud Run Jobs or
@@ -60,8 +60,8 @@ Detailed component architecture, data models (`RunManifest` and
 in [design.md](design.md).
 
 This specification is governed by and references:
-- [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
-  (Decision 2 and Section 4): Unified `Worker` (`cm-worker`) 4-step execution
+- [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
+  (Decision 2 and Runtime Contracts): Unified `Worker` (`cm-worker`) 4-step execution
   protocol, `ArtifactCache` dependency injection, and Two-Way Door container
   invariants.
 - [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md):
@@ -165,7 +165,7 @@ dependencies.
 
 To preserve the security and packaging invariants of
 [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md) and
-[ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
+the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
 (Decision 2):
 1. `Worker` MUST perform all transit reads and writes exclusively through the
    injected `ArtifactCache` protocol interface (`SPEC-ARTIFACT-CACHE`:

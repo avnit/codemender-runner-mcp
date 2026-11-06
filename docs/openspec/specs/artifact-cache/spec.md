@@ -46,8 +46,8 @@ hierarchy, and GCS transit bucket lifecycle/IAM configuration for
 `packages/launcher/src/launcher/cache/` (`launcher.cache`).
 
 As established in
-[ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
-(Decision 2 and Section 4) and
+the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
+(Decision 2 and Runtime Contracts) and
 [SPEC-WORKER (PR #73)](https://github.com/cloud-gtm/codemender-runner/pull/73), the outer
 host `Launcher` client (`LocalDockerLauncher` / `CloudRunLauncher`) and the
 inside-container `Worker` server (`cm-worker`) communicate exclusively through
@@ -81,7 +81,7 @@ This specification is governed by and references:
 - [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
 - [ADR-0007: Cloud Run Job Invocation Interface: CLI vs. Python Library](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)
 - [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
-- [ADR-0009: Abstraction Layers, Dependency Injection, and Asynchronous Workflows](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
+- [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
 
 ## Requirements
 

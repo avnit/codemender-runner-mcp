@@ -16,7 +16,7 @@ freshness: { owner: 'codemender-maintainers', reviewed: '2026-11-03' }
 ## Context
 
 Governed by [SPEC-LAUNCHER](spec.md),
-[ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md),
+[CodeMender Runner System Design](../tech/systems/codemender-runner/design.md),
 [ADR-0010](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md),
 [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
 [ADR-0007](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md),
@@ -28,7 +28,7 @@ management for `packages/launcher/src/launcher/`.
 
 High-level architectural decisions, including the three dependency injection seams,
 phased CI execution model ($M \times K$ concurrency), container image packaging,
-and transit storage layout, are established in [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
+and transit storage layout, are established in the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
 and [ADR-0010](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md).
 This document specifies the concrete implementation details and edge-case contracts
 governing the `Launcher` component.
@@ -55,7 +55,7 @@ governing the `Launcher` component.
 
 ### Non-Goals
 
-- Re-evaluating overarching architectural trade-offs established in [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md).
+- Re-evaluating overarching architectural trade-offs established in the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md).
 - Implementing container-internal worker execution (governed by [SPEC-WORKER](../worker/spec.md)).
 - Implementing underlying storage drivers (governed by [SPEC-ARTIFACT-CACHE](../artifact-cache/spec.md)).
 - Long-term findings database persistence (deferred to future `packages/store`).
@@ -65,7 +65,7 @@ governing the `Launcher` component.
 ## Component Architecture & Class Design
 
 `Launcher` serves as the host-side client in the acyclic dependency structure
-governed by ADR-0009 Decision 1 (`Launcher --> ArtifactCache <-- Worker`):
+governed by [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) Decision 1 (`Launcher --> ArtifactCache <-- Worker`):
 
 ```mermaid
 classDiagram
@@ -465,8 +465,8 @@ sequenceDiagram
 
 ## Legacy API Migration & Deprecation Delta
 
-To transition from the pre-ADR-0009 direct-execution launcher to the unified
-worker-based architecture, the legacy methods and models are replaced as follows:
+To transition from the legacy direct-execution launcher to the unified
+worker-based architecture in the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md), the legacy methods and models are replaced as follows:
 
 | Legacy Member | Status | Replacement in SPEC-LAUNCHER | Rationale |
 | :--- | :--- | :--- | :--- |

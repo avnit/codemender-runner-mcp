@@ -24,12 +24,12 @@ sdd_cujspec_product: codemender-runner
 
 ## Overview
 
-This specification extends [SPEC-GHA-FIX](../github-actions-fix/spec.md), [SPEC-GITLAB-CI](../gitlab-ci/spec.md), [SPEC-FIX](../fix/spec.md), and [SPEC-VERIFY](../verify/spec.md) under [ADR-0006](../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md) and [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md) Phase 1.
+This specification extends [SPEC-GHA-FIX](../github-actions-fix/spec.md), [SPEC-GITLAB-CI](../gitlab-ci/spec.md), [SPEC-FIX](../fix/spec.md), and [SPEC-VERIFY](../verify/spec.md) under [ADR-0006](../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md) and [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) Phase 1.
 
 ### Reused vs. New
 
 - **Reused Unchanged:**
-  - Single-finding `fix` and `verify` contracts ([SPEC-FIX](../fix/spec.md), [SPEC-VERIFY](../verify/spec.md)) and Phase 1 bounded-parallel orchestration ([ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)).
+  - Single-finding `fix` and `verify` contracts ([SPEC-FIX](../fix/spec.md), [SPEC-VERIFY](../verify/spec.md)) and Phase 1 bounded-parallel orchestration ([CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)).
   - Per-finding SARIF splitting (`REQ-0004`), 35-minute per-fix timeout and `fixed`/`no_fix`/`failed` classification (`REQ-0003`, `REQ-0005`), progressive sticky `Fix` column states (`REQ-0006`), whole-patch suggestion eligibility (`REQ-0007`), collapsible patch comment layout and dynamic backtick fencing (`REQ-0008.1–2`), `finding_id` deduplication (`REQ-0009`), overlapping-line warning text (`REQ-0010`), and README topics (`REQ-0012`) from [SPEC-GHA-FIX](../github-actions-fix/spec.md), mapped as:
 
 | `SPEC-GHA-FIX` Concept | GitLab CI Equivalent |

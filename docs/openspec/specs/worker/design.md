@@ -25,8 +25,8 @@ duplicated manifest/receipt handling.
 
 Governed by [SPEC-WORKER](spec.md),
 [SPEC-0003](../runner-container-packaging/spec.md),
-[ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
-(Decision 2 and Section 4),
+the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
+(Decision 2 and Runtime Contracts),
 [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
 [ADR-0007](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md),
 [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md),
@@ -363,8 +363,8 @@ communication architecture defined in
 and
 [Proposal: cloudrun-job-bootstrapper](../../proposals/cloudrun-job-bootstrapper/proposal.md),
 as refined in
-[ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
-Section 4:
+the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
+Runtime Contracts:
 
 1. **`Launcher` Owns Host-Side Phases 1, 2, & 5 (Staging, Dispatch, and
    Retrieval):** `Launcher` resolves the multi-tenant, commit-scoped cache root
@@ -401,12 +401,12 @@ Section 4:
      `gcloud`/`gsutil` CLI fallbacks) is superseded by `launcher.worker`
      (`cm-worker`), `/tmp/work/{repo,inputs,out}`, and `ArtifactCache` over
      `fsspec`.
-   - **Verification Output Extension (`ADR-0009` Section 4):** Per
+   - **Verification Output Extension ([CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)):** Per
      [SPEC-VERIFY](../verify/spec.md) (`REQ-0006`), `cm-runner verify` writes
      `<finding-stem>.sarif` (e.g.,
      `tasks/verify-finding-001/output/finding-001.sarif` mapped to
-     `receipt.artifacts["sarif"]`), superseding the `.diff` typo in the example
-     directory tree of `ADR-0009` Section 4.
+     `receipt.artifacts["sarif"]`), matching the Runtime Contracts directory tree
+     in the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md).
 
 ## Data Models & JSON Schemas
 

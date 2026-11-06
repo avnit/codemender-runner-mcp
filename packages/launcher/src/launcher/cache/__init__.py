@@ -12,7 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0007, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0003, SPEC-ARTIFACT-CACHE/REQ-0004, SPEC-ARTIFACT-CACHE/REQ-0006, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0004, SPEC-WORKER/REQ-0006
+# Governing: ADR-0007, SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0003, SPEC-ARTIFACT-CACHE/REQ-0004, SPEC-ARTIFACT-CACHE/REQ-0006, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0004, SPEC-WORKER/REQ-0006
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0002
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0006
 """ArtifactCache public interface, factory, wire models, and archive helpers."""
 
 from __future__ import annotations
@@ -56,11 +59,13 @@ if TYPE_CHECKING:
   from launcher.cache.gcs import GcsArtifactCache
 
 
-# Governing: SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0003, ADR-0009
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0003
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0002
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0006
 def open_artifact_cache(uri: str | Path, **kwargs: Any) -> ArtifactCache:
   """Opens a `LocalArtifactCache` or `GcsArtifactCache` based on URI scheme.
 
-  Enforces ADR-0009's Two-Way Door lazy-import invariant: `GcsArtifactCache`
+  Enforces the CodeMender Runner System Design Two-Way Door lazy-import invariant: `GcsArtifactCache`
   (and `gcsfs`) is imported only when `uri` uses the `'gs://'` scheme.
 
   Args:
@@ -113,7 +118,7 @@ def open_artifact_cache(uri: str | Path, **kwargs: Any) -> ArtifactCache:
 def __getattr__(name: str) -> Any:
   """Lazily resolves `GcsArtifactCache` on `launcher.cache` (PEP 562).
 
-  Per ADR-0009's Two-Way Door invariant, importing `launcher.cache` or opening
+  Per the CodeMender Runner System Design Two-Way Door invariant, importing `launcher.cache` or opening
   a local `file://` cache must never import `gcsfs` or Google Cloud libraries
   (which live in the optional `codemender-launcher[cloudrun]` extra). Module
   `__getattr__` defers importing `launcher.cache.gcs` until a caller explicitly

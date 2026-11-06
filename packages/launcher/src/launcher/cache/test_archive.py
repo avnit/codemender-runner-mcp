@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: SPEC-WORKER/REQ-0004, SPEC-FIND-DIFF/REQ-0002, ADR-0005, ADR-0009
+# Governing: SPEC-WORKER/REQ-0004, SPEC-FIND-DIFF/REQ-0002, ADR-0005
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0005
 """Unit tests for safe archive extraction and nested directory flattening."""
 
 import io

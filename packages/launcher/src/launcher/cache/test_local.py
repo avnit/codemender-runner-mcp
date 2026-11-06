@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0005, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002
+# Governing: ADR-0005, SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0006
 """Unit and concurrency tests for launcher.cache.local (LocalArtifactCache)."""
 
 from __future__ import annotations

@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0005, ADR-0009, SPEC-WORKER/REQ-0004, SPEC-FIND-DIFF/REQ-0002
+# Governing: ADR-0005, SPEC-WORKER/REQ-0004, SPEC-FIND-DIFF/REQ-0002
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0005
 """Safe repository archive extraction and flattening helpers for ArtifactCache."""
 
 from collections.abc import Sequence
@@ -286,7 +287,8 @@ def _extract_validated_members(
       dir_path.chmod(mode)
 
 
-# Governing: SPEC-WORKER/REQ-0004, ADR-0005, ADR-0009
+# Governing: SPEC-WORKER/REQ-0004, ADR-0005
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0005
 def unpack_tar_gz_preserving_permissions(
     archive_path: Path, dest_dir: Path
 ) -> None:

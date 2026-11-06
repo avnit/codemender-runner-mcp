@@ -29,7 +29,7 @@ freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-22' }
   - [Proposal: VCS to Cloud Run Communication Architecture (`vcs-cloudrun-comms`)](../../proposals/vcs-cloudrun-comms/proposal.md)
   - [Proposal: Cloud Run Jobs Container Bootstrapper (`cloudrun-job-bootstrapper`)](../../proposals/cloudrun-job-bootstrapper/proposal.md)
 - **Governing ADRs:**
-  - [ADR-0009: Abstraction Layers, Dependency Injection, and Asynchronous Workflows](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)
+  - [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
   - [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
   - [ADR-0007: Cloud Run Job Invocation Interface: CLI vs. Python Library](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)
   - [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
@@ -39,7 +39,7 @@ freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-22' }
 
 ## 1. Context & Problem Statement
 
-Per [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md) and [SPEC-WORKER (PR #73)](https://github.com/cloud-gtm/codemender-runner/pull/73), `Launcher` (on the trusted outer CI host) and `Worker` (`cm-worker`, inside the untrusted sandbox container) form the client and server halves of a unified container execution protocol. Because this protocol is 100% file/object-based over `ArtifactCache`, a single universal worker container image (`docker/runner.Dockerfile` with `ENTRYPOINT ["cm-worker"]`) executes identically across local Docker/gVisor (`file://`), Google Cloud Run Jobs (`gs://`), and Google Kubernetes Engine / GKE (`gs://`), while standalone local runs outside CI/CD can still invoke `cm-runner` directly by overriding `--entrypoint cm-runner`. Both components live in `packages/launcher` and communicate exclusively through `ArtifactCache` (`packages/launcher/src/launcher/cache/`) in an acyclic hub-and-spoke dependency graph:
+Per the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) and [SPEC-WORKER (PR #73)](https://github.com/cloud-gtm/codemender-runner/pull/73), `Launcher` (on the trusted outer CI host) and `Worker` (`cm-worker`, inside the untrusted sandbox container) form the client and server halves of a unified container execution protocol. Because this protocol is 100% file/object-based over `ArtifactCache`, a single universal worker container image (`docker/runner.Dockerfile` with `ENTRYPOINT ["cm-worker"]`) executes identically across local Docker/gVisor (`file://`), Google Cloud Run Jobs (`gs://`), and Google Kubernetes Engine / GKE (`gs://`), while standalone local runs outside CI/CD can still invoke `cm-runner` directly by overriding `--entrypoint cm-runner`. Both components live in `packages/launcher` and communicate exclusively through `ArtifactCache` (`packages/launcher/src/launcher/cache/`) in an acyclic hub-and-spoke dependency graph:
 
 ```text
 Launcher (host client)  -->  ArtifactCache (launcher.cache)  <--  Worker (cm-worker server)
@@ -50,7 +50,7 @@ Rather than introducing a separate protocol wrapper above `ArtifactCache`, the s
 1. **Storage Transport & Atomic File I/O Layer (Powered by `fsspec`):**
    - Wraps [`fsspec`](https://filesystem-spec.readthedocs.io/) (`filesystem-spec`) to support local disk (`file://` via built-in `LocalFileSystem`), Google Cloud Storage (`gs://` via plugin `gcsfs.GCSFileSystem`), and hermetic in-memory testing (`memory://` via built-in `MemoryFileSystem`), with straightforward extensibility to `s3://` or `az://`.
    - Guarantees **atomic reads and writes** across all operations (`get_file`, `put_file`, `get_bytes`, `put_bytes`, `get_json`, `put_json`) so neither `Launcher` nor `Worker` ever observes a half-written manifest, truncated repository archive, or partial receipt.
-   - Enforces [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md)'s **Two-Way Door lazy-import invariant**: local `file://` executions never import `gcsfs` or `google.cloud`.
+   - Enforces the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) **Two-Way Door lazy-import invariant**: local `file://` executions never import `gcsfs` or `google.cloud`.
 2. **Typed Client–Worker Communication Protocol (`vcs-cloudrun-comms` Domain Layer):**
    - Owns the wire schemas (`RunManifest`, `ExecutionReceipt`), `<cache_root>` URI & branch-sanitization helpers (`sanitize_branch_name`, `build_gcs_cache_uri`), and encapsulates the conflict-free relative directory layout (`shared/code.tar.gz`, `findings/<finding_id>.sarif`, `tasks/<task_id>/input/manifest.json`, `tasks/<task_id>/output/{receipt.json, runner.log, ...}`).
    - Exposes all typed domain methods required by `Worker` and `Launcher` (`get_manifest`, `put_manifest`, `get_repo_archive`, `put_repo_archive`, `get_finding`, `put_finding`, `get_task_output`, `put_task_output`, `get_receipt`, `put_receipt`) alongside the low-level primitives (`get_json`, `put_json`, `get_file`, `put_file`, `get_bytes`, `put_bytes`).
@@ -107,8 +107,8 @@ Raw `fsspec.AbstractFileSystem` is an un-chrooted, general-purpose filesystem AP
 ### Non-Goals
 - Migrating existing hardcoded paths in `github-actions/`, `cloud-run-jobs/`, and `codemender-runner/storage.py` (deferred to Phase 2 until `Launcher` and `Worker` implementations land).
 - Long-term cross-run persistence (`ArtifactStore` in
-  `packages/artifactstore`, per ADR-0009 Section 4).
-- Cloud Storage FUSE mounts inside Cloud Run containers (rejected in ADR-0007 and ADR-0009 due to POSIX `stat` latency during compilation and Git operations).
+  `packages/artifactstore`, per the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)).
+- Cloud Storage FUSE mounts inside Cloud Run containers (rejected in ADR-0007 and the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) due to POSIX `stat` latency during compilation and Git operations).
 - Tar-slip inspection or repository extraction (`unpack_tar_gz_preserving_permissions` and `flatten_repo_if_nested` belong to `Worker` in `SPEC-WORKER`, while `ArtifactCache` atomically transfers the raw `shared/code.tar.gz` archive).
 
 ---
@@ -117,7 +117,7 @@ Raw `fsspec.AbstractFileSystem` is an un-chrooted, general-purpose filesystem AP
 
 ### 3.1 Package Layout & Dependencies
 
-Per [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md), [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md), and [SPEC-WORKER (PR #73)](https://github.com/cloud-gtm/codemender-runner/pull/73), `ArtifactCache` lives in `packages/launcher/src/launcher/cache/`:
+Per [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md), the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md), and [SPEC-WORKER (PR #73)](https://github.com/cloud-gtm/codemender-runner/pull/73), `ArtifactCache` lives in `packages/launcher/src/launcher/cache/`:
 
 ```text
 packages/launcher/
@@ -410,7 +410,7 @@ class GcsArtifactCache(ArtifactCache):
 
 ## 4. Data-Plane Protocol & Key Layout (Aligned with [PR #73 / `SPEC-WORKER`](https://github.com/cloud-gtm/codemender-runner/pull/73))
 
-Per [SPEC-WORKER (PR #73)](https://github.com/cloud-gtm/codemender-runner/pull/73) and [ADR-0009](../../../adr/ADR-0009-abstraction-layers-and-dependency-injection.md) (Decision 2 & Section 4), `Launcher` handles the container **control plane** while `ArtifactCache` handles the **data plane** across all 5 phases of [Proposal: `vcs-cloudrun-comms`](../../proposals/vcs-cloudrun-comms/proposal.md).
+Per [SPEC-WORKER (PR #73)](https://github.com/cloud-gtm/codemender-runner/pull/73) and the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) (Decision 2 & Runtime Contracts), `Launcher` handles the container **control plane** while `ArtifactCache` handles the **data plane** across all 5 phases of [Proposal: `vcs-cloudrun-comms`](../../proposals/vcs-cloudrun-comms/proposal.md).
 
 ### 4.1 Encapsulated `<cache_root>` Key Layout & Multi-Tenant URI Scoping
 

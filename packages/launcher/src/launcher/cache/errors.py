@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0001, ADR-0009, SPEC-ARTIFACT-CACHE/REQ-0004, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0006
+# Governing: ADR-0001, SPEC-ARTIFACT-CACHE/REQ-0004, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0006
+# Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0006
 """Typed exception hierarchy and fsspec error translation for ArtifactCache."""
 
 from __future__ import annotations
