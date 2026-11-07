@@ -86,10 +86,13 @@ jobs:
         if: github.event_name != 'pull_request'
         env:
           CUSTOM_IMAGE: ${{ vars.CODEMENDER_RUNNER_IMAGE }}
-          OWNER: ${{ github.repository_owner }}
+          # Publish to ghcr.io/<owner>/<repo>: the package this repository's
+          # GITHUB_TOKEN can create and write, and the default image the
+          # codemender-local action pulls (ghcr.io/<action-or-workflow-repo>:latest).
+          REPOSITORY: ${{ github.repository }}
           SHA: ${{ github.sha }}
         run: |
-          DEFAULT_REPO="ghcr.io/${OWNER,,}/codemender-runner"
+          DEFAULT_REPO="ghcr.io/${REPOSITORY,,}"
           TARGET_IMAGE="${CUSTOM_IMAGE:-${DEFAULT_REPO}:latest}"
           if [[ "${TARGET_IMAGE}" == ghcr.io/* ]]; then
             repo_part="${TARGET_IMAGE%:*}"
