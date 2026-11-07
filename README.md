@@ -221,6 +221,46 @@ bq query --use_legacy_sql=false \
    FROM `my-project.codemender.findings` ORDER BY created_at DESC LIMIT 20'
 ```
 
+#### Scan any repository from GitHub Actions → BigQuery + GitHub issues
+
+The [`CodeMender Repo Scan`](.github/workflows/cm-repo-scan.yml) workflow
+(manual `workflow_dispatch`) takes a repository to clone and scan, plus the
+repository that should receive the issues. It calls `cm_find` on the deployed
+MCP server, which clones the repo, runs a full `cm find` in a new Cloud Run Job
+execution and stores every finding in BigQuery. The workflow waits for the scan
+and then opens one GitHub issue per finding, labelled `codemender` and
+`severity:<level>`. Each issue carries a hidden fingerprint, so re-scans never
+duplicate an issue that already exists, open or closed.
+
+One-time setup in the repository that runs the workflow (*Settings → Secrets and
+variables → Actions*):
+
+| Name | Kind | Value |
+|---|---|---|
+| `CODEMENDER_MCP_URL` | variable | `terraform -chdir=terraform output -raw mcp_endpoint` |
+| `CODEMENDER_MCP_TOKEN` | secret | `gcloud secrets versions access latest --secret codemender-mcp-auth-token` |
+| `CODEMENDER_ISSUES_TOKEN` | secret | Only when issues go to *another* repo: fine-grained PAT with **Issues: read and write** on it |
+
+```bash
+gh workflow run cm-repo-scan.yml -R avnit/codemender-runner-mcp \
+  -f repo=my-org/my-repo -f issues_repo=my-org/security-tracker -f min_severity=WARNING
+```
+
+| Input | Default | Purpose |
+|---|---|---|
+| `repo` | — (required) | Repository to clone and scan (`owner/repo` or URL). The MCP server's GitHub token must be able to clone it |
+| `issues_repo` | `repo` | Repository the issues are created in |
+| `ref` | default branch | Branch, tag or commit |
+| `min_severity` | `NOTE` | Lowest SARIF level filed as an issue (`NOTE`/`WARNING`/`ERROR`); every finding still goes to BigQuery |
+| `max_issues` | `50` | Cap on new issues per run |
+| `create_issues` / `dry_run` | `true` / `false` | Scan + BigQuery only, or list the issues without creating them |
+| `scan_job_id` | — | Publish an existing scan (e.g. after the 6h runner limit) instead of starting a new one |
+
+The run summary shows the scan job, finding counts by severity and the created
+issue links. The same logic runs locally:
+`python scripts/cm_scan_issues.py --repo owner/repo --dry-run` (with
+`CODEMENDER_MCP_URL` / `CODEMENDER_MCP_TOKEN` / `GITHUB_TOKEN` set).
+
 See [`packages/mcpserver/README.md`](packages/mcpserver/README.md) for the tool
 reference, BigQuery schema, finding lifecycle
 (`OPEN` → `VERIFIED` / `FALSE_POSITIVE` / `INCONCLUSIVE` → `FIXED` → `PATCHED`)
@@ -275,5 +315,6 @@ Looking for standalone component references? Jump directly to:
 | [`docker/mcp.Dockerfile`](docker/mcp.Dockerfile), [`cloudbuild.mcp.yaml`](cloudbuild.mcp.yaml) | MCP server image (pinned Python base, runs as `nonroot`) and its Cloud Build config. |
 | [`terraform/modules/mcp/`](terraform/modules/mcp), [`terraform/mcp.tf`](terraform/mcp.tf) | Opt-in (`enable_mcp_server = true`) Cloud Run service, service account with least-privilege IAM (`run.jobsExecutorWithOverrides` on the runner job only), BigQuery dataset, Secret Manager access. New `mcp_*` variables in [`terraform.tfvars.example`](terraform/terraform.tfvars.example). |
 | [`deploy.sh`](deploy.sh), [`.gcloudignore`](.gcloudignore) | One-command deploy / plan / code update (above). Terraform state, plans and tfvars are never uploaded to Cloud Build. |
+| [`.github/workflows/cm-repo-scan.yml`](.github/workflows/cm-repo-scan.yml), [`scripts/cm_scan_issues.py`](scripts/cm_scan_issues.py) | Manual workflow: scan any repo via the MCP server (findings → BigQuery), then file de-duplicated GitHub issues in a target repo. |
 | [`Makefile`](Makefile) | `build-mcp`, `run-mcp` (local container with your ADC), `deploy-mcp` (Cloud Build + `gcloud run services update`). |
 | CI | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) installs `packages/mcpserver` so its tests run with `make test`. |

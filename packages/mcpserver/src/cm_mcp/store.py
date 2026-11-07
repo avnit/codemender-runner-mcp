@@ -65,7 +65,7 @@ FINDING_SCHEMA: dict[str, str] = {
 
 # Columns returned by list_findings (large blobs omitted).
 FINDING_SUMMARY_COLUMNS = (
-    "finding_id", "scan_job_id", "repo", "commit_sha", "rule_id", "severity",
+    "finding_id", "scan_job_id", "repo", "ref", "commit_sha", "fingerprint", "rule_id", "severity",
     "message", "file_path", "start_line", "end_line", "status",
     "verify_status", "fix_status", "pr_url", "updated_at",
 )
