@@ -61,7 +61,21 @@ WHERE repo = 'acme/widgets' AND status = 'VERIFIED'
                      ORDER BY created_at DESC LIMIT 1);
 ```
 
-## Deploy (Terraform)
+## Deploy
+
+**Recommended:** [`deploy.sh`](../../deploy.sh) at the repo root does all of the
+steps below (APIs, secrets, images, Terraform) in one command:
+
+```bash
+./deploy.sh --plan-only --project my-project --github-owner my-org   # preview
+./deploy.sh --project my-project --github-owner my-org               # deploy
+./deploy.sh --code-only                                              # roll out code changes
+```
+
+See the [root README](../../README.md#quickstart-codemender-mcp-server-on-cloud-run-deploysh)
+for its options.
+
+### Manual (Terraform)
 
 The MCP server is an opt-in addition to the existing Cloud Run setup
 ([`terraform/README.md`](../../terraform/README.md)).
