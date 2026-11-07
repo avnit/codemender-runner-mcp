@@ -52,3 +52,6 @@ override.tf.json
 
 # Local task breakdown file
 tasks.md
+
+# Claude Code local settings and plugin data (may contain sensitive data)
+.claude/

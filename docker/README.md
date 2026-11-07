@@ -81,7 +81,17 @@ builds [`runner.Dockerfile`](runner.Dockerfile) on pushes to `main`, `v*` tags,
 or manual `workflow_dispatch` runs, verifies the `["cm-runner"]` entrypoint and
 Python package imports, and publishes:
 
-- `ghcr.io/<owner>/codemender-runner:latest`
-- `ghcr.io/<owner>/codemender-runner:<commit-sha>`
+- `ghcr.io/<owner>/<repo>:latest` (e.g. `ghcr.io/cloud-gtm/codemender-runner`;
+  in a fork, `ghcr.io/<you>/<fork-name>`), the default image of the
+  `codemender-local` action
+- `ghcr.io/<owner>/<repo>:<commit-sha>`
 - Optional custom target URI when the `CODEMENDER_RUNNER_IMAGE` repository
   variable is set.
+
+The workflow has `packages: write`, so the repository's own `GITHUB_TOKEN`
+creates and updates `ghcr.io/<owner>/<repo>` with no setup. To push to a
+package that already exists and is linked to **another** repository (the push
+fails with `permission_denied: write_package`), either grant this repository
+**Write** under the package's *Settings → Manage Actions access*, or add a
+`CODEMENDER_GHCR_TOKEN` repository secret: a classic PAT of the package owner
+with the `write:packages` scope. The workflow then logs in with that token.
