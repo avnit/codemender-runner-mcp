@@ -110,6 +110,12 @@ box, along with modular building blocks for custom workflows:
   after the initial scan. Runs an exploitability check against the cached
   snapshot in the sandbox, replies on the review thread, and automatically
   dismisses false positives.
+- **[MCP Server](packages/mcpserver/README.md) (`cm_find` / `cm_validate` /
+  `cm_fix`):** A Cloud Run service that exposes CodeMender to MCP clients. Give
+  it a repository name and it runs a full-repository scan in a new Cloud Run Job
+  execution, stores every finding in BigQuery, and on request validates
+  (`cm verify`) or fixes (`cm fix`) individual findings — updating BigQuery and
+  pushing the patch as a branch / pull request.
 - **[Custom Workflows](packages/codemender/README.md):** Compose the
   standalone `cm-runner` stages (`find`, `fix`, `verify`) and
   [`packages/launcher/`](packages/launcher/README.md) building blocks to build

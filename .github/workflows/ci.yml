@@ -34,7 +34,8 @@ jobs:
             -e ./packages/codemender \
             -e "./packages/launcher[cloudrun]" \
             -e "./packages/repohost[github,gitlab]" \
-            pytest pytest-cov
+            -e ./packages/mcpserver \
+            pytest pytest-cov httpx
       - name: Run workspace unit tests
         run: make test
       - name: Run distribution script unit tests

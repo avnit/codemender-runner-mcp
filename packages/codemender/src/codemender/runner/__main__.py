@@ -37,7 +37,7 @@ from codemender.runner.events import EventEmitter
 logger = logging.getLogger(__name__)
 
 _LOG_LEVELS = ("debug", "info", "warning", "error")
-_REPO_COMMANDS = ("init", "find-diff", "fix", "verify")
+_REPO_COMMANDS = ("init", "find-diff", "find-full", "fix", "verify")
 
 
 def configure_logging(level: str) -> None:
@@ -185,6 +185,27 @@ def build_parser() -> argparse.ArgumentParser:
           f"(default: {find_diff.DEFAULT_DIFF_WORKERS})"
       ),
   )
+  find_full_parser = subparsers.add_parser(
+      "find-full",
+      parents=[common],
+      help="scan the whole repository and emit SARIF 2.1.0",
+      description=(
+          "Scan every file in the repository (no diff base) and emit compact"
+          " SARIF 2.1.0 JSON on stdout."
+      ),
+  )
+  find_full_parser.add_argument(
+      "--repo",
+      default=".",
+      metavar="PATH",
+      help="the repository to scan (default: the current directory)",
+  )
+  find_full_parser.add_argument(
+      "--out",
+      default=None,
+      metavar="DIR",
+      help="directory to write report.sarif and report.md artifacts",
+  )
   fix_parser = subparsers.add_parser(
       "fix",
       parents=[common],
@@ -267,8 +288,8 @@ def dispatch(
   """Executes a `cm-runner` repository subcommand with stdout isolation.
 
   Args:
-    command: Repository subcommand name (`"init"`, `"find-diff"`, `"fix"`, or
-      `"verify"`).
+    command: Repository subcommand name (`"init"`, `"find-diff"`,
+      `"find-full"`, `"fix"`, or `"verify"`).
     adapter: Verified `CmAdapter` instance.
     repo: Target Git repository directory path.
     base: Base Git reference for `find-diff` (default: `"HEAD"`).
@@ -315,6 +336,12 @@ def dispatch(
               out=out_path,
               diff_workers=diff_workers,
           ),
+          adapter,
+          cmd_emitter,
+      )
+    if command == "find-full":
+      return find_diff.run(
+          find_diff.FindDiffConfig(repo=repo_path, out=out_path, full_scan=True),
           adapter,
           cmd_emitter,
       )

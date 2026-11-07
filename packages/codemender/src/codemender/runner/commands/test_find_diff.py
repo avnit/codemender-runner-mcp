@@ -1207,3 +1207,44 @@ esac
 
 if __name__ == "__main__":
   unittest.main()
+
+
+class TestFindFullScan(FindDiffTestBase):
+  """`full_scan=True` (cm-runner find-full) scans the whole repository."""
+
+  def test_full_scan_omits_diff_flags_and_skips_base_ref_check(self):
+    adapter = RecordingCmAdapter()
+    stream = StringIO()
+    cfg = find_diff.FindDiffConfig(
+        repo=Path(self.repo).resolve(),
+        base="does-not-exist",
+        full_scan=True,
+    )
+    rc = find_diff.run(cfg, adapter, EventEmitter(stream=stream))
+    self.assertEqual(rc, exit_codes.OK)
+    find_args = adapter.calls[0]["args"]
+    self.assertEqual(find_args[0], "find")
+    self.assertFalse(any(a.startswith("--diff") for a in find_args))
+    self.assertIn("--fail-on", find_args)
+    self.assertEqual(adapter.calls[0]["timeout_sec"], find_diff._FIND_FULL_TIMEOUT_SEC)
+    self.assertEqual(json.loads(stream.getvalue())["version"], "2.1.0")
+
+  def test_dispatch_find_full_writes_report_artifacts(self):
+    adapter = RecordingCmAdapter()
+    out_dir = Path(self.tmp) / "out"
+    rc = cli_main.dispatch(
+        "find-full", adapter, repo=self.repo, out=out_dir, auto_init=False
+    )
+    self.assertEqual(rc, exit_codes.OK)
+    self.assertTrue((out_dir / "report.sarif").is_file())
+    self.assertTrue((out_dir / "report.md").is_file())
+    self.assertFalse(
+        any(a.startswith("--diff") for a in adapter.calls[0]["args"])
+    )
+
+  def test_find_full_parser(self):
+    args = cli_main.build_parser().parse_args(
+        ["find-full", "--repo", self.repo, "--out", "/tmp/o"]
+    )
+    self.assertEqual(args.command, "find-full")
+    self.assertEqual(args.out, "/tmp/o")

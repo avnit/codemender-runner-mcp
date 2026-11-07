@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codemender-mcp"
+version = "0.1.0"
+description = "MCP server that runs CodeMender find/validate/fix as Cloud Run Job executions and stores findings in BigQuery"
+requires-python = ">=3.11"
+dependencies = [
+    "codemender",
+    "mcp>=1.9.0,<2",
+    "uvicorn>=0.30.0",
+    "starlette>=0.37.0",
+    "requests>=2.31.0,<3",
+]
+
+[project.optional-dependencies]
+gcp = [
+    "google-cloud-bigquery>=3.25.0",
+    "google-cloud-run>=0.10.0",
+    "google-cloud-storage>=2.14.0",
+]
+
+[project.scripts]
+cm-mcp = "cm_mcp.server:main"
+
+[tool.uv.sources]
+codemender = { workspace = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["cm_mcp*"]
+exclude = ["test_*", "*_test", "testdata*", "*test_*", "*testdata*"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["**/test_*.py", "**/*_test.py", "**/testdata/**", "test_*.py", "*_test.py", "testdata/**"]

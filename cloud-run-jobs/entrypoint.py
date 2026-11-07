@@ -623,7 +623,10 @@ def main(argv: list[str] | None = None) -> int:
     if arg in ("version", "--version", "-v") and not cli_cmd:
       cli_cmd = "version"
       i += 1
-    elif arg in ("init", "find-diff", "find", "fix", "verify") and not cli_cmd:
+    elif (
+        arg in ("init", "find-diff", "find", "find-full", "fix", "verify")
+        and not cli_cmd
+    ):
       cli_cmd = "find-diff" if arg == "find" else arg
       i += 1
     elif flag in value_flags:
@@ -787,6 +790,22 @@ def main(argv: list[str] | None = None) -> int:
       shutil.copy2(sarif_path, findings_path)
     elif os.path.isfile(findings_path) and not os.path.isfile(sarif_path):
       shutil.copy2(findings_path, sarif_path)
+  elif CMD == "find-full":
+    # Full-repository scan (no diff base); used by the MCP server's cm_find.
+    stage_rc = stage_workspace(PAYLOAD_URI, CMD, FINDING_URI)
+    if stage_rc != 0:
+      EXIT_CODE = stage_rc
+      return EXIT_CODE
+    rc = run_logged([
+        "cm-runner",
+        *global_opts,
+        "find-full",
+        "--repo",
+        REPO_DIR,
+        "--out",
+        OUTPUT_DIR,
+        *passthrough_args,
+    ])
   elif CMD == "fix":
     stage_rc = stage_workspace(PAYLOAD_URI, CMD, FINDING_URI)
     if stage_rc != 0:

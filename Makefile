@@ -1,8 +1,10 @@
-.PHONY: test test-cov build-runner build-cloudrun build-gitlab check-gcp-project deploy-cloudrun init-fork
+.PHONY: test test-cov build-runner build-cloudrun build-gitlab build-mcp run-mcp check-gcp-project deploy-cloudrun deploy-mcp init-fork
 
 RUNNER_IMAGE ?= codemender-runner:local
 CLOUDRUN_IMAGE ?= codemender-cloudrun:local
 GITLAB_IMAGE ?= codemender-gitlab:local
+MCP_IMAGE ?= codemender-mcp:local
+MCP_SERVICE ?= $(RESOURCE_PREFIX)-mcp
 
 TFVARS_FILE ?= terraform/terraform.tfvars
 parse_tfvar = $(strip $(shell [ -f "$(TFVARS_FILE)" ] && awk -F= '/^[[:space:]]*$(1)[[:space:]]*=/ { val = $$2; sub(/[[:space:]]*\043.*/, "", val); gsub(/^[[:space:]"'\'']+|[[:space:]"'\'']+$$/, "", val); print val }' "$(TFVARS_FILE)" | tail -n 1))
@@ -16,6 +18,8 @@ AR_HOST = $(GCP_REGION)-docker.pkg.dev
 AR_REPO = $(RESOURCE_PREFIX)-runner
 CLOUDRUN_JOB ?= $(RESOURCE_PREFIX)-runner
 REMOTE_IMAGE_SHA = $(AR_HOST)/$(GCP_PROJECT_ID)/$(AR_REPO)/codemender-runner:$(IMAGE_TAG)
+MCP_IMAGE_TAG ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo dev)
+REMOTE_MCP_IMAGE = $(AR_HOST)/$(GCP_PROJECT_ID)/$(AR_REPO)/codemender-mcp:$(MCP_IMAGE_TAG)
 
 empty :=
 space := $(empty) $(empty)
@@ -41,6 +45,13 @@ build-cloudrun: build-runner
 build-gitlab:
 	docker build -f docker/gitlab.Dockerfile -t $(GITLAB_IMAGE) .
 
+build-mcp:
+	docker build -f docker/mcp.Dockerfile -t $(MCP_IMAGE) .
+
+# Runs the MCP server locally against real GCP resources (uses your ADC).
+run-mcp: build-mcp
+	docker run --rm -p 8080:8080 -e GOOGLE_CLOUD_PROJECT=$(GCP_PROJECT_ID) -e CLOUD_RUN_REGION=$(GCP_REGION) \n		-e CLOUD_RUN_JOB_NAME=$(CLOUDRUN_JOB) -e GITHUB_TOKEN -e CM_MCP_AUTH_TOKEN \n		-v $(HOME)/.config/gcloud:/home/nonroot/.config/gcloud:ro $(MCP_IMAGE)
+
 check-gcp-project:
 	@if [ -z "$(GCP_PROJECT_ID)" ] || [ "$(GCP_PROJECT_ID)" = "TODO" ]; then \
 		echo "Error: GCP_PROJECT_ID is not set. Configure gcp_project_id in $(TFVARS_FILE) or pass GCP_PROJECT_ID=<project-id>." >&2; \
@@ -59,3 +70,8 @@ deploy-cloudrun: check-gcp-project
 # Governing: docs/openspec/specs/distribute/spec.md#req-0004, SPEC-DIST
 init-fork:
 	./scripts/set-fork-owner.sh $(OWNER)
+
+# Builds the MCP server image with Cloud Build and rolls the Cloud Run service.
+deploy-mcp: check-gcp-project
+	gcloud builds submit --config=cloudbuild.mcp.yaml --project=$(GCP_PROJECT_ID) --substitutions=_REGION=$(GCP_REGION),_REPO_NAME=$(AR_REPO),_IMAGE_TAG=$(MCP_IMAGE_TAG) .
+	gcloud run services update $(MCP_SERVICE) --image $(REMOTE_MCP_IMAGE) --region $(GCP_REGION) --project $(GCP_PROJECT_ID)

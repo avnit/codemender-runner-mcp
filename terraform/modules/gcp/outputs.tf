@@ -68,3 +68,8 @@ output "next_step_cloud_build_command" {
   description = "Standalone Cloud Build command to manually rebuild and push the Cloud Run Job container image."
   value       = "gcloud builds submit --config=cloudbuild.yaml --project=${var.project_id} --substitutions=_REGION=${var.region},_REPO_NAME=${google_artifact_registry_repository.docker_repo.repository_id},_IMAGE_TAG=${local.runner_image_hash} ."
 }
+
+output "artifact_registry_repository_id" {
+  description = "Artifact Registry repository ID (used for the MCP server image)."
+  value       = google_artifact_registry_repository.docker_repo.repository_id
+}
