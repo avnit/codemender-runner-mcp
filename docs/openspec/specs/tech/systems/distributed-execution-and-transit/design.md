@@ -15,7 +15,7 @@ Extending the top-level client/server seams defined in the [CodeMender Runner Sy
 
 Local Docker with gVisor paired with `LocalArtifactCache` (`file://`) and Google Cloud Run Jobs paired with `GcsArtifactCache` (`gs://`)—together with GitHub Actions dynamic matrices and GitLab CI static `parallel: N` pipelines—serve as our **initial reference implementations** validating extensible compute, transit, and distributed scheduling seams that generalize to GKE/Kubernetes Jobs, enterprise batch clusters, S3/Blob object stores, and any repository host or host-less campaign runner.
 
-**Design References**: Accompanies the [Distributed Execution and Transit System Specification](spec.md), extends the [CodeMender Runner System Specification](../codemender-runner/spec.md) and [System Design](../codemender-runner/design.md), and aligns with [ADR-0002](../../../../../adr/ADR-0002.md), [ADR-0006](../../../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md), and [ADR-0010](../../../../../adr/ADR-0010-permission-isolation-and-authn-authz.md) alongside component specs [SPEC-LAUNCHER](../../../launcher/spec.md), [SPEC-WORKER](../../../worker/spec.md), [SPEC-ARTIFACT-CACHE](../../../artifact-cache/spec.md), and [SPEC-VERIFY](../../../verify/spec.md).
+**Design References**: Accompanies the [Distributed Execution and Transit System Specification](spec.md), extends the [CodeMender Runner System Specification](../codemender-runner/spec.md) and [System Design](../codemender-runner/design.md), and aligns with [ADR-0002](../../../../../adr/ADR-0002.md), [ADR-0006](../../../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md), and the [Security and Trust Zones System Specification](../security-and-trust-zones/spec.md) ([Design](../security-and-trust-zones/design.md)) alongside component specs [SPEC-LAUNCHER](../../../launcher/spec.md), [SPEC-WORKER](../../../worker/spec.md), [SPEC-ARTIFACT-CACHE](../../../artifact-cache/spec.md), and [SPEC-VERIFY](../../../verify/spec.md).
 
 ## Goals / Non-Goals
 
@@ -44,7 +44,7 @@ Local Docker with gVisor paired with `LocalArtifactCache` (`file://`) and Google
 **Alternatives considered**:
 
 - Cloud Storage / S3 FUSE mounts or live host bind mounts: Degrades build/test throughput over network metadata round-trips and risks mutating caller checkouts.
-- Presigned upload/download URLs in job overrides (`args`/`env`): Exposes replayable bearer credentials across execution status APIs, job metadata, and audit logs while imposing fixed URL expiry ceilings on long-running compilations (whereas remote workers authenticate via keyless workload identities per [ADR-0010](../../../../../adr/ADR-0010-permission-isolation-and-authn-authz.md)).
+- Presigned upload/download URLs in job overrides (`args`/`env`): Exposes replayable bearer credentials across execution status APIs, job metadata, and audit logs while imposing fixed URL expiry ceilings on long-running compilations (whereas remote workers authenticate via keyless workload identities per [Security and Trust Zones Decision 3](../security-and-trust-zones/design.md#decision-3-mode-switched-least-privilege-gcp-wif-local-single-sa-vs-cloud_run-coordinatorworker-dual-sa-split)).
 
 ### Decision 2: Typed In-Process SDK Job Dispatch, Crash-Spill Log Recovery & Cooperative Cancellation
 

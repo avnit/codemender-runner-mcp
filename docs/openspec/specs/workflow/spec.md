@@ -42,8 +42,7 @@ This specification is governed by:
 - [ADR-0006: PR Remediation Routing and Security Gate](../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md)
 - [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
 - [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) ([Specification](../tech/systems/codemender-runner/spec.md))
-- [ADR-0010: Permission Isolation, Credential Boundaries, and Authn/Authz](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md)
-- Buganizer Epic [b/579991472](http://b/579991472) / Task [b/580028358](http://b/580028358)
+- [Security and Trust Zones System Specification](../tech/systems/security-and-trust-zones/spec.md) ([Design](../tech/systems/security-and-trust-zones/design.md))
 
 ---
 
@@ -60,7 +59,7 @@ The `Workflow` implementation:
 2. MUST NOT read platform-specific environment variables directly (such as `GITHUB_*` or `CI_*`).
 3. MUST interact with the repository hosting platform exclusively through the methods declared on `RepoHost`.
 4. MUST interact with sandbox containers and runner processes exclusively through `Launcher` (`find`, `fix`, `verify`, `stop`).
-5. MUST enforce ADR-0010 trust zone boundaries: Zone 1 host tokens (`$GITHUB_TOKEN`, `$CI_JOB_TOKEN`, GitLab API tokens) MUST NOT be passed into `Launcher` methods or placed inside the staged repository workspace. Archive sanitization and Zone 2 WIF credentials are governed exclusively by [SPEC-LAUNCHER (PR #93)](https://github.com/cloud-gtm/codemender-runner/pull/93) REQ-0002 and REQ-0008.
+5. MUST enforce [Security and Trust Zones](../tech/systems/security-and-trust-zones/spec.md#req-0001) trust zone boundaries: Zone 1 host tokens (`$GITHUB_TOKEN`, `$CI_JOB_TOKEN`, GitLab API tokens) MUST NOT be passed into `Launcher` methods or placed inside the staged repository workspace. Archive sanitization and Zone 2 WIF credentials are governed exclusively by [SPEC-LAUNCHER (PR #93)](https://github.com/cloud-gtm/codemender-runner/pull/93) REQ-0002 and REQ-0008.
 
 #### Scenario: Workflow initialization with mock adapters
 - **WHEN** the `Workflow` engine is instantiated with a test implementation of `RepoHost` and `Launcher`

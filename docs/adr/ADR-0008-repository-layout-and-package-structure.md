@@ -66,4 +66,4 @@ Ship all runtime execution logic, transit coordination, durable persistence adap
 *   [CodeMender Runner System Specification](../openspec/specs/tech/systems/codemender-runner/spec.md) — observable system behavioral contracts for isolation and scenario-extensible execution.
 *   [CodeMender Runner System Design](../openspec/specs/tech/systems/codemender-runner/design.md) — concrete workspace package map, optional-extra boundaries, and repository layout.
 *   [ADR-0001: Foundational Technical Stack, Build Tooling, and Engineering Conventions](ADR-0001.md) — foundational Python workspace tooling and engineering conventions.
-*   [ADR-0010](ADR-0010-permission-isolation-and-authn-authz.md) — privilege separation and credential boundaries reinforced by excluding repository-host communication code from sandboxed environments.
+*   [Security and Trust Zones System Specification](../openspec/specs/tech/systems/security-and-trust-zones/spec.md) ([Design](../openspec/specs/tech/systems/security-and-trust-zones/design.md)) — privilege separation and credential boundaries reinforced by excluding repository-host communication code from sandboxed environments.

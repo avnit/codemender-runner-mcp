@@ -28,7 +28,7 @@ This specification defines the observable system-level contracts for execution-p
 
 ### REQ-0001: Execution-Plane Credential and Callback Isolation {#req-0001}
 
-Sandboxed code analysis, patch synthesis, verification, and target repository build/test execution MUST operate in an isolated execution plane that never installs, loads, or requires repository-host communication clients or external hosting/durable-sink credentials, and MUST complete with zero outbound callbacks from the sandbox to any repository hosting platform or external findings database ([ADR-0008](../../../../../adr/ADR-0008-repository-layout-and-package-structure.md), [ADR-0010](../../../../../adr/ADR-0010-permission-isolation-and-authn-authz.md)).
+Sandboxed code analysis, patch synthesis, verification, and target repository build/test execution MUST operate in an isolated execution plane that never installs, loads, or requires repository-host communication clients or external hosting/durable-sink credentials, and MUST complete with zero outbound callbacks from the sandbox to any repository hosting platform or external findings database ([ADR-0008](../../../../../adr/ADR-0008-repository-layout-and-package-structure.md), [Security and Trust Zones](../security-and-trust-zones/spec.md#req-0001)).
 
 #### Scenario: Sandboxed task execution completes without repository-host clients, credentials, or callbacks
 

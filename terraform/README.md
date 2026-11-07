@@ -9,7 +9,7 @@ secrets, variables, and labels.
 
 - **Specifications:**
   [SPEC-WIF](../docs/openspec/specs/wif/spec.md) and
-  [ADR-0010](../docs/adr/ADR-0010-permission-isolation-and-authn-authz.md).
+  [Security and Trust Zones](../docs/openspec/specs/tech/systems/security-and-trust-zones/design.md).
 - **Execution Environment Guides:**
   - [Google Cloud Run Jobs + GCS Cache (`gs://`)](../docs/user-guides/cloud-run.md)
   - [Local Docker + gVisor (`runsc`)](../docs/user-guides/local-gvisor.md)
@@ -73,7 +73,7 @@ are provisioned:
 | Feature / Resource | `execution_mode = "cloud_run"` (Recommended in `terraform.tfvars.example`) | `execution_mode = "local"` (Default in `variables.tf`) |
 | :--- | :--- | :--- |
 | **Child Modules Provisioned** | `module.wif` + `module.gcp` | `module.wif` only |
-| **Service Account Model** | **Dual-SA Least-Privilege Split ([ADR-0010](../docs/adr/ADR-0010-permission-isolation-and-authn-authz.md)):**<br>1. **WIF Caller SA (`codemender-wif-sa`):** Impersonated by CI OIDC; granted `roles/run.developer`, `roles/storage.objectUser` on the transit bucket, and `roles/iam.serviceAccountUser` (`iam.serviceAccounts.actAs`) on the Cloud Run runtime SA (`codemender-runner-sa`).<br>2. **Cloud Run Runtime SA (`codemender-runner-sa`):** Attached to the `codemender-runner` Cloud Run Job container; granted `roles/aiplatform.user`, `roles/logging.logWriter`, and object access on the transit bucket. Holds zero repository host tokens. | **Single-SA Direct Model:**<br>1. **WIF Caller SA (`codemender-wif-sa`):** Impersonated by CI OIDC on the runner VM; granted `roles/aiplatform.user` directly to call Vertex AI from the local `cm-runner` container. |
+| **Service Account Model** | **Dual-SA Least-Privilege Split ([Security and Trust Zones Decision 3](../docs/openspec/specs/tech/systems/security-and-trust-zones/design.md#decision-3-mode-switched-least-privilege-gcp-wif-local-single-sa-vs-cloud_run-coordinatorworker-dual-sa-split)):**<br>1. **WIF Caller SA (`codemender-wif-sa`):** Impersonated by CI OIDC; granted `roles/run.developer`, `roles/storage.objectUser` on the transit bucket, and `roles/iam.serviceAccountUser` (`iam.serviceAccounts.actAs`) on the Cloud Run runtime SA (`codemender-runner-sa`).<br>2. **Cloud Run Runtime SA (`codemender-runner-sa`):** Attached to the `codemender-runner` Cloud Run Job container; granted `roles/aiplatform.user`, `roles/logging.logWriter`, and object access on the transit bucket. Holds zero repository host tokens. | **Single-SA Direct Model:**<br>1. **WIF Caller SA (`codemender-wif-sa`):** Impersonated by CI OIDC on the runner VM; granted `roles/aiplatform.user` directly to call Vertex AI from the local `cm-runner` container. |
 | **Artifact & Source Staging** | GCS transit bucket (`gs://<prefix>-reports-<suffix>`) with automatic object deletion after `reports_bucket_ttl_days` (default `7` days). | Local filesystem cache (`file://`) on the CI runner host. |
 | **Container Build & Registry** | Artifact Registry (`<prefix>-runner`) + automatic Cloud Build submission ([`../cloudbuild.yaml`](../cloudbuild.yaml)) during apply when `auto_build_image = true`. | Uses `ghcr.io/<owner>/codemender-runner:latest` or a locally built `codemender-runner:local` image. |
 

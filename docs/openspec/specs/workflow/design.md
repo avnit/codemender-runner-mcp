@@ -32,7 +32,7 @@ In [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md
 [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) Decision 4 reflects this separation, specifying that dedicated per-host CLI binaries (`cm-github`, `cm-gitlab`) wire `RepoHost` and `Launcher` to:
 > *"shared CLI orchestration helpers in `repohost.cli` [now `repohost.workflow`]"*.
 
-Under Buganizer epic [b/579991472](http://b/579991472), this design extracts that coordination state machine out of `gha_runner.py` and into `packages/repohost/src/repohost/workflow.py`. `Workflow` serves as the host-side orchestrator that wires `RepoHost` and `Launcher` together via composition, without wrapping `Launcher`'s execution methods or creating a DAG engine.
+This design extracts that coordination state machine out of `gha_runner.py` and into `packages/repohost/src/repohost/workflow.py`. `Workflow` serves as the host-side orchestrator that wires `RepoHost` and `Launcher` together via composition, without wrapping `Launcher`'s execution methods or creating a DAG engine.
 
 ---
 
@@ -43,7 +43,7 @@ Under Buganizer epic [b/579991472](http://b/579991472), this design extracts tha
 - **Dependency Injection Seams:** Wire `RepoHost` and `Launcher` at the composition root (`cm-github` or `cm-gitlab`), passing them cleanly into `Workflow`.
 - **Decoupled Pure Functional Formatting:** Extract table and comment generation into functional modules (`repohost.formatting` and `repohost.github.formatting`), keeping the orchestrator focused on task coordination.
 - **SPEC-VERIFY Semantic Alignment:** Align verification outcomes with `SPEC-VERIFY` and `SPEC-LAUNCHER` (`DISMISSED` = remediated, `VERIFIED` = exploitable).
-- **Fail-Closed Security Gate Semantics:** Enforce deterministic `SecurityGateState` calculations across both platforms, fully adhering to ADR-0006 and ADR-0010.
+- **Fail-Closed Security Gate Semantics:** Enforce deterministic `SecurityGateState` calculations across both platforms, fully adhering to [ADR-0006](../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md) and [Security and Trust Zones](../tech/systems/security-and-trust-zones/design.md).
 - **Process-Level Signal Safety:** Trap signals at the CLI process boundary (`main()`) and provide safe cancellation in `Workflow.cancel()`.
 
 ### Non-Goals
@@ -264,7 +264,7 @@ sequenceDiagram
 2. **Bot-Only Deduplication:** Finding deduplication checks author identity to ensure third-party comments containing fingerprint tokens cannot suppress vulnerability remediation.
 3. **Symlink & CI Config Downgrade:** Remediation patches affecting `.github/workflows/*` or `.gitlab-ci.yml`, targeting symlinks, or containing code fences are downgraded to non-committable plain patch comments to prevent CI privilege escalation.
 4. **Content Sanitization:** Markdown output sanitizes table delimiter pipes (`\|`), escapes GitLab quick action triggers (`\/`), and uses dynamic 4+ backtick fences to prevent prompt injection and formatting breakouts.
-5. **ADR-0010 Credential Isolation:** Zone 1 host tokens (`$GITHUB_TOKEN`, `$CI_JOB_TOKEN`, GitLab API tokens) remain in Zone 1 (host runner process) and are never passed into `Launcher` methods or placed inside the staged repository workspace. Archive sanitization and Zone 2 WIF credentials are governed exclusively by [SPEC-LAUNCHER / PR #93](https://github.com/cloud-gtm/codemender-runner/pull/93) REQ-0002 and REQ-0008.
+5. **Three-Zone Credential Isolation ([Security and Trust Zones](../tech/systems/security-and-trust-zones/design.md)):** Zone 1 host tokens (`$GITHUB_TOKEN`, `$CI_JOB_TOKEN`, GitLab API tokens) remain in Zone 1 (host runner process) and are never passed into `Launcher` methods or placed inside the staged repository workspace. Archive sanitization and Zone 2 WIF credentials are governed exclusively by [SPEC-LAUNCHER / PR #93](https://github.com/cloud-gtm/codemender-runner/pull/93) REQ-0002 and REQ-0008.
 
 ---
 

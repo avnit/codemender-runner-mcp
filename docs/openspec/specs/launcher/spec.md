@@ -27,7 +27,7 @@ freshness: { owner: 'codemender-maintainers', reviewed: '2026-11-03' }
 - **Security & Compliance Lead (`persona-security-auditor`)**: As a security lead
   governing untrusted code execution in [SPEC-0003](../runner-container-packaging/spec.md),
   the [CodeMender Runner System Specification](../tech/systems/codemender-runner/spec.md),
-  and [ADR-0010](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md),
+  and the [Security and Trust Zones System Specification](../tech/systems/security-and-trust-zones/spec.md),
   I need the `Launcher` orchestrator to remain 100% decoupled from repository
   hosting APIs (`packages/repohost`), strictly prevent repository host tokens from
   reaching sandbox containers, enforce bounded worker concurrency, guarantee
@@ -47,7 +47,7 @@ and `CloudRunLauncher`) in `packages/launcher`.
 As established in
 the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
 (Decisions 1, 2, 3, and 4),
-[ADR-0010](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md)
+the [Security and Trust Zones System Design](../tech/systems/security-and-trust-zones/design.md)
 (Decisions 2 and 4), and
 [SPEC-WORKER](../worker/spec.md), `Launcher` (on the trusted outer CI host) and
 `Worker` (`cm-worker`, inside the untrusted sandbox container) form the client
@@ -78,7 +78,7 @@ This specification is governed by and references:
 - [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) ([Specification](../tech/systems/codemender-runner/spec.md)):
   Abstraction layers, dependency injection seams, asynchronous workflows, and
   phased CI execution model.
-- [ADR-0010](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md):
+- [Security and Trust Zones System Design](../tech/systems/security-and-trust-zones/design.md) ([Specification](../tech/systems/security-and-trust-zones/spec.md)):
   Three-zone permission isolation, local WIF `/creds` read-only mount, and
   Zone 1 repository snapshot and environment sanitization gates.
 - [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md):
@@ -148,7 +148,7 @@ injected `ArtifactCache` and return the cache key string `"shared/code.tar.gz"`.
 `ensure_repo_snapshot` MUST delegate archive packaging to
 `launcher.cache.archive.create_repo_archive_excluding_sensitive_files(repo_dir, dest_path, base_ref=base_ref)`.
 
-Per [ADR-0010 Decision 4](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md#decision-4-boundary-enforced-workspace-gitconfig-and-environment-sanitization-in-launcher),
+Per [Security and Trust Zones Decision 4](../tech/systems/security-and-trust-zones/design.md#decision-4-boundary-enforced-workspace-gitconfig-and-environment-sanitization-in-launcher),
 the created archive MUST satisfy the following four sanitization gates before upload:
 1. **Clean `.git/config` Allowlist Replacement**: The archive MUST replace `.git/config`
    with a minimal format-only allowlist (`core.repositoryformatversion = 0`,
@@ -438,7 +438,7 @@ as a concrete subclass of `Launcher`.
 2. **Bind-Mount Isolation**:
    - Container mounts MUST be limited to `-v <host_cache_dir>:/cache` (read-write) and
      optional `-v <host_creds_file>:/creds/adc.json:ro` (read-only) for `LocalWifSa`
-     per [ADR-0010 Decision 3](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md#decision-3-mode-switched-least-privilege-gcp-wif-local-single-sa-vs-cloud_run-coordinatorworker-dual-sa-split).
+     per [Security and Trust Zones Decision 3](../tech/systems/security-and-trust-zones/design.md#decision-3-mode-switched-least-privilege-gcp-wif-local-single-sa-vs-cloud_run-coordinatorworker-dual-sa-split).
    - Zero repository workspace bind mounts (`-v /repo:/workspace`) MUST be passed.
    - Zero host-side `shutil.copytree` operations MUST be performed.
    - Host mount paths MUST NOT resolve symlinks escaping designated host root directories.
@@ -527,12 +527,12 @@ class Launcher(abc.ABC):
 | Requirement | Description | Governing ADR / Spec | Realized Component |
 | :--- | :--- | :--- | :--- |
 | **REQ-0001** | ABC & Dependency Injection Seam (`ArtifactCache`) | [CodeMender Runner REQ-0001](../tech/systems/codemender-runner/spec.md#req-0001), [REQ-0003](../tech/systems/codemender-runner/spec.md#req-0003), ADR-0008 | `launcher.base.Launcher` |
-| **REQ-0002** | Repository Snapshot Archiving & Sanitization (`ensure_repo_snapshot`) | ADR-0010 Dec 4, [CodeMender Runner REQ-0005](../tech/systems/codemender-runner/spec.md#req-0005), [Distributed Execution & Transit REQ-0001](../tech/systems/distributed-execution-and-transit/spec.md#req-0001) | `launcher.base.Launcher.ensure_repo_snapshot` |
+| **REQ-0002** | Repository Snapshot Archiving & Sanitization (`ensure_repo_snapshot`) | [Security & Trust Zones Dec 4](../tech/systems/security-and-trust-zones/design.md#decision-4-boundary-enforced-workspace-gitconfig-and-environment-sanitization-in-launcher), [CodeMender Runner REQ-0005](../tech/systems/codemender-runner/spec.md#req-0005), [Distributed Execution & Transit REQ-0001](../tech/systems/distributed-execution-and-transit/spec.md#req-0001) | `launcher.base.Launcher.ensure_repo_snapshot` |
 | **REQ-0003** | Differential Scan Orchestration (`find`) | [CodeMender Runner REQ-0003](../tech/systems/codemender-runner/spec.md#req-0003), SPEC-FIND-DIFF | `launcher.base.Launcher.find` |
 | **REQ-0004** | Patch Generation Generator (`fix`) | [CodeMender Runner REQ-0003](../tech/systems/codemender-runner/spec.md#req-0003), [REQ-0004](../tech/systems/codemender-runner/spec.md#req-0004), SPEC-FIX | `launcher.base.Launcher.fix` |
 | **REQ-0005** | Patch Verification Generator (`verify`) | [CodeMender Runner REQ-0003](../tech/systems/codemender-runner/spec.md#req-0003), [REQ-0004](../tech/systems/codemender-runner/spec.md#req-0004), SPEC-VERIFY | `launcher.base.Launcher.verify` |
 | **REQ-0006** | Bounded Concurrency Engine (`run_parallel`) | [CodeMender Runner REQ-0004](../tech/systems/codemender-runner/spec.md#req-0004) | `launcher.base.Launcher.run_parallel` |
 | **REQ-0007** | Template Dispatch & Guaranteed `ExecutionReceipt` (`run_worker`) | [CodeMender Runner REQ-0006](../tech/systems/codemender-runner/spec.md#req-0006), [Distributed Execution & Transit REQ-0004](../tech/systems/distributed-execution-and-transit/spec.md#req-0004), ADR-0002 | `Launcher.run_worker` & `_synthesize_fallback_receipt` |
-| **REQ-0008** | Concrete Local Backend (`LocalDockerLauncher`) | ADR-0010 Dec 3, [CodeMender Runner REQ-0006](../tech/systems/codemender-runner/spec.md#req-0006), ADR-0003, SPEC-WORKER | `launcher.local.LocalDockerLauncher` |
-| **REQ-0009** | Concrete Cloud Backend (`CloudRunLauncher`) | ADR-0010 Dec 3, [CodeMender Runner REQ-0002](../tech/systems/codemender-runner/spec.md#req-0002), [REQ-0006](../tech/systems/codemender-runner/spec.md#req-0006), SPEC-ARTIFACT-CACHE | `launcher.cloudrun.CloudRunLauncher` |
+| **REQ-0008** | Concrete Local Backend (`LocalDockerLauncher`) | [Security & Trust Zones Dec 3](../tech/systems/security-and-trust-zones/design.md#decision-3-mode-switched-least-privilege-gcp-wif-local-single-sa-vs-cloud_run-coordinatorworker-dual-sa-split), [CodeMender Runner REQ-0006](../tech/systems/codemender-runner/spec.md#req-0006), ADR-0003, SPEC-WORKER | `launcher.local.LocalDockerLauncher` |
+| **REQ-0009** | Concrete Cloud Backend (`CloudRunLauncher`) | [Security & Trust Zones Dec 3](../tech/systems/security-and-trust-zones/design.md#decision-3-mode-switched-least-privilege-gcp-wif-local-single-sa-vs-cloud_run-coordinatorworker-dual-sa-split), [CodeMender Runner REQ-0002](../tech/systems/codemender-runner/spec.md#req-0002), [REQ-0006](../tech/systems/codemender-runner/spec.md#req-0006), SPEC-ARTIFACT-CACHE | `launcher.cloudrun.CloudRunLauncher` |
 | **REQ-0010** | Context Management & Lifecycle (`stop`) | [CodeMender Runner Design](../tech/systems/codemender-runner/design.md), ADR-0002 | `Launcher.__enter__`, `__exit__`, `stop` |

@@ -11,7 +11,7 @@ to run `find-diff`, `fix`, and `verify`.
 For architecture specifications, see
 [SPEC-WIF](../openspec/specs/wif/spec.md),
 [SPEC-CACHE](../openspec/specs/artifact-cache/spec.md), and
-[ADR-0010](../adr/ADR-0010-permission-isolation-and-authn-authz.md).
+[Security and Trust Zones](../openspec/specs/tech/systems/security-and-trust-zones/design.md).
 
 ## How It Executes
 
@@ -23,7 +23,7 @@ For architecture specifications, see
    (`gs://<prefix>-reports-<suffix>`) configured with an automatic object
    lifecycle TTL (`reports_bucket_ttl_days = 7` by default).
 3. **Dual-SA Isolation Boundary
-   ([ADR-0010](../adr/ADR-0010-permission-isolation-and-authn-authz.md)):**
+   ([Security and Trust Zones Decision 3](../openspec/specs/tech/systems/security-and-trust-zones/design.md#decision-3-mode-switched-least-privilege-gcp-wif-local-single-sa-vs-cloud_run-coordinatorworker-dual-sa-split)):**
    - **WIF Caller SA (`codemender-wif-sa`):** Granted only
      `roles/run.developer`, `roles/storage.objectUser` on the transit bucket,
      and `roles/iam.serviceAccountUser` (`actAs`) on the Cloud Run runtime

@@ -29,14 +29,15 @@ security sink requires implementing only the corresponding adapter seam.
 
 **Design References**: Accompanies the [CodeMender Runner System Specification](spec.md)
 (extended by the [Distributed Execution and Transit System Specification](../distributed-execution-and-transit/spec.md)
-and [Distributed Execution and Transit System Design](../distributed-execution-and-transit/design.md))
+([Design](../distributed-execution-and-transit/design.md)) and the
+[Security and Trust Zones System Specification](../security-and-trust-zones/spec.md)
+([Design](../security-and-trust-zones/design.md)))
 and synthesizes the system architecture governed by
 [ADR-0001](../../../../../adr/ADR-0001.md),
 [ADR-0002](../../../../../adr/ADR-0002.md),
 [ADR-0003](../../../../../adr/ADR-0003-environment-scrubbing.md),
 [ADR-0006](../../../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md),
-[ADR-0008](../../../../../adr/ADR-0008-repository-layout-and-package-structure.md),
-and [ADR-0010](../../../../../adr/ADR-0010-permission-isolation-and-authn-authz.md).
+and [ADR-0008](../../../../../adr/ADR-0008-repository-layout-and-package-structure.md).
 
 ## Goals / Non-Goals
 
@@ -1028,7 +1029,7 @@ symmetric workspace file parity across `local` and `cloudrun` backends):
     [Distributed Execution and Transit System Specification](../distributed-execution-and-transit/spec.md#req-0001)
     ([Design](../distributed-execution-and-transit/design.md)),
     [ADR-0003](../../../../../adr/ADR-0003-environment-scrubbing.md),
-    [ADR-0010](../../../../../adr/ADR-0010-permission-isolation-and-authn-authz.md),
+    [Security and Trust Zones Decision 4](../security-and-trust-zones/design.md#decision-4-boundary-enforced-workspace-gitconfig-and-environment-sanitization-in-launcher),
     [SPEC-GHA-FIX REQ-0005](../../../github-actions-fix/spec.md#req-0005),
     and [SPEC-LAUNCHER REQ-0002](../../../launcher/spec.md#req-0002).
     When `Launcher.ensure_repo_snapshot()` packages the target repository into

@@ -17,7 +17,7 @@ freshness: { owner: 'codemender-maintainers', reviewed: '2026-11-03' }
 
 Governed by [SPEC-LAUNCHER](spec.md),
 [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md),
-[ADR-0010](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md),
+[Security and Trust Zones System Design](../tech/systems/security-and-trust-zones/design.md),
 [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
 the [Distributed Execution and Transit System Design](../tech/systems/distributed-execution-and-transit/design.md),
 [SPEC-WORKER](../worker/spec.md), and
@@ -28,7 +28,7 @@ management for `packages/launcher/src/launcher/`.
 High-level architectural decisions, including the three dependency injection seams,
 phased CI execution model ($M \times K$ concurrency), container image packaging,
 and transit storage layout, are established in the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
-and [ADR-0010](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md).
+and the [Security and Trust Zones System Design](../tech/systems/security-and-trust-zones/design.md).
 This document specifies the concrete implementation details and edge-case contracts
 governing the `Launcher` component.
 
@@ -429,7 +429,7 @@ sequenceDiagram
 - **Bind Mounts**:
   - `-v <host_cache_dir>:/cache` (read-write).
   - Optional `-v <host_creds_file>:/creds/adc.json:ro` (read-only) for `LocalWifSa`
-    per [ADR-0010 Decision 3](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md#decision-3-mode-switched-least-privilege-gcp-wif-local-single-sa-vs-cloud_run-coordinatorworker-dual-sa-split).
+    per [Security and Trust Zones Decision 3](../tech/systems/security-and-trust-zones/design.md#decision-3-mode-switched-least-privilege-gcp-wif-local-single-sa-vs-cloud_run-coordinatorworker-dual-sa-split).
   - Zero repository workspace bind-mounts (`-v /repo:/workspace`) are passed.
 - **Capability Gating**:
   - When `runtime == "runsc"`, `--runtime=runsc --cap-add SYS_ADMIN` is passed.
