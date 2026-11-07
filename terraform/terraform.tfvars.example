@@ -163,3 +163,11 @@ github_repositories = [
 #    Overrides ambient CLI credentials when specified.
 # github_mgmt_token = null
 
+
+# --- CodeMender MCP server (optional) ---
+# enable_mcp_server          = true
+# runner_timeout             = "10800s"   # full-repository scans need longer than the 1h default
+# mcp_github_token_secret_id = "codemender-github-token"
+# mcp_auth_token_secret_id   = "codemender-mcp-auth-token"
+# mcp_allow_unauthenticated  = true       # only together with mcp_auth_token_secret_id
+# mcp_invoker_members        = ["user:you@example.com"]

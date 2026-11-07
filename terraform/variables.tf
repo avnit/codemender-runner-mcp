@@ -223,3 +223,59 @@ variable "github_mgmt_token" {
   sensitive   = true
   description = "Personal access token (classic or fine-grained) for GitHub provider authentication when not using GitHub App or ambient auth."
 }
+
+# --- CodeMender MCP server (terraform/mcp.tf) --------------------------------
+
+variable "enable_mcp_server" {
+  type        = bool
+  default     = false
+  description = "Deploy the CodeMender MCP server (Cloud Run service + BigQuery dataset). Requires execution_mode = \"cloud_run\". Set runner_timeout to >= \"10800s\" for full-repository scans."
+}
+
+variable "mcp_image_tag" {
+  type        = string
+  default     = "latest"
+  description = "Tag of the codemender-mcp image (built from docker/mcp.Dockerfile)."
+}
+
+variable "mcp_bq_dataset_id" {
+  type        = string
+  default     = "codemender"
+  description = "BigQuery dataset for MCP jobs and findings."
+}
+
+variable "mcp_bq_location" {
+  type        = string
+  default     = "US"
+  description = "BigQuery dataset location."
+}
+
+variable "mcp_github_token_secret_id" {
+  type        = string
+  default     = null
+  description = "Secret Manager secret ID holding a GitHub token (repo scope) for cloning, pushing fix branches and opening PRs."
+}
+
+variable "mcp_auth_token_secret_id" {
+  type        = string
+  default     = null
+  description = "Optional Secret Manager secret ID holding a bearer token required on MCP requests."
+}
+
+variable "mcp_allow_unauthenticated" {
+  type        = bool
+  default     = false
+  description = "Allow unauthenticated Cloud Run ingress (only with mcp_auth_token_secret_id set)."
+}
+
+variable "mcp_invoker_members" {
+  type        = list(string)
+  default     = []
+  description = "IAM members allowed to invoke the MCP service (e.g. [\"user:you@example.com\"])."
+}
+
+variable "mcp_default_patch_mode" {
+  type        = string
+  default     = "pr"
+  description = "Default cm_fix patch mode: pr, branch or none."
+}

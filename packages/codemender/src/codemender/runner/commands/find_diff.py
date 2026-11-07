@@ -46,6 +46,9 @@ logger = logging.getLogger(__name__)
 # cancel remote LROs cleanly before terminating the child.
 _FIND_DIFF_TIMEOUT_SEC = 1800.0
 _CM_REPORT_TIMEOUT_SEC = 60.0
+# A full-repository scan covers every file rather than a PR diff, so it gets a
+# longer circuit breaker (3h). The Cloud Run Job timeout must be at least this.
+_FIND_FULL_TIMEOUT_SEC = 10800.0
 
 # Concurrent `cm find --diff` worker bounds and default (1..16 supported by cm;
 # cm's own built-in default is 4).
@@ -65,12 +68,16 @@ class FindDiffConfig:
       written.
     diff_workers: Number of concurrent `cm find --diff` workers (default: 8,
       valid range: 1..16).
+    full_scan: When True, scan the whole repository (`cm find <repo>` without
+      `--diff`) instead of only the changes against `base`. Used by
+      `cm-runner find-full` and the MCP server's `cm_find` tool.
   """
 
   repo: Path
   base: str = "HEAD"
   out: Path | None = None
   diff_workers: int | None = DEFAULT_DIFF_WORKERS
+  full_scan: bool = False
 
   def __post_init__(self) -> None:
     if isinstance(self.base, str):
@@ -115,7 +122,9 @@ class FindDiffConfig:
       logger.error("--repo %s is not inside a Git working tree.", self.repo)
       return exit_codes.FAILED
 
-    if not git.ref_exists(self.repo.as_posix(), self.base):
+    if not self.full_scan and not git.ref_exists(
+        self.repo.as_posix(), self.base
+    ):
       logger.error(
           "--base reference %r does not exist or is invalid in %s.",
           self.base,
@@ -168,19 +177,16 @@ def run(
   # Step 1: Differential scan via `cm find --diff`.
   # `--bypass-warning` accepts `cm`'s responsibility warning on the caller's
   # behalf, matching fix.py and verify.py; there is no terminal to ask in CI.
+  find_args = ["find", cfg.repo.as_posix(), "-y", "--bypass-warning"]
+  if not cfg.full_scan:
+    find_args += [f"--diff={cfg.base}", f"--diff-workers={cfg.diff_workers}"]
+  find_args += ["--fail-on", "NONE"]
   find_result = adapter.run(
-      [
-          "find",
-          cfg.repo.as_posix(),
-          "-y",
-          "--bypass-warning",
-          f"--diff={cfg.base}",
-          f"--diff-workers={cfg.diff_workers}",
-          "--fail-on",
-          "NONE",
-      ],
+      find_args,
       cwd=cfg.repo.as_posix(),
-      timeout_sec=_FIND_DIFF_TIMEOUT_SEC,
+      timeout_sec=(
+          _FIND_FULL_TIMEOUT_SEC if cfg.full_scan else _FIND_DIFF_TIMEOUT_SEC
+      ),
   )
   logger.info("cm find --diff stdout:\n%s", find_result.stdout.rstrip())
   logger.info("cm find --diff stderr:\n%s", find_result.stderr.rstrip())
