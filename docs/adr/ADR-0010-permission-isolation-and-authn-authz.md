@@ -7,9 +7,8 @@
   Layout, Three-Package Workspace, and Runtime Architecture),
   [CodeMender Runner System Design](../openspec/specs/tech/systems/codemender-runner/design.md),
   [ADR-0003](ADR-0003-environment-scrubbing.md),
-  [ADR-0005](ADR-0005-multi-platform-transit-storage-and-isolation.md),
   [ADR-0006](ADR-0006-pr-remediation-routing-and-security-gate.md),
-  [ADR-0007](ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)
+  [Distributed Execution and Transit System Design](../openspec/specs/tech/systems/distributed-execution-and-transit/design.md)
 - **Governs:** [SPEC-WIF](../openspec/specs/wif/spec.md),
   [SPEC-GHA](../openspec/specs/github-actions/spec.md),
   [SPEC-GHA-FIX](../openspec/specs/github-actions-fix/spec.md),
@@ -408,9 +407,9 @@ sequenceDiagram
     `WorkerSa`'s permissions.
   - **Write-Once Transit Storage and Bounded Blast Radius (`WorkerSa`):**
     `Worker` inside Cloud Run authenticates via identity-bound IAM (avoiding
-    replayable GCS signed URL bearer tokens per
-    [ADR-0005](ADR-0005-multi-platform-transit-storage-and-isolation.md)) and
-    cannot trigger new Cloud Run Jobs. Because all Cloud Run Job executions
+    replayable GCS signed URL bearer tokens per the
+    [Distributed Execution and Transit System Design](../openspec/specs/tech/systems/distributed-execution-and-transit/design.md))
+    and cannot trigger new Cloud Run Jobs. Because all Cloud Run Job executions
     share `WorkerSa` and call GCS via `GcsArtifactCache`, static IAM on
     `WorkerSa` is bucket-wide across the dedicated transit bucket
     (`<run_prefix>` partitions object paths across runs rather than enforcing a
@@ -432,16 +431,18 @@ sequenceDiagram
     `CoordinatorSa` (including across repositories when `CoordinatorSa` is
     shared at the organization level) to replace the Cloud Run Job's container
     image and execute arbitrary workloads as `WorkerSa`.
-  - *Passing GCS V4 Signed URLs into the Cloud Run container:* Rejected in
-    [ADR-0005](ADR-0005-multi-platform-transit-storage-and-isolation.md) because
-    signed URLs act as bearer tokens if leaked in logs or environment variables.
+  - *Passing GCS V4 Signed URLs into the Cloud Run container:* Rejected in the
+    [Distributed Execution and Transit System Design](../openspec/specs/tech/systems/distributed-execution-and-transit/design.md)
+    because signed URLs act as bearer tokens if leaked in status APIs, logs, or
+    environment variables.
   - *Minting per-execution GCP Credential Access Boundary (CAB) downscoped
     OAuth2 tokens for prefix-scoped GCS access:* Rejected for three reasons: (1)
     Cloud Run's metadata server cannot attach a per-execution CAB via
     `RunJobRequest.Overrides`, requiring `Launcher` to pass a raw OAuth2 bearer
     token in job `env`/`args` overrides where it persists in
-    `run.executions.get` metadata and Cloud Audit Logs (violating
-    [ADR-0005](ADR-0005-multi-platform-transit-storage-and-isolation.md)); (2)
+    `run.executions.get` metadata and Cloud Audit Logs (violating the
+    [Distributed Execution and Transit System Design](../openspec/specs/tech/systems/distributed-execution-and-transit/design.md));
+    (2)
     minting a downscoped token from Zone 1 requires either downscoping
     `CoordinatorSa` itself or granting `CoordinatorSa`
     `roles/iam.serviceAccountTokenCreator` on `WorkerSa` (defeating the

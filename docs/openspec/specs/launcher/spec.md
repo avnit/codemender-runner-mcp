@@ -84,11 +84,11 @@ This specification is governed by and references:
 - [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md):
   Three-package workspace layout (`packages/{codemender,launcher,repohost}`) and
   package dependency rules. Supersedes ADR-0002.
-- [ADR-0007](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md):
-  Cloud Run Job invocation interfaces and `ExecutionReceipt` schema.
-- [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md):
-  Multi-platform transit storage, bounded-history archive transit, and sandboxed
-  isolation model.
+- [Distributed Execution and Transit System Specification](../tech/systems/distributed-execution-and-transit/spec.md)
+  and [Design](../tech/systems/distributed-execution-and-transit/design.md):
+  Multi-platform archive snapshot transit, container-private scratch hydration,
+  typed in-process remote job dispatch, `ExecutionReceipt`/log recovery, and
+  cooperative cancellation.
 - [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md):
   Environment scrubbing and container configuration allowlist.
 - [ADR-0002](../../../adr/ADR-0002.md):
@@ -527,12 +527,12 @@ class Launcher(abc.ABC):
 | Requirement | Description | Governing ADR / Spec | Realized Component |
 | :--- | :--- | :--- | :--- |
 | **REQ-0001** | ABC & Dependency Injection Seam (`ArtifactCache`) | [CodeMender Runner REQ-0001](../tech/systems/codemender-runner/spec.md#req-0001), [REQ-0003](../tech/systems/codemender-runner/spec.md#req-0003), ADR-0008 | `launcher.base.Launcher` |
-| **REQ-0002** | Repository Snapshot Archiving & Sanitization (`ensure_repo_snapshot`) | ADR-0010 Dec 4, [CodeMender Runner REQ-0005](../tech/systems/codemender-runner/spec.md#req-0005), ADR-0005 | `launcher.base.Launcher.ensure_repo_snapshot` |
+| **REQ-0002** | Repository Snapshot Archiving & Sanitization (`ensure_repo_snapshot`) | ADR-0010 Dec 4, [CodeMender Runner REQ-0005](../tech/systems/codemender-runner/spec.md#req-0005), [Distributed Execution & Transit REQ-0001](../tech/systems/distributed-execution-and-transit/spec.md#req-0001) | `launcher.base.Launcher.ensure_repo_snapshot` |
 | **REQ-0003** | Differential Scan Orchestration (`find`) | [CodeMender Runner REQ-0003](../tech/systems/codemender-runner/spec.md#req-0003), SPEC-FIND-DIFF | `launcher.base.Launcher.find` |
 | **REQ-0004** | Patch Generation Generator (`fix`) | [CodeMender Runner REQ-0003](../tech/systems/codemender-runner/spec.md#req-0003), [REQ-0004](../tech/systems/codemender-runner/spec.md#req-0004), SPEC-FIX | `launcher.base.Launcher.fix` |
 | **REQ-0005** | Patch Verification Generator (`verify`) | [CodeMender Runner REQ-0003](../tech/systems/codemender-runner/spec.md#req-0003), [REQ-0004](../tech/systems/codemender-runner/spec.md#req-0004), SPEC-VERIFY | `launcher.base.Launcher.verify` |
 | **REQ-0006** | Bounded Concurrency Engine (`run_parallel`) | [CodeMender Runner REQ-0004](../tech/systems/codemender-runner/spec.md#req-0004) | `launcher.base.Launcher.run_parallel` |
-| **REQ-0007** | Template Dispatch & Guaranteed `ExecutionReceipt` (`run_worker`) | [CodeMender Runner REQ-0006](../tech/systems/codemender-runner/spec.md#req-0006), ADR-0007, ADR-0002 | `Launcher.run_worker` & `_synthesize_fallback_receipt` |
+| **REQ-0007** | Template Dispatch & Guaranteed `ExecutionReceipt` (`run_worker`) | [CodeMender Runner REQ-0006](../tech/systems/codemender-runner/spec.md#req-0006), [Distributed Execution & Transit REQ-0004](../tech/systems/distributed-execution-and-transit/spec.md#req-0004), ADR-0002 | `Launcher.run_worker` & `_synthesize_fallback_receipt` |
 | **REQ-0008** | Concrete Local Backend (`LocalDockerLauncher`) | ADR-0010 Dec 3, [CodeMender Runner REQ-0006](../tech/systems/codemender-runner/spec.md#req-0006), ADR-0003, SPEC-WORKER | `launcher.local.LocalDockerLauncher` |
 | **REQ-0009** | Concrete Cloud Backend (`CloudRunLauncher`) | ADR-0010 Dec 3, [CodeMender Runner REQ-0002](../tech/systems/codemender-runner/spec.md#req-0002), [REQ-0006](../tech/systems/codemender-runner/spec.md#req-0006), SPEC-ARTIFACT-CACHE | `launcher.cloudrun.CloudRunLauncher` |
 | **REQ-0010** | Context Management & Lifecycle (`stop`) | [CodeMender Runner Design](../tech/systems/codemender-runner/design.md), ADR-0002 | `Launcher.__enter__`, `__exit__`, `stop` |

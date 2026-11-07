@@ -78,8 +78,8 @@ This specification is governed by and references:
 - [Proposal: VCS to Cloud Run Communication Architecture (`vcs-cloudrun-comms`)](../../proposals/vcs-cloudrun-comms/proposal.md)
 - [Proposal: Cloud Run Jobs Container Bootstrapper (`cloudrun-job-bootstrapper`)](../../proposals/cloudrun-job-bootstrapper/proposal.md)
 - [ADR-0002: Machine-Readable Output Contract](../../../adr/ADR-0002.md)
-- [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
-- [ADR-0007: Cloud Run Job Invocation Interface: CLI vs. Python Library](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)
+- [Distributed Execution and Transit System Specification](../tech/systems/distributed-execution-and-transit/spec.md)
+- [Distributed Execution and Transit System Design](../tech/systems/distributed-execution-and-transit/design.md)
 - [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
 - [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
 

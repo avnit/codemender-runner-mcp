@@ -28,11 +28,10 @@ freshness: { owner: 'codemender-maintainers', reviewed: '2026-10-22' }
   - [SPEC-WIF: Unified Terraform Root & Composable Mode-Aware WIF Module](../wif/spec.md)
   - [Proposal: VCS to Cloud Run Communication Architecture (`vcs-cloudrun-comms`)](../../proposals/vcs-cloudrun-comms/proposal.md)
   - [Proposal: Cloud Run Jobs Container Bootstrapper (`cloudrun-job-bootstrapper`)](../../proposals/cloudrun-job-bootstrapper/proposal.md)
+  - [Distributed Execution and Transit System Specification](../tech/systems/distributed-execution-and-transit/spec.md) and [Design](../tech/systems/distributed-execution-and-transit/design.md)
 - **Governing ADRs:**
   - [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
   - [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
-  - [ADR-0007: Cloud Run Job Invocation Interface: CLI vs. Python Library](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)
-  - [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
   - [ADR-0002: Machine-Readable Output Contract](../../../adr/ADR-0002.md)
 
 ---
@@ -108,7 +107,7 @@ Raw `fsspec.AbstractFileSystem` is an un-chrooted, general-purpose filesystem AP
 - Migrating existing hardcoded paths in `github-actions/`, `cloud-run-jobs/`, and `codemender-runner/storage.py` (deferred to Phase 2 until `Launcher` and `Worker` implementations land).
 - Long-term cross-run persistence (`ArtifactStore` in
   `packages/artifactstore`, per the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)).
-- Cloud Storage FUSE mounts inside Cloud Run containers (rejected in ADR-0007 and the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) due to POSIX `stat` latency during compilation and Git operations).
+- Cloud Storage FUSE mounts inside Cloud Run containers (rejected in the [Distributed Execution and Transit System Design](../tech/systems/distributed-execution-and-transit/design.md) and the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) due to POSIX `stat` latency during compilation and Git operations).
 - Tar-slip inspection or repository extraction (`unpack_tar_gz_preserving_permissions` and `flatten_repo_if_nested` belong to `Worker` in `SPEC-WORKER`, while `ArtifactCache` atomically transfers the raw `shared/code.tar.gz` archive).
 
 ---

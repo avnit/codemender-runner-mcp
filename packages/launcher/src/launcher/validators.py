@@ -12,9 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0002, ADR-0007
+# Governing: ADR-0002
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0007
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0002
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0004
 # Governing: SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0006
 # Governing: SPEC-WORKER/REQ-0001, SPEC-WORKER/REQ-0002
 """Shared `attrs` field validators, converters, and path predicates."""

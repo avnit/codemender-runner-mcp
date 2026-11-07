@@ -9,8 +9,8 @@ artifact cache (`file://`).
 
 For architecture specifications, see
 [SPEC-WIF](../openspec/specs/wif/spec.md),
-[SPEC-CACHE](../openspec/specs/artifact-cache/spec.md), and
-[ADR-0005](../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md).
+[SPEC-CACHE](../openspec/specs/artifact-cache/spec.md), and the
+[Distributed Execution and Transit System Design](../openspec/specs/tech/systems/distributed-execution-and-transit/design.md).
 
 ## How It Executes
 

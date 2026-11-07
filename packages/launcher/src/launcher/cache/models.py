@@ -12,9 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0007, SPEC-ARTIFACT-CACHE/REQ-0006
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0006
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0006
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0004
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0006
 # Governing: SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0006
 """Shared wire models for Launcher and Worker over ArtifactCache."""
 
@@ -124,9 +126,11 @@ class _JsonWireModel:
     return json.dumps(self.to_dict(), sort_keys=True)
 
 
-# Governing: SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, ADR-0007
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0006
+# Governing: SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0006
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0006
 @attrs.define(frozen=True)
 class RunManifest(_JsonWireModel):
   """Task input manifest (`tasks/<task_id>/input/manifest.json`)."""
@@ -176,9 +180,11 @@ class RunManifest(_JsonWireModel):
     return {key: val for key, val in raw.items() if val is not None}
 
 
-# Governing: SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0006, ADR-0001, ADR-0007
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0006
+# Governing: SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0006, ADR-0001
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0006
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0004
 @attrs.define(frozen=True)
 class ExecutionReceipt(_JsonWireModel):
   """Task completion receipt (`tasks/<task_id>/output/receipt.json`)."""

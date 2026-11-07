@@ -38,7 +38,7 @@ This specification is governed by:
 - [SPEC-LAUNCHER: Sandbox Container Dispatch & Execution Engine (PR #93)](https://github.com/cloud-gtm/codemender-runner/pull/93)
 - [ADR-0002: Machine-Readable Output Contract](../../../adr/ADR-0002.md)
 - [ADR-0003: Environment Variable Scrubbing When Running `cm`](../../../adr/ADR-0003-environment-scrubbing.md)
-- [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
+- [Distributed Execution and Transit System Specification](../tech/systems/distributed-execution-and-transit/spec.md)
 - [ADR-0006: PR Remediation Routing and Security Gate](../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md)
 - [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
 - [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md) ([Specification](../tech/systems/codemender-runner/spec.md))

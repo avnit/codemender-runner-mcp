@@ -30,7 +30,7 @@ sdd_cujspec_product: codemender-runner
 
 - **Reused Unchanged:**
   - Differential scanning contract and SARIF 2.1.0 output ([SPEC-FIND-DIFF](../find-diff/spec.md)).
-  - Cloud Run `cm-worker` task/manifest/receipt contract and transit cache layout ([SPEC-GHA REQ-0003, REQ-0008](../github-actions/spec.md#req-0003), [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md), [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)).
+  - Cloud Run `cm-worker` task/manifest/receipt contract and transit cache layout ([SPEC-GHA REQ-0003, REQ-0008](../github-actions/spec.md#req-0003), [Distributed Execution & Transit](../tech/systems/distributed-execution-and-transit/design.md), [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)).
   - Host-token isolation boundary ([SPEC-GHA REQ-0006](../github-actions/spec.md#req-0006), [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md), [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md)).
   - SARIF splitting, `finding_id` fingerprinting, and sticky summary table structure/fencing ([SPEC-GHA-FIX REQ-0004, REQ-0008.2, REQ-0009.1](../github-actions-fix/spec.md#req-0004)).
   - Shared Cloud Run Job, GCS transit bucket, and Cloud Run caller IAM roles ([SPEC-WIF REQ-0004](../wif/spec.md#req-0004)).

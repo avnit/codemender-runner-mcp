@@ -17,8 +17,8 @@ sdd_cujspec_product: codemender-runner
 
 CodeMender supports two primary GitHub Actions execution topologies as defined
 in [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
-and
-[ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md):
+and the
+[Distributed Execution and Transit System Design](../tech/systems/distributed-execution-and-transit/design.md):
 
 1. **Local Execution on the GitHub Actions Runner
    (`execution_mode = "local"`):** The composite action runs `cm-runner`
@@ -42,8 +42,8 @@ CLI authentication.
 
 Governed by [SPEC-WIF](spec.md),
 [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
-and
-[ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md).
+and the
+[Distributed Execution and Transit System Design](../tech/systems/distributed-execution-and-transit/design.md).
 
 ## Goals / Non-Goals
 
@@ -66,8 +66,8 @@ and
   `terraform/tests/root_gcp_test.tftest.hcl` so `scripts/distribute.sh`
   (`SPEC-DIST`) can strip Cloud Run files cleanly for local-mode customer
   distribution with zero dangling local, module, or output references.
-- Enforce
-  [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
+- Enforce transit and execution
+  ([Distributed Execution & Transit](../tech/systems/distributed-execution-and-transit/design.md))
   least-privilege separation in `cloud_run` mode: the WIF caller Service
   Account receives GCS transit bucket access (`roles/storage.objectUser`),
   Cloud Run Job execution/polling permissions (`roles/run.developer`), and
@@ -190,8 +190,8 @@ and
     1. `roles/storage.objectUser` on `var.gcs_transit_bucket_name`.
     1. `roles/iam.serviceAccountUser` (`iam.serviceAccounts.actAs`) on each
        email in `var.cloud_run_runtime_sa_emails`.
-- **Rationale:** Aligns IAM bindings strictly with
-  [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
+- **Rationale:** Aligns IAM bindings strictly with the
+  [Distributed Execution and Transit System Design](../tech/systems/distributed-execution-and-transit/design.md)
   while avoiding custom role creation/deletion tombstones.
 
 ### Decision 5: Three-Tier GitHub Provider Authentication (`app_auth`, Token, Ambient CLI) {#decision-5}

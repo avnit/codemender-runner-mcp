@@ -67,12 +67,11 @@ This specification is governed by and references:
 - [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md):
   Three-package workspace layout (`packages/{codemender,launcher,repohost}`),
   co-located unit tests, and `cm-worker = "launcher.worker:main"` entrypoint.
-- [ADR-0007](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md):
-  `RunManifest` and `ExecutionReceipt` models, failure-spill logging, and exit
-  code mapping (`0`, `2`, `3`, `130`, `143`).
-- [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md):
-  Bounded-history archive transit (`shared/code.tar.gz`) and container-private
-  ephemeral scratch isolation.
+- [Distributed Execution and Transit System Specification](../tech/systems/distributed-execution-and-transit/spec.md)
+  and [Design](../tech/systems/distributed-execution-and-transit/design.md):
+  Bounded-history archive transit (`shared/code.tar.gz`), container-private
+  ephemeral scratch hydration, structured execution receipts, failure-spill
+  logging, and preemption exit-code handling (`0`, `2`, `3`, `130`, `143`).
 - [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md): Subprocess
   environment pass-through (`env=None`) without denylist scrubbing or
   `<repo_dir>/.codemender_cache` redirection.
@@ -95,7 +94,7 @@ This specification is governed by and references:
 - [Proposal: vcs-cloudrun-comms](../../proposals/vcs-cloudrun-comms/proposal.md):
   5-phase client-to-worker transit storage and execution lifecycle protocol
   realized jointly by `Launcher`, `ArtifactCache`, and `Worker`.
-- `SPEC-ARTIFACT-CACHE` (`launcher.cache.ArtifactCache`, `open_artifact_cache`,
+- [SPEC-ARTIFACT-CACHE](../artifact-cache/spec.md) (`launcher.cache.ArtifactCache`, `open_artifact_cache`,
   `RunManifest`, `ExecutionReceipt`, `ScanMetadata`, and
   `launcher.cache.errors.ArtifactCacheError`): Typed client-worker communication
   protocol (`vcs-cloudrun-comms`) and short-lived `file://` / `gs://` artifact
@@ -123,8 +122,8 @@ The `cm-worker` CLI entrypoint MUST accept the following command-line flags:
    path (default: `/tmp/work`).
 
 `cm-worker` MUST emit zero bytes to `sys.stdout` across all execution paths
-(both success and failure) per
-[ADR-0007](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md).
+(both success and failure) per [ADR-0002](../../../adr/ADR-0002.md) and the
+[Distributed Execution and Transit System Design](../tech/systems/distributed-execution-and-transit/design.md).
 If required flags are missing, empty, or invalid, or if unknown flags are
 supplied, `cm-worker` MUST write a diagnostic error message to `sys.stderr`,
 emit zero bytes to `sys.stdout`, and exit with code `2`
@@ -527,7 +526,7 @@ ______________________________________________________________________
 When `cm-worker` runs a task, the worker MUST install signal handlers for
 `SIGTERM` and `SIGINT` to handle container preemption and CI cancellation
 gracefully
-([ADR-0007](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)):
+([Distributed Execution & Transit REQ-0005](../tech/systems/distributed-execution-and-transit/spec.md#req-0005)):
 
 1. **Preemption Interruption & Child `cm` Cleanup:** Upon receiving `SIGTERM` or
    `SIGINT`, `Worker`'s signal handler MUST raise an internal preemption

@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0005
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0006
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0002
 # Governing: SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002
 """LocalArtifactCache implementation backed by fsspec LocalFileSystem."""
 

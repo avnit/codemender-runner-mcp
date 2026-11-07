@@ -56,13 +56,13 @@ Governed by `var.execution_mode` (`"local"` or `"cloud_run"`):
    (`roles/run.developer`), and act as (`roles/iam.serviceAccountUser`) the
    Cloud Run Job's runtime Service Account—while omitting
    `roles/aiplatform.user` on the WIF caller Service Account in accordance with
-   [ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md).
+   the [Distributed Execution and Transit System Design](../tech/systems/distributed-execution-and-transit/design.md).
 
 This specification is governed by and references:
 
 - [ADR-0002: Machine-Readable Output Contract](../../../adr/ADR-0002.md)
 - [ADR-0008: Repository Layout, Three-Package Workspace, and Runtime Architecture](../../../adr/ADR-0008-repository-layout-and-package-structure.md)
-- [ADR-0005: Multi-Platform Transit Storage & Sandboxed Isolation Model](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
+- [Distributed Execution and Transit System Design](../tech/systems/distributed-execution-and-transit/design.md)
 
 ## Requirements
 

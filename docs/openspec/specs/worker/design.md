@@ -28,8 +28,7 @@ Governed by [SPEC-WORKER](spec.md),
 the [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md)
 (Decision 2 and Runtime Contracts),
 [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
-[ADR-0007](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md),
-[ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md),
+the [Distributed Execution and Transit System Design](../tech/systems/distributed-execution-and-transit/design.md),
 [ADR-0003](../../../adr/ADR-0003-environment-scrubbing.md),
 [ADR-0002](../../../adr/ADR-0002.md),
 [Proposal: cloudrun-job-bootstrapper](../../proposals/cloudrun-job-bootstrapper/proposal.md),
@@ -505,7 +504,7 @@ completion record written by `Worker` to `tasks/<task_id>/output/receipt.json`.
 
 In compliance with
 [ADR-0002](../../../adr/ADR-0002.md),
-[ADR-0007](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md),
+the [Distributed Execution and Transit System Specification](../tech/systems/distributed-execution-and-transit/spec.md#req-0004),
 and `SPEC-ARTIFACT-CACHE` (`launcher.cache.errors.ArtifactCacheError`),
 `Worker.run_task` and `cm-worker` map all outcomes to five deterministic exit
 codes:

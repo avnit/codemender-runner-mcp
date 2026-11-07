@@ -12,10 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0007, SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0003, SPEC-ARTIFACT-CACHE/REQ-0004, SPEC-ARTIFACT-CACHE/REQ-0006, SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003, SPEC-WORKER/REQ-0004, SPEC-WORKER/REQ-0006
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0001, SPEC-ARTIFACT-CACHE/REQ-0002
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0003, SPEC-ARTIFACT-CACHE/REQ-0004
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0006
+# Governing: SPEC-WORKER/REQ-0002, SPEC-WORKER/REQ-0003
+# Governing: SPEC-WORKER/REQ-0004, SPEC-WORKER/REQ-0006
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0002
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0006
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0002
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0003
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0004
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0006
 """ArtifactCache public interface, factory, wire models, and archive helpers."""
 
 from __future__ import annotations

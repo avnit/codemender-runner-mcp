@@ -15,11 +15,16 @@
 # Governing: ADR-0008, SPEC-GHA/REQ-0003
 # Governing: docs/openspec/specs/github-actions/spec.md#req-0003
 # Governing: docs/openspec/specs/github-actions-fix/spec.md#req-0003, SPEC-GHA-FIX
-# Governing: docs/adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0001
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0004
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0005
 
 """In-process Cloud Run client SDK for GitHub Actions and CI platforms.
 
-Governed by ADR-0005, ADR-0007 (Option 3), ADR-0008, and SPEC-GHA REQ-0003.
+Implements typed in-process job dispatch, transit staging, receipt/log
+recovery, and cooperative cancellation per
+docs/openspec/specs/tech/systems/distributed-execution-and-transit/design.md,
+ADR-0008, and SPEC-GHA REQ-0003.
 """
 
 from __future__ import annotations

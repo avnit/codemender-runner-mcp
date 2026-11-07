@@ -19,8 +19,7 @@ Governed by [SPEC-LAUNCHER](spec.md),
 [CodeMender Runner System Design](../tech/systems/codemender-runner/design.md),
 [ADR-0010](../../../adr/ADR-0010-permission-isolation-and-authn-authz.md),
 [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
-[ADR-0007](../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md),
-[ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md),
+the [Distributed Execution and Transit System Design](../tech/systems/distributed-execution-and-transit/design.md),
 [SPEC-WORKER](../worker/spec.md), and
 [SPEC-ARTIFACT-CACHE](../artifact-cache/spec.md), this design defines the technical
 architecture, concrete data models, failure-recovery mechanics, and lifecycle

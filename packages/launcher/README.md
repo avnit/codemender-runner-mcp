@@ -17,7 +17,7 @@ storage abstractions that decouple CI orchestration from container execution
 - **`launcher.cache` (`ArtifactCache`, `LocalArtifactCache`, `GcsArtifactCache`, `RunManifest`, `ExecutionReceipt`):**
   Multi-platform transit storage interface and wire models supporting local
   filesystem directories (`file://`) and Google Cloud Storage buckets (`gs://`)
-  per [ADR-0005](../../docs/adr/ADR-0005-multi-platform-transit-storage-and-isolation.md).
+  per the [Distributed Execution and Transit System Design](../../docs/openspec/specs/tech/systems/distributed-execution-and-transit/design.md).
 
 ## Execution Backends & Setup Guides
 
@@ -42,9 +42,9 @@ pytest packages/launcher
   — Worker container bootstrapper and task lifecycle specification.
 - [SPEC-CACHE](../../docs/openspec/specs/artifact-cache/spec.md)
   — `ArtifactCache` transit storage contract across `file://` and `gs://`.
-- [ADR-0005: Multi-Platform Transit
-  Storage](../../docs/adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)
-  — Multi-platform transit storage and isolation.
+- [Distributed Execution and Transit System
+  Design](../../docs/openspec/specs/tech/systems/distributed-execution-and-transit/design.md)
+  — Multi-platform archive transit, scratch hydration, and remote job dispatch.
 - [CodeMender Runner System
   Design](../../docs/openspec/specs/tech/systems/codemender-runner/design.md)
   — Abstraction layers, dependency injection seams, and asynchronous workflows.

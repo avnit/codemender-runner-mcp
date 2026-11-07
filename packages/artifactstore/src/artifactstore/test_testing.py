@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0008, ADR-0005
+# Governing: ADR-0008
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0002
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
 

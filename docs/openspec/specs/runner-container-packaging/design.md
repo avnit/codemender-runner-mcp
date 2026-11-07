@@ -23,7 +23,7 @@ CVE vulnerability surface.
 
 Governed by [SPEC-0003](spec.md),
 [ADR-0002](../../../adr/ADR-0002.md),
-[ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md),
+the [Distributed Execution and Transit System Design](../tech/systems/distributed-execution-and-transit/design.md),
 and
 [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
 this design specifies a lean container packaging strategy

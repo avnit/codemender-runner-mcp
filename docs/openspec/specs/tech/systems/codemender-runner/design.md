@@ -28,13 +28,13 @@ batch clusters), transit store (such as S3 or Blob storage), or durable
 security sink requires implementing only the corresponding adapter seam.
 
 **Design References**: Accompanies the [CodeMender Runner System Specification](spec.md)
+(extended by the [Distributed Execution and Transit System Specification](../distributed-execution-and-transit/spec.md)
+and [Distributed Execution and Transit System Design](../distributed-execution-and-transit/design.md))
 and synthesizes the system architecture governed by
 [ADR-0001](../../../../../adr/ADR-0001.md),
 [ADR-0002](../../../../../adr/ADR-0002.md),
 [ADR-0003](../../../../../adr/ADR-0003-environment-scrubbing.md),
-[ADR-0005](../../../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md),
 [ADR-0006](../../../../../adr/ADR-0006-pr-remediation-routing-and-security-gate.md),
-[ADR-0007](../../../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md),
 [ADR-0008](../../../../../adr/ADR-0008-repository-layout-and-package-structure.md),
 and [ADR-0010](../../../../../adr/ADR-0010-permission-isolation-and-authn-authz.md).
 
@@ -495,9 +495,9 @@ sequenceDiagram
          (`code.tar.gz`, `manifest.json`, split `.sarif` files, `.diff` patches,
          `receipt.json`) scoped to a workflow run or PR, while remaining
          distinct from long-term findings persistence (`ArtifactStore`).
-       - **`TransitCache` / `TransitStore`**: Aligns with
-         [ADR-0005](../../../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md)'s
-         "Transit Storage" terminology, emphasizing cross-boundary data transit
+       - **`TransitCache` / `TransitStore`**: Aligns with the
+         [Distributed Execution and Transit](../distributed-execution-and-transit/design.md)
+         "transit storage" terminology, emphasizing cross-boundary data transit
          between host and container, though less descriptive of what is stored.
        - **`RunWorkspace` / `SharedWorkspace`**: Emphasizes a run-scoped shared
          directory tree, but "workspace" is overloaded by `uv` workspaces and
@@ -626,13 +626,13 @@ sequenceDiagram
         GKE).
      1. **Materialize Inputs on Container-Private Ephemeral Scratch Disk:** Read
         `tasks/<task_id>/input/manifest.json` (`RunManifest`, defined in
-        [ADR-0007](../../../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)
-        and [SPEC-WORKER](../../../worker/spec.md))
+        [SPEC-ARTIFACT-CACHE](../../../artifact-cache/spec.md) and
+        [SPEC-WORKER](../../../worker/spec.md))
         and stream/extract `shared/code.tar.gz` into container-private ephemeral
         scratch disk (`/tmp/work/repo`), following the bounded-history archive
-        transit and container-local extraction model established in
-        [ADR-0005](../../../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md) and
-        [SPEC-ARTIFACT-CACHE](../../../artifact-cache/spec.md).
+        transit and container-local extraction model defined in the
+        [Distributed Execution and Transit System Design](../distributed-execution-and-transit/design.md)
+        and [SPEC-ARTIFACT-CACHE](../../../artifact-cache/spec.md).
      1. **Execute `codemender` In-Process:** Invoke the
         `codemender.runner.commands` handler (`init.run`, `find_diff.run`,
         `fix.run`, `verify.run`) in-process against `/tmp/work/repo` with
@@ -643,7 +643,9 @@ sequenceDiagram
         [SPEC-WORKER](../../../worker/spec.md)).
      1. **Publish Receipt & Outputs to `ArtifactCache`:** Write `receipt.json`
         (`ExecutionReceipt`, defined in
-        [ADR-0007](../../../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)),
+        [SPEC-ARTIFACT-CACHE](../../../artifact-cache/spec.md) and
+        [SPEC-WORKER](../../../worker/spec.md), per the
+        [Distributed Execution and Transit System Design](../distributed-execution-and-transit/design.md)),
         `runner.log`, and output artifacts (`report.sarif`, `finding-NNN.diff`,
         or updated `finding-NNN.sarif`) back to `tasks/<task_id>/output/` via
         `ArtifactCache`.
@@ -706,8 +708,8 @@ sequenceDiagram
     errors on bind-mounted host directories in gVisor, and requires slow host
     `shutil.copytree` operations for parallel `fix` tasks.
   - _Cloud Storage FUSE volume mounts for Cloud Run:_ Introduces severe POSIX
-    file-stat latency during compilation and differential Git analysis (see
-    [ADR-0007](../../../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md)).
+    file-stat latency during compilation and differential Git analysis (see the
+    [Distributed Execution and Transit System Design](../distributed-execution-and-transit/design.md)).
   - _Immediately maintaining separate `runner.Dockerfile` and
     `cloudrun.Dockerfile` builds:_ Doubles CI container build times and image
     management overhead today to save ~40 MB of compressed layers, when the
@@ -1022,8 +1024,9 @@ symmetric workspace file parity across `local` and `cloudrun` backends):
 ```
 
 - **Traceability to Governing ADRs, Specs & Proposals:**
-  - **`shared/code.tar.gz` & Security Exclusions:** Governed by
-    [ADR-0005](../../../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md),
+  - **`shared/code.tar.gz` & Security Exclusions:** Governed by the
+    [Distributed Execution and Transit System Specification](../distributed-execution-and-transit/spec.md#req-0001)
+    ([Design](../distributed-execution-and-transit/design.md)),
     [ADR-0003](../../../../../adr/ADR-0003-environment-scrubbing.md),
     [ADR-0010](../../../../../adr/ADR-0010-permission-isolation-and-authn-authz.md),
     [SPEC-GHA-FIX REQ-0005](../../../github-actions-fix/spec.md#req-0005),
@@ -1046,12 +1049,12 @@ symmetric workspace file parity across `local` and `cloudrun` backends):
     `scan-meta.json` for intra-run deduplication and on-demand verification correlation).
   - **`tasks/<task_id>/input/manifest.json` (`RunManifest`) &
     `tasks/<task_id>/output/{receipt.json, runner.log}` (`ExecutionReceipt`):**
-    Governed by
-    [ADR-0005](../../../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md),
-    [ADR-0007](../../../../../adr/ADR-0007-cloud-run-job-invocation-interface-cli-vs-python-library.md),
+    Governed by the
+    [Distributed Execution and Transit System Specification](../distributed-execution-and-transit/spec.md#req-0004)
+    ([Design](../distributed-execution-and-transit/design.md)),
     [SPEC-ARTIFACT-CACHE](../../../artifact-cache/spec.md), and
     [SPEC-WORKER](../../../worker/spec.md),
-    extended here via `ArtifactCache` to run identically across both local
+    running identically via `ArtifactCache` across both local
     gVisor (`LocalArtifactCache`) and Cloud Run Jobs (`GcsArtifactCache`).
   - **`report.sarif`, `<finding>.diff` & Updated `<finding>.sarif` Output Artifacts:** Governed by
     [ADR-0002](../../../../../adr/ADR-0002.md) and [SPEC-VERIFY](../../../verify/spec.md)

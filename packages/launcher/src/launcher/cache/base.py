@@ -12,9 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Governing: ADR-0007, SPEC-ARTIFACT-CACHE/REQ-0001
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0001
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0003
 # Governing: docs/openspec/specs/tech/systems/codemender-runner/spec.md#req-0006
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0001
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0002
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0004
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0006
 # Governing: SPEC-ARTIFACT-CACHE/REQ-0002, SPEC-ARTIFACT-CACHE/REQ-0006
 """Abstract base class, protocol methods, and URI helpers for ArtifactCache."""
 
@@ -111,7 +115,8 @@ def validate_single_segment(
   return value
 
 
-# Governing: SPEC-ARTIFACT-CACHE/REQ-0002, ADR-0007
+# Governing: SPEC-ARTIFACT-CACHE/REQ-0002
+# Governing: docs/openspec/specs/tech/systems/distributed-execution-and-transit/spec.md#req-0002
 def sanitize_branch_name(branch: str) -> str:
   """Sanitizes a Git branch ref into a deterministic single path segment.
 

@@ -23,7 +23,7 @@ This specification defines the container packaging and runtime environment
 requirements for the CodeMender Runner image (`docker/runner.Dockerfile`), built
 from the repository root context (`.`). Governed by
 [ADR-0002](../../../adr/ADR-0002.md),
-[ADR-0005](../../../adr/ADR-0005-multi-platform-transit-storage-and-isolation.md),
+the [Distributed Execution and Transit System Specification](../tech/systems/distributed-execution-and-transit/spec.md),
 and
 [ADR-0008](../../../adr/ADR-0008-repository-layout-and-package-structure.md),
 this container executes across GitHub Actions runner matrix jobs, local
