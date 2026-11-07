@@ -1,0 +1,13 @@
+# Files excluded from `gcloud builds submit` uploads (deploy.sh, Makefile).
+# Never upload Terraform state, plans or variable files: they can contain secrets.
+.gcloudignore
+.git/
+.github/
+.claude/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+tfplan
+*.tfplan
+#!include:.gitignore
