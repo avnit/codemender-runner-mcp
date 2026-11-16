@@ -165,10 +165,10 @@ Works from Linux, macOS, Cloud Shell, WSL and Git Bash on Windows.
 
 ```bash
 # 1. Preview — runs terraform plan, changes nothing
-./deploy.sh --plan-only --project my-project --github-owner my-org
+./deploy.sh --plan-only --project my-project --region us-central1
 
-# 2. Deploy — prompts for a GitHub token (repo scope) and asks before applying
-./deploy.sh --project my-project --github-owner my-org
+# 2. Deploy — prompts for a GitHub token (or Enter to skip) and asks before applying
+./deploy.sh --project my-project --region us-central1
 
 # 3. After code changes — rebuild images and roll the job + service only
 ./deploy.sh --code-only
@@ -198,7 +198,7 @@ A full deploy:
 | `--plan-only` | `terraform plan` only; creates nothing |
 | `--code-only` | Rebuild images, `gcloud run jobs/services update` |
 | `--project`, `--region`, `--prefix` | Target project, region (default `us-central1`), name prefix (default `codemender`). Default from `terraform.tfvars`, then `gcloud config` |
-| `--github-owner` | GitHub user/org that owns the repositories to scan |
+| `--github-owner` | GitHub user/org that owns the repositories to scan (optional; auto-inferred from `terraform.tfvars`, `gh`, `GITHUB_TOKEN`, or git `origin`) |
 | `--private` | No public access: IAM-only for your gcloud account (connect via `gcloud run services proxy`). Default is a public URL that requires the bearer token |
 | `--github-token-from-gh` / `--rotate-github-token` | Use `gh auth token`; add a new secret version |
 | `-y`, `--yes` | Non-interactive (CI); applies without prompting |

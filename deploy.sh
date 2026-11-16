@@ -75,7 +75,7 @@ Options
   --project ID              GCP project (default: terraform.tfvars, then gcloud config)
   --region REGION           GCP region (default: terraform.tfvars, then us-central1)
   --prefix PREFIX           Resource name prefix (default: codemender)
-  --github-owner OWNER      GitHub user/org that owns the repos (default: tfvars or `gh`)
+  --github-owner OWNER      GitHub user/org that owns the repos (optional; inferred from tfvars, gh, GITHUB_TOKEN, or git origin)
   --private                 No public URL: IAM-only access for your gcloud account
                             (connect with `gcloud run services proxy`). Default is a
                             public URL protected by a bearer token.
@@ -116,9 +116,6 @@ step "Checking prerequisites"
 for bin in gcloud git; do
   command -v "$bin" >/dev/null 2>&1 || die "'$bin' is not installed."
 done
-if [[ "$MODE" != "code" ]]; then
-  command -v terraform >/dev/null 2>&1 || die "terraform is not installed (https://developer.hashicorp.com/terraform/install; Windows: winget install Hashicorp.Terraform)."
-fi
 PYTHON=""
 for cand in python3 python py; do
   if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
@@ -126,9 +123,44 @@ for cand in python3 python py; do
   fi
 done
 [[ -n "$PYTHON" ]] || die "Python >= 3.8 is required (used to compute image tags)."
+
+if [[ "$MODE" != "code" ]]; then
+  # Cloud Shell ships a stub at /usr/local/bin/terraform that prints install
+  # instructions and exits 0. Verify `terraform version` outputs "Terraform v".
+  export PATH="${HOME}/.local/bin:${PATH}"
+  if ! terraform version 2>/dev/null | grep -q "Terraform v"; then
+    info "Real terraform binary not found (or Cloud Shell stub detected); installing Terraform to ~/.local/bin/terraform..."
+    mkdir -p "${HOME}/.local/bin"
+    "$PYTHON" - <<'PY' || die "Failed to install terraform. Install from https://developer.hashicorp.com/terraform/install"
+import io, os, platform, stat, urllib.request, zipfile
+arch = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine().lower(), "amd64")
+sysname = platform.system().lower()
+url = f"https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_{sysname}_{arch}.zip"
+data = urllib.request.urlopen(url, timeout=60).read()
+dest = os.path.expanduser("~/.local/bin/terraform")
+with zipfile.ZipFile(io.BytesIO(data)) as zf:
+    with open(dest, "wb") as f:
+        f.write(zf.read("terraform"))
+os.chmod(dest, os.stat(dest).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+PY
+    hash -r 2>/dev/null || true
+    terraform version 2>/dev/null | grep -q "Terraform v" \
+      || die "terraform is not installed (https://developer.hashicorp.com/terraform/install)."
+    ok "installed $(terraform version | head -n 1)"
+  fi
+fi
+
 gcloud auth print-access-token >/dev/null 2>&1 || die "gcloud is not logged in. Run: gcloud auth login"
-if [[ "$MODE" != "code" ]] && ! gcloud auth application-default print-access-token >/dev/null 2>&1; then
-  die "Terraform needs Application Default Credentials. Run: gcloud auth application-default login"
+if [[ "$MODE" != "code" ]]; then
+  # Use live gcloud access token so Cloud Shell sessions with missing or expired
+  # ~/.config/gcloud/application_default_credentials.json never fail with invalid_grant.
+  if [[ -z "${GOOGLE_OAUTH_ACCESS_TOKEN:-}" ]]; then
+    GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth print-access-token 2>/dev/null || true)"
+    export GOOGLE_OAUTH_ACCESS_TOKEN
+  fi
+  if [[ -z "${GOOGLE_OAUTH_ACCESS_TOKEN:-}" ]] && ! gcloud auth application-default print-access-token >/dev/null 2>&1; then
+    die "Terraform needs Application Default Credentials. Run: gcloud auth application-default login"
+  fi
 fi
 ok "tools found (python: ${PYTHON})"
 
@@ -269,12 +301,20 @@ if [[ "$MODE" == "code" ]]; then
 fi
 
 # ======================================================= full / plan-only
-# --- GitHub owner -----------------------------------------------------------
+# --- GitHub owner (optional; inferred automatically if omitted) -------------
 [[ -n "$GITHUB_OWNER" ]] || GITHUB_OWNER="$(tfvar github_owner)"
+[[ "$GITHUB_OWNER" != "TODO" ]] || GITHUB_OWNER=""
 if [[ -z "$GITHUB_OWNER" ]] && command -v gh >/dev/null 2>&1; then
   GITHUB_OWNER="$(gh api user -q .login 2>/dev/null || true)"
 fi
-[[ -n "$GITHUB_OWNER" ]] || die "Pass --github-owner (the GitHub user or org that owns the repositories)."
+if [[ -z "$GITHUB_OWNER" && -n "${GITHUB_TOKEN:-}" ]]; then
+  GITHUB_OWNER="$("$PYTHON" -c 'import json, os, urllib.request; req = urllib.request.Request("https://api.github.com/user", headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"], "User-Agent": "codemender-deploy"}); print(json.loads(urllib.request.urlopen(req, timeout=5).read()).get("login", ""))' 2>/dev/null || true)"
+fi
+if [[ -z "$GITHUB_OWNER" ]]; then
+  GITHUB_OWNER="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null | sed -n -E 's#.*github\.com[:/]([^/]+)/.*#\1#p' | head -n 1 || true)"
+fi
+GITHUB_OWNER="${GITHUB_OWNER:-avnit}"
+info "github_owner=${GITHUB_OWNER}"
 
 # --- terraform.tfvars -------------------------------------------------------
 step "Terraform variables"
@@ -299,34 +339,44 @@ else
   ok "using existing terraform/terraform.tfvars (MCP settings below override it)"
 fi
 
-TF_ARGS=(
-  -var "gcp_project_id=${PROJECT_ID}"
-  -var "gcp_region=${REGION}"
-  -var "resource_prefix=${PREFIX}"
-  -var "execution_mode=cloud_run"
-  -var "enable_mcp_server=true"
-  -var "auto_build_image=false"
-  -var "mcp_image_tag=${MCP_TAG}"
-  -var "mcp_github_token_secret_id=${GH_SECRET}"
-)
-[[ -n "$(tfvar github_owner)" ]] || TF_ARGS+=(-var "github_owner=${GITHUB_OWNER}" -var "github_scope_type=user")
-[[ -n "$(tfvar runner_timeout)" ]] || TF_ARGS+=(-var "runner_timeout=${RUNNER_TIMEOUT}")
-if [[ "$ACCESS_MODE" == "private" ]]; then
-  TF_ARGS+=(-var "mcp_allow_unauthenticated=false" -var "mcp_invoker_members=[\"user:${ACCOUNT}\"]")
-else
-  TF_ARGS+=(-var "mcp_auth_token_secret_id=${AUTH_SECRET}" -var "mcp_allow_unauthenticated=true")
-fi
+secret_exists() { gcloud secrets describe "$1" --project "$PROJECT_ID" >/dev/null 2>&1; }
+
+build_tf_args() {
+  TF_ARGS=(
+    -var "gcp_project_id=${PROJECT_ID}"
+    -var "gcp_region=${REGION}"
+    -var "resource_prefix=${PREFIX}"
+    -var "execution_mode=cloud_run"
+    -var "enable_mcp_server=true"
+    -var "auto_build_image=false"
+    -var "mcp_image_tag=${MCP_TAG}"
+  )
+  if secret_exists "$GH_SECRET"; then
+    TF_ARGS+=(-var "mcp_github_token_secret_id=${GH_SECRET}")
+  fi
+  local tf_gh_owner
+  tf_gh_owner="$(tfvar github_owner)"
+  if [[ -z "$tf_gh_owner" || "$tf_gh_owner" == "TODO" ]]; then
+    TF_ARGS+=(-var "github_owner=${GITHUB_OWNER}" -var "github_scope_type=user")
+  fi
+  [[ -n "$(tfvar runner_timeout)" ]] || TF_ARGS+=(-var "runner_timeout=${RUNNER_TIMEOUT}")
+  if [[ "$ACCESS_MODE" == "private" ]]; then
+    TF_ARGS+=(-var "mcp_allow_unauthenticated=false" -var "mcp_invoker_members=[\"user:${ACCOUNT}\"]")
+  else
+    TF_ARGS+=(-var "mcp_auth_token_secret_id=${AUTH_SECRET}" -var "mcp_allow_unauthenticated=true")
+  fi
+}
+
+build_tf_args
 RT="$(tfvar runner_timeout)"; RT="${RT:-$RUNNER_TIMEOUT}"
 if [[ "${RT%s}" =~ ^[0-9]+$ ]] && (( ${RT%s} < 10800 )); then
   warn "runner_timeout=${RT} is below 10800s; full-repository scans may be cut off."
 fi
 
-secret_exists() { gcloud secrets describe "$1" --project "$PROJECT_ID" >/dev/null 2>&1; }
-
 # ================================================================ plan-only
 if [[ "$MODE" == "plan" ]]; then
   step "terraform plan (no changes will be made)"
-  secret_exists "$GH_SECRET" || warn "secret ${GH_SECRET} does not exist yet; a full deploy will create it."
+  secret_exists "$GH_SECRET" || warn "secret ${GH_SECRET} does not exist yet; a full deploy will create it if a GitHub token is provided."
   image_exists "$RUNNER_IMAGE" || warn "runner image not built yet; a full deploy builds it before applying."
   tf init -input=false -upgrade=false >/dev/null
   tf plan -input=false "${TF_ARGS[@]}"
@@ -362,17 +412,19 @@ else
     token="$(gh auth token 2>/dev/null || true)"
     [[ -n "$token" ]] && warn "using your gh CLI token; prefer a fine-grained token scoped to the target repos."
   fi
-  if [[ -z "$token" ]]; then
-    [[ -t 0 ]] || die "Set GITHUB_TOKEN (repo scope) or pass --github-token-from-gh."
-    read -r -s -p "    GitHub token (repo scope; used to clone, push fix branches and open PRs): " token; echo
+  if [[ -z "$token" && -t 0 ]] && ! $ASSUME_YES; then
+    read -r -s -p "    GitHub token (repo scope; press Enter to skip for public-repo-only scanning): " token; echo
   fi
-  [[ -n "$token" ]] || die "Empty GitHub token."
-  if secret_exists "$GH_SECRET"; then
-    printf '%s' "$token" | gcloud secrets versions add "$GH_SECRET" --data-file=- --project "$PROJECT_ID" >/dev/null
-    ok "added new version to ${GH_SECRET}"
+  if [[ -n "$token" ]]; then
+    if secret_exists "$GH_SECRET"; then
+      printf '%s' "$token" | gcloud secrets versions add "$GH_SECRET" --data-file=- --project "$PROJECT_ID" >/dev/null
+      ok "added new version to ${GH_SECRET}"
+    else
+      printf '%s' "$token" | gcloud secrets create "$GH_SECRET" --data-file=- --replication-policy=automatic --project "$PROJECT_ID" >/dev/null
+      ok "created ${GH_SECRET}"
+    fi
   else
-    printf '%s' "$token" | gcloud secrets create "$GH_SECRET" --data-file=- --replication-policy=automatic --project "$PROJECT_ID" >/dev/null
-    ok "created ${GH_SECRET}"
+    warn "No GitHub token provided; public repositories can be scanned with cm_find/cm_validate (set GITHUB_TOKEN later to push fix PRs)."
   fi
   unset token
 fi
@@ -386,9 +438,27 @@ if [[ "$ACCESS_MODE" == "token" ]]; then
   fi
 fi
 
+# Refresh TF_ARGS now that secrets may have been created
+build_tf_args
+
 step "Terraform init"
 tf init -input=false >/dev/null
 ok "initialized"
+
+# Import pre-existing MCP service account or BigQuery dataset if already present in the project
+MCP_SA_EMAIL="${PREFIX}-mcp-sa@${PROJECT_ID}.iam.gserviceaccount.com"
+if gcloud iam service-accounts describe "$MCP_SA_EMAIL" --project "$PROJECT_ID" >/dev/null 2>&1; then
+  if ! tf state list 2>/dev/null | grep -q 'module.mcp\[0\].google_service_account.mcp_sa'; then
+    info "Importing existing service account ${MCP_SA_EMAIL} into Terraform state..."
+    tf import "${TF_ARGS[@]}" 'module.mcp[0].google_service_account.mcp_sa' "projects/${PROJECT_ID}/serviceAccounts/${MCP_SA_EMAIL}" >/dev/null 2>&1 || true
+  fi
+fi
+if bq --project_id="$PROJECT_ID" show --dataset "${PROJECT_ID}:codemender" >/dev/null 2>&1; then
+  if ! tf state list 2>/dev/null | grep -q 'module.mcp\[0\].google_bigquery_dataset.codemender'; then
+    info "Importing existing BigQuery dataset ${PROJECT_ID}:codemender into Terraform state..."
+    tf import "${TF_ARGS[@]}" 'module.mcp[0].google_bigquery_dataset.codemender' "projects/${PROJECT_ID}/datasets/codemender" >/dev/null 2>&1 || true
+  fi
+fi
 
 # Images must exist before Cloud Run resources are created, and images need the
 # Artifact Registry repo (managed by Terraform): bootstrap it with a targeted apply.
@@ -413,8 +483,22 @@ tf plan -input=false -out=tfplan "${TF_ARGS[@]}"
 confirm "Apply this plan?" || { rm -f "${TF_DIR}/tfplan"; die "Aborted; nothing applied."; }
 
 step "Terraform apply"
-tf apply -input=false tfplan
-rm -f "${TF_DIR}/tfplan"
+if ! tf apply -input=false tfplan; then
+  rm -f "${TF_DIR}/tfplan"
+  if [[ "$ACCESS_MODE" != "private" ]]; then
+    warn "Terraform apply failed (often caused by Organization Policy blocking allUsers on Cloud Run)."
+    warn "Retrying with IAM-only invoker (--private mode for ${ACCOUNT})..."
+    ACCESS_MODE="private"
+    build_tf_args
+    tf plan -input=false -out=tfplan "${TF_ARGS[@]}"
+    tf apply -input=false tfplan
+    rm -f "${TF_DIR}/tfplan"
+  else
+    die "Terraform apply failed."
+  fi
+else
+  rm -f "${TF_DIR}/tfplan"
+fi
 ok "infrastructure applied"
 
 URL="$(tf output -raw mcp_endpoint 2>/dev/null || true)"
